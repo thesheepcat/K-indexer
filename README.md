@@ -36,7 +36,7 @@ Technical specifications for the K protocol are available in the [official K rep
 
 #### 1. **Clone Required Repositories**
 ```bash
-# Clone rusty-kaspa (dependency requirement)
+# Clone rusty-kaspa
 git clone https://github.com/kaspanet/rusty-kaspa.git
 
 # Clone K-indexer in the same development folder
@@ -91,7 +91,7 @@ If you're running a frontend on a different machine:
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `--rusty-kaspa-address` | `localhost:17120` | Address of your rusty-kaspa node |
-| Web Server Port | `3000` | REST API listening port |
+| `--bind-address` | `0.0.0.0:3000` | REST API listening port |
 
 ---
 

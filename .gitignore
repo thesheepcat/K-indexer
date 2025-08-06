@@ -1,3 +1,4 @@
 /target
 /Cargo.lock
 .continue
+k-indexer.db
