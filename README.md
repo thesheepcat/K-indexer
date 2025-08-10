@@ -32,27 +32,18 @@ Technical specifications for the K protocol are available in the [official K rep
 
 ### 📋 Step-by-Step Instructions
 
-> **💡 Tip**: Run K-indexer on the same machine as your rusty-kaspa node for optimal performance.
+> **💡 Tip**: Run K-indexer on the same network as your rusty-kaspa node network for optimal performance, reducing latency.
 
-#### 1. **Clone Required Repositories**
+#### 1. **Clone K-indexer**
 ```bash
-# Clone rusty-kaspa (dependency requirement)
-git clone https://github.com/kaspanet/rusty-kaspa.git
-
 # Clone K-indexer in the same development folder
 git clone https://github.com/thesheepcat/K-indexer.git
 ```
 
 #### 2. **Start Your Kaspa Node**
-After completing rusty-kaspa compilation, activate the node.
-You can also run a rusty-kaspa binary downloaded from the official rusty-kaspa repository; anyhow, you'll need the rusty-kaspa repository locally available because K-indexer needs some rusty-kaspa related dependencies.
+Follow the [documentation here on how to run rusty-kaspa](https://kaspa.aspectron.org/running-rusty-kaspa.html)
 
-```bash
-cd rusty-kaspa
-./kaspad --testnet --utxoindex --rpclisten-borsh=0.0.0.0:17120
-```
-
-**Required Parameters:**
+**Required Node Parameters:**
 - `--testnet`: Run on testnet (required for safety)
 - `--utxoindex`: Enable UTXO indexing
 - `--rpclisten-borsh=0.0.0.0:17120`: Enable BORSH RPC on all interfaces
@@ -91,8 +82,12 @@ If you're running a frontend on a different machine:
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `--rusty-kaspa-address` | `localhost:17120` | Address of your rusty-kaspa node |
+<<<<<<< HEAD
 | `--bind-address` | `3000` | REST API listening port |
 | `--database-path` | `k-indexer.db` | Path to database location  |
+=======
+| `--bind-address` | `0.0.0.0:3000` | REST API listening port |
+>>>>>>> origin/master
 
 ---
 
