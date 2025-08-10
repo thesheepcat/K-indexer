@@ -18,6 +18,9 @@ mod notification_handler;
 mod transaction_processor;
 mod web_server;
 
+#[cfg(test)]
+mod test_vote_implementation;
+
 use web_server::AppState;
 use cli::Args;
 use database::DatabaseManager;
@@ -61,6 +64,7 @@ async fn main() -> Result<()> {
     let k_posts_collection = db_manager.get_k_posts_collection();
     let k_replies_collection = db_manager.get_k_replies_collection();
     let k_broadcasts_collection = db_manager.get_k_broadcasts_collection();
+    let k_votes_collection = db_manager.get_k_votes_collection();
 
     // Build Kaspa connection URL
     let rusty_kaspa_address_prefix = "ws://";
@@ -73,6 +77,7 @@ async fn main() -> Result<()> {
         k_posts_collection,
         k_replies_collection,
         k_broadcasts_collection,
+        k_votes_collection,
     )?;
 
     // Start Kaspa connection

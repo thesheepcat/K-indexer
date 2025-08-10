@@ -28,6 +28,8 @@ pub struct WebServer {
 #[derive(Debug, Deserialize)]
 struct GetPostsQuery {
     user: Option<String>,
+    #[serde(rename = "requesterPubkey")]
+    requester_pubkey: Option<String>,
     limit: Option<u32>,
     before: Option<u64>,
     after: Option<u64>,
@@ -36,6 +38,8 @@ struct GetPostsQuery {
 #[derive(Debug, Deserialize)]
 struct GetRepliesQuery {
     post: Option<String>,
+    #[serde(rename = "requesterPubkey")]
+    requester_pubkey: Option<String>,
     limit: Option<u32>,
     before: Option<u64>,
     after: Option<u64>,
@@ -43,6 +47,8 @@ struct GetRepliesQuery {
 
 #[derive(Debug, Deserialize)]
 struct GetPostsWatchingQuery {
+    #[serde(rename = "requesterPubkey")]
+    requester_pubkey: Option<String>,
     limit: Option<u32>,
     before: Option<u64>,
     after: Option<u64>,
@@ -58,6 +64,8 @@ struct GetUsersQuery {
 #[derive(Debug, Deserialize)]
 struct GetMentionsQuery {
     user: Option<String>,
+    #[serde(rename = "requesterPubkey")]
+    requester_pubkey: Option<String>,
     limit: Option<u32>,
     before: Option<u64>,
     after: Option<u64>,
@@ -66,6 +74,8 @@ struct GetMentionsQuery {
 #[derive(Debug, Deserialize)]
 struct GetPostDetailsQuery {
     id: Option<String>,
+    #[serde(rename = "requesterPubkey")]
+    requester_pubkey: Option<String>,
 }
 
 impl WebServer {
@@ -140,6 +150,18 @@ async fn handle_get_posts(
         }
     };
 
+    // Check if requesterPubkey parameter is provided
+    let requester_pubkey = match params.requester_pubkey {
+        Some(pubkey) => pubkey,
+        None => {
+            let error = ApiError {
+                error: "Missing required parameter: requesterPubkey".to_string(),
+                code: "MISSING_PARAMETER".to_string(),
+            };
+            return Err((StatusCode::BAD_REQUEST, Json(error)));
+        }
+    };
+
     // Validate required limit parameter
     let limit = match params.limit {
         Some(limit) => {
@@ -161,8 +183,8 @@ async fn handle_get_posts(
         }
     };
 
-    // Use the API handler to get paginated posts for the user
-    match app_state.api_handlers.get_posts_paginated(&user_public_key, limit, params.before, params.after).await {
+    // Use the API handler to get paginated posts for the user with voting status
+    match app_state.api_handlers.get_posts_paginated(&user_public_key, &requester_pubkey, limit, params.before, params.after).await {
         Ok(response_json) => {
             // Parse the JSON response back to PaginatedPostsResponse
             match serde_json::from_str::<PaginatedPostsResponse>(&response_json) {
@@ -216,8 +238,20 @@ async fn handle_get_post_details(
         }
     };
 
-    // Use the API handler to get post details
-    match app_state.api_handlers.get_post_details(&post_id).await {
+    // Check if requesterPubkey parameter is provided
+    let requester_pubkey = match params.requester_pubkey {
+        Some(pubkey) => pubkey,
+        None => {
+            let error = ApiError {
+                error: "Missing required parameter: requesterPubkey".to_string(),
+                code: "MISSING_PARAMETER".to_string(),
+            };
+            return Err((StatusCode::BAD_REQUEST, Json(error)));
+        }
+    };
+
+    // Use the API handler to get post details with voting information
+    match app_state.api_handlers.get_post_details_with_votes(&post_id, &requester_pubkey).await {
         Ok(response_json) => {
             // Parse the JSON response back to PostDetailsResponse
             match serde_json::from_str::<PostDetailsResponse>(&response_json) {
@@ -272,6 +306,18 @@ async fn handle_get_mentions(
         }
     };
 
+    // Check if requesterPubkey parameter is provided
+    let requester_pubkey = match params.requester_pubkey {
+        Some(pubkey) => pubkey,
+        None => {
+            let error = ApiError {
+                error: "Missing required parameter: requesterPubkey".to_string(),
+                code: "MISSING_PARAMETER".to_string(),
+            };
+            return Err((StatusCode::BAD_REQUEST, Json(error)));
+        }
+    };
+
     // Validate required limit parameter
     let limit = match params.limit {
         Some(limit) => {
@@ -293,8 +339,8 @@ async fn handle_get_mentions(
         }
     };
 
-    // Use the API handler to get paginated mentions for the user
-    match app_state.api_handlers.get_mentions_paginated(&user_public_key, limit, params.before, params.after).await {
+    // Use the API handler to get paginated mentions for the user with voting status
+    match app_state.api_handlers.get_mentions_paginated(&user_public_key, &requester_pubkey, limit, params.before, params.after).await {
         Ok(response_json) => {
             // Parse the JSON response back to PaginatedPostsResponse
             match serde_json::from_str::<PaginatedPostsResponse>(&response_json) {
@@ -401,6 +447,18 @@ async fn handle_get_posts_watching(
     Query(params): Query<GetPostsWatchingQuery>,
 ) -> Result<Json<PaginatedPostsResponse>, (StatusCode, Json<ApiError>)> {
 
+    // Check if requesterPubkey parameter is provided
+    let requester_pubkey = match params.requester_pubkey {
+        Some(pubkey) => pubkey,
+        None => {
+            let error = ApiError {
+                error: "Missing required parameter: requesterPubkey".to_string(),
+                code: "MISSING_PARAMETER".to_string(),
+            };
+            return Err((StatusCode::BAD_REQUEST, Json(error)));
+        }
+    };
+
     // Validate required limit parameter
     let limit = match params.limit {
         Some(limit) => {
@@ -422,8 +480,8 @@ async fn handle_get_posts_watching(
         }
     };
 
-    // Use the API handler to get paginated posts for watching
-    match app_state.api_handlers.get_posts_watching_paginated(limit, params.before, params.after).await {
+    // Use the API handler to get paginated posts for watching with voting status
+    match app_state.api_handlers.get_posts_watching_paginated(&requester_pubkey, limit, params.before, params.after).await {
         Ok(response_json) => {
             // Parse the JSON response back to PaginatedPostsResponse
             match serde_json::from_str::<PaginatedPostsResponse>(&response_json) {
@@ -444,7 +502,7 @@ async fn handle_get_posts_watching(
                 Ok(api_error) => {
                     let status_code = match api_error.code.as_str() {
                         "DATABASE_ERROR" | "SERIALIZATION_ERROR" => StatusCode::INTERNAL_SERVER_ERROR,
-                        "MISSING_PARAMETER" | "INVALID_LIMIT" => StatusCode::BAD_REQUEST,
+                        "MISSING_PARAMETER" | "INVALID_USER_KEY" | "INVALID_LIMIT" => StatusCode::BAD_REQUEST,
                         _ => StatusCode::INTERNAL_SERVER_ERROR,
                     };
                     Err((status_code, Json(api_error)))
@@ -478,6 +536,18 @@ async fn handle_get_replies(
         }
     };
 
+    // Check if requesterPubkey parameter is provided
+    let requester_pubkey = match params.requester_pubkey {
+        Some(pubkey) => pubkey,
+        None => {
+            let error = ApiError {
+                error: "Missing required parameter: requesterPubkey".to_string(),
+                code: "MISSING_PARAMETER".to_string(),
+            };
+            return Err((StatusCode::BAD_REQUEST, Json(error)));
+        }
+    };
+
     // Validate required limit parameter
     let limit = match params.limit {
         Some(limit) => {
@@ -499,8 +569,8 @@ async fn handle_get_replies(
         }
     };
 
-    // Use the paginated API handler
-    match app_state.api_handlers.get_replies_paginated(&post_id, limit, params.before, params.after).await {
+    // Use the paginated API handler with voting status
+    match app_state.api_handlers.get_replies_paginated(&post_id, &requester_pubkey, limit, params.before, params.after).await {
         Ok(response_json) => {
             // Parse the JSON response back to PaginatedRepliesResponse
             match serde_json::from_str::<PaginatedRepliesResponse>(&response_json) {
@@ -520,7 +590,7 @@ async fn handle_get_replies(
             match serde_json::from_str::<ApiError>(&error_json) {
                 Ok(api_error) => {
                     let status_code = match api_error.code.as_str() {
-                        "MISSING_PARAMETER" | "INVALID_POST_ID" | "INVALID_LIMIT" => StatusCode::BAD_REQUEST,
+                        "MISSING_PARAMETER" | "INVALID_POST_ID" | "INVALID_USER_KEY" | "INVALID_LIMIT" => StatusCode::BAD_REQUEST,
                         _ => StatusCode::INTERNAL_SERVER_ERROR,
                     };
                     Err((status_code, Json(api_error)))

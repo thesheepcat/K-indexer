@@ -1,5 +1,5 @@
 use crate::database::DatabaseManager;
-use crate::models::{ApiError, PostsResponse, UsersResponse, ServerPost, ServerReply, ServerUserPost, KPostRecord, KReplyRecord, KBroadcastRecord, PaginatedPostsResponse, PaginationMetadata, PaginatedRepliesResponse, PaginatedUsersResponse, PostDetailsResponse};
+use crate::models::{ApiError, PostsResponse, UsersResponse, ServerPost, ServerReply, ServerUserPost, KPostRecord, KReplyRecord, KBroadcastRecord, KVoteRecord, PaginatedPostsResponse, PaginationMetadata, PaginatedRepliesResponse, PaginatedUsersResponse, PostDetailsResponse};
 use polodb_core::{bson::doc, CollectionT};
 use serde::{Deserialize};
 use serde_json;
@@ -15,9 +15,9 @@ impl ApiHandlers {
         Self { db_manager }
     }
 
-    /// GET /get-posts?user={userPublicKey}
-    /// Fetch all posts for a specific user
-    pub async fn get_posts(&self, user_public_key: &str) -> Result<String, String> {
+    /// GET /get-posts?user={userPublicKey}&requesterPubkey={requesterPubkey}
+    /// Fetch all posts for a specific user with voting status
+    pub async fn get_posts(&self, user_public_key: &str, requester_pubkey: &str) -> Result<String, String> {
 
         // Validate user public key format (66 hex characters for compressed public key)
         if user_public_key.len() != 66 {
@@ -42,6 +42,29 @@ impl ApiHandlers {
             ));
         }
 
+        // Validate requester public key format (66 hex characters for compressed public key)
+        if requester_pubkey.len() != 66 {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Must be 66 hex characters.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        if !requester_pubkey.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Must contain only hex characters.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        // Validate compressed public key prefix (should start with 02 or 03)
+        if !requester_pubkey.starts_with("02") && !requester_pubkey.starts_with("03") {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Compressed public key must start with 02 or 03.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
         // Query database for posts by this user
         let k_posts_collection = self.db_manager.get_k_posts_collection();
         
@@ -58,6 +81,7 @@ impl ApiHandlers {
         
         let mut posts = Vec::new();
         let k_replies_collection = self.db_manager.get_k_replies_collection();
+        let k_votes_collection = self.db_manager.get_k_votes_collection();
         
         for item in query_result {
             match item {
@@ -75,7 +99,18 @@ impl ApiHandlers {
                         }
                     };
                     
-                    let server_post = ServerPost::from_k_post_record_with_replies_count(&k_post_record, replies_count);
+                    // Calculate vote counts and user's vote status
+                    let (up_votes_count, down_votes_count, is_upvoted, is_downvoted) = 
+                        self.get_vote_data(&k_post_record.transaction_id, requester_pubkey, &k_votes_collection);
+                    
+                    let server_post = ServerPost::from_k_post_record_with_replies_count_and_votes(
+                        &k_post_record, 
+                        replies_count,
+                        up_votes_count,
+                        down_votes_count,
+                        is_upvoted,
+                        is_downvoted
+                    );
                     posts.push(server_post);
                 }
                 Err(err) => {
@@ -102,9 +137,32 @@ impl ApiHandlers {
         }
     }
 
-    /// GET /get-posts-watching
-    /// Fetch all posts (not replies) available in the k-posts database
-    pub async fn get_posts_watching(&self) -> Result<String, String> {
+    /// GET /get-posts-watching?requesterPubkey={requesterPubkey}
+    /// Fetch all posts (not replies) available in the k-posts database with voting status
+    pub async fn get_posts_watching(&self, requester_pubkey: &str) -> Result<String, String> {
+
+        // Validate requester public key format (66 hex characters for compressed public key)
+        if requester_pubkey.len() != 66 {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Must be 66 hex characters.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        if !requester_pubkey.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Must contain only hex characters.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        // Validate compressed public key prefix (should start with 02 or 03)
+        if !requester_pubkey.starts_with("02") && !requester_pubkey.starts_with("03") {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Compressed public key must start with 02 or 03.",
+                "INVALID_USER_KEY",
+            ));
+        }
 
         // Query database for all posts (no filter)
         let k_posts_collection = self.db_manager.get_k_posts_collection();
@@ -122,6 +180,7 @@ impl ApiHandlers {
         
         let mut posts = Vec::new();
         let k_replies_collection = self.db_manager.get_k_replies_collection();
+        let k_votes_collection = self.db_manager.get_k_votes_collection();
         
         for item in query_result {
             match item {
@@ -139,7 +198,18 @@ impl ApiHandlers {
                         }
                     };
                     
-                    let server_post = ServerPost::from_k_post_record_with_replies_count(&k_post_record, replies_count);
+                    // Calculate vote counts and user's vote status
+                    let (up_votes_count, down_votes_count, is_upvoted, is_downvoted) = 
+                        self.get_vote_data(&k_post_record.transaction_id, requester_pubkey, &k_votes_collection);
+                    
+                    let server_post = ServerPost::from_k_post_record_with_replies_count_and_votes(
+                        &k_post_record, 
+                        replies_count,
+                        up_votes_count,
+                        down_votes_count,
+                        is_upvoted,
+                        is_downvoted
+                    );
                     posts.push(server_post);
                 }
                 Err(err) => {
@@ -167,8 +237,8 @@ impl ApiHandlers {
     }
 
     /// GET /get-posts with pagination
-    /// Fetch paginated posts for a specific user with cursor-based pagination
-    pub async fn get_posts_paginated(&self, user_public_key: &str, limit: u32, before: Option<u64>, after: Option<u64>) -> Result<String, String> {
+    /// Fetch paginated posts for a specific user with cursor-based pagination and voting status
+    pub async fn get_posts_paginated(&self, user_public_key: &str, requester_pubkey: &str, limit: u32, before: Option<u64>, after: Option<u64>) -> Result<String, String> {
 
         // Validate user public key format (66 hex characters for compressed public key)
         if user_public_key.len() != 66 {
@@ -193,8 +263,32 @@ impl ApiHandlers {
             ));
         }
 
+        // Validate requester public key format (66 hex characters for compressed public key)
+        if requester_pubkey.len() != 66 {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Must be 66 hex characters.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        if !requester_pubkey.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Must contain only hex characters.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        // Validate compressed public key prefix (should start with 02 or 03)
+        if !requester_pubkey.starts_with("02") && !requester_pubkey.starts_with("03") {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Compressed public key must start with 02 or 03.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
         let k_posts_collection = self.db_manager.get_k_posts_collection();
         let k_replies_collection = self.db_manager.get_k_replies_collection();
+        let k_votes_collection = self.db_manager.get_k_votes_collection();
 
         // Build query based on cursor parameters
         let mut query = doc! { "sender_pubkey": user_public_key };
@@ -246,7 +340,18 @@ impl ApiHandlers {
                         }
                     };
                     
-                    let server_post = ServerPost::from_k_post_record_with_replies_count(&k_post_record, replies_count);
+                    // Calculate vote counts and user's vote status
+                    let (up_votes_count, down_votes_count, is_upvoted, is_downvoted) = 
+                        self.get_vote_data(&k_post_record.transaction_id, requester_pubkey, &k_votes_collection);
+                    
+                    let server_post = ServerPost::from_k_post_record_with_replies_count_and_votes(
+                        &k_post_record, 
+                        replies_count,
+                        up_votes_count,
+                        down_votes_count,
+                        is_upvoted,
+                        is_downvoted
+                    );
                     all_posts.push(server_post);
                 }
                 Err(err) => {
@@ -300,11 +405,35 @@ impl ApiHandlers {
     }
 
     /// GET /get-posts-watching with pagination
-    /// Fetch paginated posts for watching with cursor-based pagination
-    pub async fn get_posts_watching_paginated(&self, limit: u32, before: Option<u64>, after: Option<u64>) -> Result<String, String> {
+    /// Fetch paginated posts for watching with cursor-based pagination and voting status
+    pub async fn get_posts_watching_paginated(&self, requester_pubkey: &str, limit: u32, before: Option<u64>, after: Option<u64>) -> Result<String, String> {
+
+        // Validate requester public key format (66 hex characters for compressed public key)
+        if requester_pubkey.len() != 66 {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Must be 66 hex characters.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        if !requester_pubkey.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Must contain only hex characters.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        // Validate compressed public key prefix (should start with 02 or 03)
+        if !requester_pubkey.starts_with("02") && !requester_pubkey.starts_with("03") {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Compressed public key must start with 02 or 03.",
+                "INVALID_USER_KEY",
+            ));
+        }
 
         let k_posts_collection = self.db_manager.get_k_posts_collection();
         let k_replies_collection = self.db_manager.get_k_replies_collection();
+        let k_votes_collection = self.db_manager.get_k_votes_collection();
 
         // Build query based on cursor parameters
         let mut query = doc! {};
@@ -356,7 +485,18 @@ impl ApiHandlers {
                         }
                     };
                     
-                    let server_post = ServerPost::from_k_post_record_with_replies_count(&k_post_record, replies_count);
+                    // Calculate vote counts and user's vote status
+                    let (up_votes_count, down_votes_count, is_upvoted, is_downvoted) = 
+                        self.get_vote_data(&k_post_record.transaction_id, requester_pubkey, &k_votes_collection);
+                    
+                    let server_post = ServerPost::from_k_post_record_with_replies_count_and_votes(
+                        &k_post_record, 
+                        replies_count,
+                        up_votes_count,
+                        down_votes_count,
+                        is_upvoted,
+                        is_downvoted
+                    );
                     all_posts.push(server_post);
                 }
                 Err(err) => {
@@ -410,8 +550,8 @@ impl ApiHandlers {
     }
 
     /// GET /get-replies with pagination
-    /// Fetch paginated replies for a specific post with cursor-based pagination
-    pub async fn get_replies_paginated(&self, post_id: &str, limit: u32, before: Option<u64>, after: Option<u64>) -> Result<String, String> {
+    /// Fetch paginated replies for a specific post with cursor-based pagination and voting status
+    pub async fn get_replies_paginated(&self, post_id: &str, requester_pubkey: &str, limit: u32, before: Option<u64>, after: Option<u64>) -> Result<String, String> {
 
         // Validate post ID format (64 hex characters for transaction hash)
         if post_id.len() != 64 {
@@ -428,7 +568,31 @@ impl ApiHandlers {
             ));
         }
 
+        // Validate requester public key format (66 hex characters for compressed public key)
+        if requester_pubkey.len() != 66 {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Must be 66 hex characters.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        if !requester_pubkey.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Must contain only hex characters.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        // Validate compressed public key prefix (should start with 02 or 03)
+        if !requester_pubkey.starts_with("02") && !requester_pubkey.starts_with("03") {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Compressed public key must start with 02 or 03.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
         let k_replies_collection = self.db_manager.get_k_replies_collection();
+        let k_votes_collection = self.db_manager.get_k_votes_collection();
 
         // Build query based on cursor parameters
         let mut query = doc! { "post_id": post_id };
@@ -480,7 +644,18 @@ impl ApiHandlers {
                         }
                     };
                     
-                    let server_reply = ServerReply::from_k_reply_record_with_replies_count(&k_reply_record, replies_count);
+                    // Calculate vote counts and user's vote status
+                    let (up_votes_count, down_votes_count, is_upvoted, is_downvoted) = 
+                        self.get_vote_data(&k_reply_record.transaction_id, requester_pubkey, &k_votes_collection);
+                    
+                    let server_reply = ServerReply::from_k_reply_record_with_replies_count_and_votes(
+                        &k_reply_record, 
+                        replies_count,
+                        up_votes_count,
+                        down_votes_count,
+                        is_upvoted,
+                        is_downvoted
+                    );
                     all_replies.push(server_reply);
                 }
                 Err(err) => {
@@ -678,8 +853,8 @@ impl ApiHandlers {
             }
         }
     }/// GET /get-mentions with pagination
-    /// Fetch paginated posts and replies where a specific user has been mentioned
-    pub async fn get_mentions_paginated(&self, user_public_key: &str, limit: u32, before: Option<u64>, after: Option<u64>) -> Result<String, String> {
+    /// Fetch paginated posts and replies where a specific user has been mentioned with voting status
+    pub async fn get_mentions_paginated(&self, user_public_key: &str, requester_pubkey: &str, limit: u32, before: Option<u64>, after: Option<u64>) -> Result<String, String> {
 
         // Validate user public key format (66 hex characters for compressed public key)
         if user_public_key.len() != 66 {
@@ -704,8 +879,32 @@ impl ApiHandlers {
             ));
         }
 
+        // Validate requester public key format (66 hex characters for compressed public key)
+        if requester_pubkey.len() != 66 {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Must be 66 hex characters.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        if !requester_pubkey.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Must contain only hex characters.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        // Validate compressed public key prefix (should start with 02 or 03)
+        if !requester_pubkey.starts_with("02") && !requester_pubkey.starts_with("03") {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Compressed public key must start with 02 or 03.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
         let k_posts_collection = self.db_manager.get_k_posts_collection();
         let k_replies_collection = self.db_manager.get_k_replies_collection();
+        let k_votes_collection = self.db_manager.get_k_votes_collection();
 
         // Since PoloDB query operators don't work for array matching, we'll use manual search
         // but with proper pagination logic that collects results in chronological order
@@ -748,7 +947,18 @@ impl ApiHandlers {
                             }
                         };
                         
-                        let server_post = ServerPost::from_k_post_record_with_replies_count(&k_post_record, replies_count);
+                        // Calculate vote counts and user's vote status
+                        let (up_votes_count, down_votes_count, is_upvoted, is_downvoted) = 
+                            self.get_vote_data(&k_post_record.transaction_id, requester_pubkey, &k_votes_collection);
+                        
+                        let server_post = ServerPost::from_k_post_record_with_replies_count_and_votes(
+                            &k_post_record, 
+                            replies_count,
+                            up_votes_count,
+                            down_votes_count,
+                            is_upvoted,
+                            is_downvoted
+                        );
                         all_mentions.push(server_post);
                     }
                 }
@@ -790,7 +1000,18 @@ impl ApiHandlers {
                             }
                         };
                         
-                        let server_reply = ServerReply::from_k_reply_record_with_replies_count(&k_reply_record, replies_count);
+                        // Calculate vote counts and user's vote status
+                        let (up_votes_count, down_votes_count, is_upvoted, is_downvoted) = 
+                            self.get_vote_data(&k_reply_record.transaction_id, requester_pubkey, &k_votes_collection);
+                        
+                        let server_reply = ServerReply::from_k_reply_record_with_replies_count_and_votes(
+                            &k_reply_record, 
+                            replies_count,
+                            up_votes_count,
+                            down_votes_count,
+                            is_upvoted,
+                            is_downvoted
+                        );
                         all_mentions.push(server_reply);
                     }
                 }
@@ -865,9 +1086,9 @@ impl ApiHandlers {
         }
     }
 
-    /// GET /get-post-details?id={postId}
-    /// Fetch details for a specific post or reply by its ID
-    pub async fn get_post_details(&self, post_id: &str) -> Result<String, String> {
+    /// GET /get-post-details?id={postId}&requesterPubkey={requesterPubkey}
+    /// Fetch details for a specific post or reply by its ID with voting information for the requesting user
+    pub async fn get_post_details_with_votes(&self, post_id: &str, requester_pubkey: &str) -> Result<String, String> {
 
         // Validate post ID format (64 hex characters for transaction hash)
         if post_id.len() != 64 {
@@ -884,8 +1105,32 @@ impl ApiHandlers {
             ));
         }
 
+        // Validate requester public key format (66 hex characters for compressed public key)
+        if requester_pubkey.len() != 66 {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Must be 66 hex characters.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        if !requester_pubkey.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Must contain only hex characters.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        // Validate compressed public key prefix (should start with 02 or 03)
+        if !requester_pubkey.starts_with("02") && !requester_pubkey.starts_with("03") {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Compressed public key must start with 02 or 03.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
         let k_posts_collection = self.db_manager.get_k_posts_collection();
         let k_replies_collection = self.db_manager.get_k_replies_collection();
+        let k_votes_collection = self.db_manager.get_k_votes_collection();
 
         // First, try to find the post in the k-posts collection
         let post_query = doc! { "transaction_id": post_id };
@@ -902,8 +1147,19 @@ impl ApiHandlers {
                         0
                     }
                 };
+
+                // Calculate vote counts and user's vote status
+                let (up_votes_count, down_votes_count, is_upvoted, is_downvoted) = 
+                    self.get_vote_data(post_id, requester_pubkey, &k_votes_collection);
                 
-                let server_post = ServerPost::from_k_post_record_with_replies_count(&k_post_record, replies_count);
+                let server_post = ServerPost::from_k_post_record_with_replies_count_and_votes(
+                    &k_post_record, 
+                    replies_count,
+                    up_votes_count,
+                    down_votes_count,
+                    is_upvoted,
+                    is_downvoted
+                );
                 let response = PostDetailsResponse { post: server_post };
                 
                 return match serde_json::to_string(&response) {
@@ -934,8 +1190,19 @@ impl ApiHandlers {
                         0
                     }
                 };
+
+                // Calculate vote counts and user's vote status
+                let (up_votes_count, down_votes_count, is_upvoted, is_downvoted) = 
+                    self.get_vote_data(post_id, requester_pubkey, &k_votes_collection);
                 
-                let server_reply = ServerReply::from_k_reply_record_with_replies_count(&k_reply_record, replies_count);
+                let server_reply = ServerReply::from_k_reply_record_with_replies_count_and_votes(
+                    &k_reply_record, 
+                    replies_count,
+                    up_votes_count,
+                    down_votes_count,
+                    is_upvoted,
+                    is_downvoted
+                );
                 let response = PostDetailsResponse { post: server_reply };
                 
                 return match serde_json::to_string(&response) {
@@ -956,6 +1223,95 @@ impl ApiHandlers {
             "Post not found",
             "NOT_FOUND",
         ))
+    }
+
+    /// GET /get-post-details?id={postId} (legacy without voting info)
+    /// Fetch details for a specific post or reply by its ID
+    pub async fn get_post_details(&self, post_id: &str) -> Result<String, String> {
+        // Call the new method with empty requester_pubkey to maintain backward compatibility
+        // This will return voting fields as None
+        self.get_post_details_with_votes(post_id, "").await
+    }
+
+    /// Get vote data for a specific post and requester
+    /// Returns (up_votes_count, down_votes_count, is_upvoted, is_downvoted)
+    fn get_vote_data(&self, post_id: &str, requester_pubkey: &str, k_votes_collection: &polodb_core::Collection<crate::models::KVoteRecord>) -> (u64, u64, bool, bool) {
+        // If no requester_pubkey is provided, skip the user-specific vote check
+        if requester_pubkey.is_empty() {
+            let votes_cursor = match k_votes_collection
+                .find(doc! { "post_id": post_id })
+                .run() {
+                Ok(cursor) => cursor,
+                Err(err) => {
+                    log_error!("Error querying votes for post {}: {}", post_id, err);
+                    return (0, 0, false, false);
+                }
+            };
+
+            let mut up_votes_count = 0u64;
+            let mut down_votes_count = 0u64;
+
+            for vote_result in votes_cursor {
+                match vote_result {
+                    Ok(vote_record) => {
+                        match vote_record.vote.as_str() {
+                            "upvote" => up_votes_count += 1,
+                            "downvote" => down_votes_count += 1,
+                            _ => log_error!("Invalid vote value found in database: {}", vote_record.vote),
+                        }
+                    },
+                    Err(err) => {
+                        log_error!("Error reading vote record for post {}: {}", post_id, err);
+                    }
+                }
+            }
+
+            return (up_votes_count, down_votes_count, false, false);
+        }
+        // Get all votes for this post
+        let votes_cursor = match k_votes_collection
+            .find(doc! { "post_id": post_id })
+            .run() {
+            Ok(cursor) => cursor,
+            Err(err) => {
+                log_error!("Error querying votes for post {}: {}", post_id, err);
+                return (0, 0, false, false);
+            }
+        };
+
+        let mut up_votes_count = 0u64;
+        let mut down_votes_count = 0u64;
+        let mut is_upvoted = false;
+        let mut is_downvoted = false;
+
+        for vote_result in votes_cursor {
+            match vote_result {
+                Ok(vote_record) => {
+                    match vote_record.vote.as_str() {
+                        "upvote" => {
+                            up_votes_count += 1;
+                            if vote_record.sender_pubkey == requester_pubkey {
+                                is_upvoted = true;
+                            }
+                        },
+                        "downvote" => {
+                            down_votes_count += 1;
+                            if vote_record.sender_pubkey == requester_pubkey {
+                                is_downvoted = true;
+                            }
+                        },
+                        _ => {
+                            log_error!("Invalid vote value found in database: {}", vote_record.vote);
+                        }
+                    }
+                },
+                Err(err) => {
+                    log_error!("Error reading vote record for post {}: {}", post_id, err);
+                }
+            }
+        }
+
+        (up_votes_count, down_votes_count, is_upvoted, is_downvoted)
     }
 
     /// Create a standardized error response
