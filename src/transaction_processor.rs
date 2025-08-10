@@ -15,7 +15,7 @@ use kaspa_wrpc_client::prelude::*;
 use kaspa_wrpc_client::result::Result;
 
 use crate::kaspa_connection::Inner;
-use crate::models::{KPost, KPostRecord, KReply, KReplyRecord, KBroadcast, KBroadcastRecord, KActionType};
+use crate::models::{KPost, KPostRecord, KReply, KReplyRecord, KBroadcast, KBroadcastRecord, KVote, KVoteRecord, KActionType};
 
 #[cfg(test)]
 mod tests {
@@ -73,13 +73,6 @@ mod tests {
         };
         
         // Verify the message signature using Kaspa's verify_message function
-        match verify_message(&personal_message, &signature_bytes, &public_key) {
-            Ok(()) => true,
-            Err(err) => {
-                log_error!("Signature verification failed: {}", err);
-                false
-            }
-        }
         match verify_message(&personal_message, &signature_bytes, &public_key) {
             Ok(()) => true,
             Err(err) => {
@@ -312,6 +305,9 @@ impl TransactionProcessor {
                     KActionType::Reply(k_reply) => {
                         self.save_k_reply_to_database(transaction, k_reply).await?;
                     }
+                    KActionType::Vote(k_vote) => {
+                        self.save_k_vote_to_database(transaction, k_vote).await?;
+                    }
                     _ => {
                         // TODO: Handle other action types in future implementations
                     }
@@ -353,9 +349,21 @@ impl TransactionProcessor {
 
         // Check in k-replies collection
         match self.inner.k_replies_collection.find_one(doc! { "transaction_id": transaction_id }) {
-            Ok(result) => Ok(result.is_some()),
+            Ok(result) => {
+                if result.is_some() {
+                    return Ok(true);
+                }
+            },
             Err(err) => {
                 log_error!("Database error while checking transaction existence in k-replies: {}", err);
+            }
+        }
+
+        // Check in k-votes collection
+        match self.inner.k_votes_collection.find_one(doc! { "transaction_id": transaction_id }) {
+            Ok(result) => Ok(result.is_some()),
+            Err(err) => {
+                log_error!("Database error while checking transaction existence in k-votes: {}", err);
                 Ok(false) // Assume it doesn't exist if we can't check
             }
         }
@@ -458,6 +466,29 @@ impl TransactionProcessor {
                     post_id,
                     base64_encoded_message,
                     mentioned_pubkeys,
+                }))
+            }
+            "vote" => {
+                // Expected format: vote:sender_pubkey:sender_signature:post_id:vote
+                if parts.len() < 5 {
+                    return Err(format!("Invalid vote format: expected 5 parts, got {}", parts.len()));
+                }
+
+                let sender_pubkey = parts[1].to_string();
+                let sender_signature = parts[2].to_string();
+                let post_id = parts[3].to_string();
+                let vote = parts[4].to_string();
+
+                // Validate vote value
+                if vote != "upvote" && vote != "downvote" {
+                    return Err(format!("Invalid vote value: expected 'upvote' or 'downvote', got '{}';", vote));
+                }
+
+                Ok(KActionType::Vote(KVote {
+                    sender_pubkey,
+                    sender_signature,
+                    post_id,
+                    vote,
                 }))
             }
             _ => Ok(KActionType::Unknown(action.to_string())),
@@ -621,6 +652,60 @@ impl TransactionProcessor {
             }
             Err(err) => {
                 log_error!("Failed to save K broadcast to database: {}", err);
+                // Just log the error and continue instead of failing the entire process
+            }
+        }
+
+        Ok(())
+    }
+
+    // Save K vote to database
+    async fn save_k_vote_to_database(&self, transaction: RpcTransaction, k_vote: KVote) -> Result<()> {
+        let transaction_id = match &transaction.verbose_data {
+            Some(verbose_data) => verbose_data.transaction_id.to_string(),
+            None => "unknown".to_string(),
+        };
+
+        // Construct the message to verify - it's post_id + vote
+        let message_to_verify = format!("{}:{}", k_vote.post_id, k_vote.vote);
+
+        // Verify the signature
+        if !self.verify_kaspa_signature(&message_to_verify, &k_vote.sender_signature, &k_vote.sender_pubkey) {
+            log_error!("Invalid signature for vote {}, skipping", transaction_id);
+            return Ok(()); // Skip votes with invalid signatures
+        }
+
+        // Extract block time (for now using current timestamp as placeholder)
+        let block_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        // Extract sender and receiver addresses from transaction
+        let sender_address = transaction.inputs.first()
+            .map(|input| format!("input_{}", input.previous_outpoint.transaction_id))
+            .unwrap_or_else(|| "unknown_sender".to_string());
+
+        let receiver_address = transaction.outputs.first()
+            .map(|output| format!("output_{}", hex::encode(output.script_public_key.script())))
+            .unwrap_or_else(|| "unknown_receiver".to_string());
+
+        // Create K vote record
+        let k_vote_record = KVoteRecord::new(
+            transaction_id.clone(),
+            block_time,
+            sender_address,
+            receiver_address,
+            k_vote,
+        );
+
+        // Save to database
+        match self.inner.k_votes_collection.insert_one(&k_vote_record) {
+            Ok(_) => {
+                log_info!("Saved K vote: {} -> {} ({})", transaction_id, k_vote_record.post_id, k_vote_record.vote);
+            }
+            Err(err) => {
+                log_error!("Failed to save K vote to database: {}", err);
                 // Just log the error and continue instead of failing the entire process
             }
         }

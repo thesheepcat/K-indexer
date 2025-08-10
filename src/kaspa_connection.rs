@@ -9,7 +9,7 @@ use futures::FutureExt;
 use kaspa_wrpc_client::prelude::*;
 use kaspa_wrpc_client::result::Result;
 
-use crate::models::{KPostRecord, KReplyRecord, KBroadcastRecord};
+use crate::models::{KPostRecord, KReplyRecord, KBroadcastRecord, KVoteRecord};
 use crate::notification_handler::NotificationHandler;
 use crate::transaction_processor::TransactionProcessor;
 
@@ -33,6 +33,7 @@ pub struct Inner {
     pub k_posts_collection: Collection<KPostRecord>,
     pub k_replies_collection: Collection<KReplyRecord>,
     pub k_broadcasts_collection: Collection<KBroadcastRecord>,
+    pub k_votes_collection: Collection<KVoteRecord>,
     // channel for processing K protocol transactions
     pub k_transaction_channel: Channel<RpcTransaction>,
     // task control for K transaction processor
@@ -56,6 +57,7 @@ impl KaspaConnection {
         k_posts_collection: Collection<KPostRecord>,
         k_replies_collection: Collection<KReplyRecord>,
         k_broadcasts_collection: Collection<KBroadcastRecord>,
+        k_votes_collection: Collection<KVoteRecord>,
     ) -> Result<Self> {
         // if not url is supplied we use the default resolver to
         // obtain the public node rpc endpoint
@@ -83,6 +85,7 @@ impl KaspaConnection {
             k_posts_collection,
             k_replies_collection,
             k_broadcasts_collection,
+            k_votes_collection,
             k_transaction_channel: Channel::unbounded(),
             k_processor_task_ctl: DuplexChannel::oneshot(),
         };

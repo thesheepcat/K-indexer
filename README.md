@@ -57,7 +57,7 @@ cargo build --release
 #### 4. **Run K-indexer**
 ```bash
 cd target/release
-./K-indexer --rusty-kaspa-address=localhost:17120
+./K-indexer --rusty-kaspa-address=localhost:17120 --database-path=/home/K-indexer/K-indexer.db
 ```
 
 ### ✅ Verify Connection
@@ -82,7 +82,12 @@ If you're running a frontend on a different machine:
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `--rusty-kaspa-address` | `localhost:17120` | Address of your rusty-kaspa node |
+<<<<<<< HEAD
+| `--bind-address` | `3000` | REST API listening port |
+| `--database-path` | `k-indexer.db` | Path to database location  |
+=======
 | `--bind-address` | `0.0.0.0:3000` | REST API listening port |
+>>>>>>> origin/master
 
 ---
 
