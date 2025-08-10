@@ -152,7 +152,7 @@ See previous paragraphs ("Posting a message" and "Replying to user contents")
 
 ---
 
-### ❌ Upvoting/downvoting user contents (not yet confirmed)
+### ✅ Upvoting/downvoting user contents
 - User A can setup his own account to:
   - Gets notified if someone upvote/downvote its content;
   - Gets notified if someone quotes upvote/downvote its content;
@@ -181,7 +181,8 @@ sequenceDiagram
   k:1:vote:sender_pubkey:sender_signature:post_id:vote
   ```
 
-### Field Descriptions- `sender_pubkey`: The public key of the message sender
+### Field Descriptions- 
+  - `sender_pubkey`: The public key of the message sender
   - `sender_signature`: Digital signature for consistency verification
   - `post_id`: The reference to the post being voted
   - `vote`: The value defining the user vote the content (upvote/downvote)
