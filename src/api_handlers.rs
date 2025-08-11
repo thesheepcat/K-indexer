@@ -549,7 +549,9 @@ impl ApiHandlers {
         }
     }
 
-    /// GET /get-replies with pagination
+    
+
+    /// GET /get-replies with pagination (Post Replies Mode)
     /// Fetch paginated replies for a specific post with cursor-based pagination and voting status
     pub async fn get_replies_paginated(&self, post_id: &str, requester_pubkey: &str, limit: u32, before: Option<u64>, after: Option<u64>) -> Result<String, String> {
 
@@ -846,6 +848,173 @@ impl ApiHandlers {
             Ok(json) => Ok(json),
             Err(err) => {
                 log_error!("Failed to serialize paginated users response: {}", err);
+                Err(self.create_error_response(
+                    "Internal server error during serialization",
+                    "SERIALIZATION_ERROR",
+                ))
+            }
+        }
+    }
+
+    /// GET /get-replies with pagination (User Replies Mode)
+    /// Fetch paginated replies made by a specific user with cursor-based pagination and voting status
+    pub async fn get_user_replies_paginated(&self, user_public_key: &str, requester_pubkey: &str, limit: u32, before: Option<u64>, after: Option<u64>) -> Result<String, String> {
+
+        // Validate user public key format (66 hex characters for compressed public key)
+        if user_public_key.len() != 66 {
+            return Err(self.create_error_response(
+                "Invalid user public key format. Must be 66 hex characters.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        if !user_public_key.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(self.create_error_response(
+                "Invalid user public key format. Must contain only hex characters.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        // Validate compressed public key prefix (should start with 02 or 03)
+        if !user_public_key.starts_with("02") && !user_public_key.starts_with("03") {
+            return Err(self.create_error_response(
+                "Invalid user public key format. Compressed public key must start with 02 or 03.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        // Validate requester public key format (66 hex characters for compressed public key)
+        if requester_pubkey.len() != 66 {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Must be 66 hex characters.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        if !requester_pubkey.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Must contain only hex characters.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        // Validate compressed public key prefix (should start with 02 or 03)
+        if !requester_pubkey.starts_with("02") && !requester_pubkey.starts_with("03") {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Compressed public key must start with 02 or 03.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        let k_replies_collection = self.db_manager.get_k_replies_collection();
+        let k_votes_collection = self.db_manager.get_k_votes_collection();
+
+        // Build query to find all replies by this user
+        let mut query = doc! { "sender_pubkey": user_public_key };
+        
+        if let Some(before_timestamp) = before {
+            query.insert("block_time", doc! { "$lt": before_timestamp as i64 });
+        }
+        
+        if let Some(after_timestamp) = after {
+            query.insert("block_time", doc! { "$gt": after_timestamp as i64 });
+        }
+
+        // Always sort descending (newest first) for consistency
+        let sort_order = doc! { "block_time": -1 };
+
+        // Query database with proper pagination: fetch one extra to determine hasMore
+        let query_limit = (limit + 1) as u64;
+        
+        let query_result = match k_replies_collection
+            .find(query)
+            .sort(sort_order)
+            .limit(query_limit)
+            .run() {
+            Ok(result) => result,
+            Err(err) => {
+                log_error!("Database error while querying paginated user replies for user {}: {}", user_public_key, err);
+                return Err(self.create_error_response(
+                    "Internal server error during database query",
+                    "DATABASE_ERROR",
+                ));
+            }
+        };
+        
+        let mut all_replies = Vec::new();
+        
+        for item in query_result {
+            match item {
+                Ok(k_reply_record) => {
+                    // Calculate replies count for this reply (nested replies)
+                    let replies_count = match k_replies_collection
+                        .find(doc! { "post_id": &k_reply_record.transaction_id })
+                        .run() {
+                        Ok(cursor) => {
+                            cursor.count() as u64
+                        },
+                        Err(err) => {
+                            log_error!("Error counting replies for reply {}: {}", k_reply_record.transaction_id, err);
+                            0
+                        }
+                    };
+                    
+                    // Calculate vote counts and user's vote status
+                    let (up_votes_count, down_votes_count, is_upvoted, is_downvoted) = 
+                        self.get_vote_data(&k_reply_record.transaction_id, requester_pubkey, &k_votes_collection);
+                    
+                    let server_reply = ServerReply::from_k_reply_record_with_replies_count_and_votes(
+                        &k_reply_record, 
+                        replies_count,
+                        up_votes_count,
+                        down_votes_count,
+                        is_upvoted,
+                        is_downvoted
+                    );
+                    all_replies.push(server_reply);
+                }
+                Err(err) => {
+                    log_error!("Error reading K reply record: {}", err);
+                    continue;
+                }
+            }
+        }
+
+        // Determine if there are more replies available
+        let has_more = all_replies.len() > limit as usize;
+        
+        // Take only the requested number of replies (remove the extra one used for hasMore detection)
+        if has_more {
+            all_replies.truncate(limit as usize);
+        }
+
+        // Calculate pagination cursors
+        let next_cursor = if has_more && !all_replies.is_empty() {
+            // For next page (older replies), use the timestamp of the last reply
+            Some(all_replies.last().unwrap().timestamp.to_string())
+        } else {
+            None
+        };
+        
+        let prev_cursor = if !all_replies.is_empty() {
+            // For checking newer replies, use the timestamp of the first reply
+            Some(all_replies.first().unwrap().timestamp.to_string())
+        } else {
+            None
+        };
+
+        let pagination = PaginationMetadata {
+            has_more,
+            next_cursor,
+            prev_cursor,
+        };
+
+        let response = PaginatedRepliesResponse { replies: all_replies, pagination };
+        
+        match serde_json::to_string(&response) {
+            Ok(json) => Ok(json),
+            Err(err) => {
+                log_error!("Failed to serialize paginated user replies response: {}", err);
                 Err(self.create_error_response(
                     "Internal server error during serialization",
                     "SERIALIZATION_ERROR",
