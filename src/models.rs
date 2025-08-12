@@ -26,6 +26,9 @@ pub enum KActionType {
 pub struct KBroadcast {
     pub sender_pubkey: String,
     pub sender_signature: String,
+    #[serde(default)]
+    pub base64_encoded_nickname: String,
+    pub base64_encoded_profile_image: Option<String>, // Optional profile image
     pub base64_encoded_message: String,
 }
 
@@ -38,6 +41,9 @@ pub struct KBroadcastRecord {
     pub receiver_address: String,
     pub sender_pubkey: String,
     pub sender_signature: String,
+    #[serde(default)]
+    pub base64_encoded_nickname: String,
+    pub base64_encoded_profile_image: Option<String>, // Optional profile image
     pub base64_encoded_message: String, // Stored as Base64 encoded string
     pub created_at: u64, // Timestamp when record was created
 }
@@ -57,6 +63,8 @@ impl KBroadcastRecord {
             receiver_address,
             sender_pubkey: k_broadcast.sender_pubkey,
             sender_signature: k_broadcast.sender_signature,
+            base64_encoded_nickname: k_broadcast.base64_encoded_nickname,
+            base64_encoded_profile_image: k_broadcast.base64_encoded_profile_image,
             base64_encoded_message: k_broadcast.base64_encoded_message, // Keep as Base64 encoded
             created_at: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -139,6 +147,10 @@ pub struct ServerPost {
     pub is_upvoted: Option<bool>, // Whether the requesting user has upvoted this post (only for get-post-details)
     #[serde(rename = "isDownvoted", skip_serializing_if = "Option::is_none")]
     pub is_downvoted: Option<bool>, // Whether the requesting user has downvoted this post (only for get-post-details)
+    #[serde(rename = "userNickname", skip_serializing_if = "Option::is_none")]
+    pub user_nickname: Option<String>, // Base64 encoded user nickname (optional)
+    #[serde(rename = "userProfileImage", skip_serializing_if = "Option::is_none")]
+    pub user_profile_image: Option<String>, // Base64 encoded profile image (optional)
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -174,6 +186,10 @@ pub struct ServerUserPost {
     pub post_content: String,    // Base64 encoded content (max 100 chars when decoded)
     pub signature: String,       // Schnorr signature as hex string
     pub timestamp: u64,          // Unix timestamp
+    #[serde(rename = "userNickname", skip_serializing_if = "Option::is_none")]
+    pub user_nickname: Option<String>, // Base64 encoded user nickname (optional)
+    #[serde(rename = "userProfileImage", skip_serializing_if = "Option::is_none")]
+    pub user_profile_image: Option<String>, // Base64 encoded profile image (optional)
     // Note: Users API omits repliesCount, upVotesCount, downVotesCount, repostsCount, parentPostId, mentionedPubkeys
 }
 
@@ -185,6 +201,8 @@ impl ServerUserPost {
             post_content: record.base64_encoded_message.clone(),
             signature: record.sender_signature.clone(),
             timestamp: record.block_time,
+            user_nickname: Some(record.base64_encoded_nickname.clone()),
+            user_profile_image: record.base64_encoded_profile_image.clone(),
         }
     }
 }
@@ -228,6 +246,8 @@ impl ServerPost {
             mentioned_pubkeys: record.mentioned_pubkeys.clone(),
             is_upvoted: None,
             is_downvoted: None,
+            user_nickname: None,      // Will be populated separately
+            user_profile_image: None, // Will be populated separately
         }
     }
 
@@ -253,6 +273,8 @@ impl ServerPost {
             mentioned_pubkeys: record.mentioned_pubkeys.clone(),
             is_upvoted: Some(is_upvoted),
             is_downvoted: Some(is_downvoted),
+            user_nickname: None,      // Will be populated separately
+            user_profile_image: None, // Will be populated separately
         }
     }
 }
@@ -329,6 +351,8 @@ impl ServerReply {
             mentioned_pubkeys: record.mentioned_pubkeys.clone(),
             is_upvoted: None,
             is_downvoted: None,
+            user_nickname: None,      // Will be populated separately
+            user_profile_image: None, // Will be populated separately
         }
     }
 
@@ -354,6 +378,8 @@ impl ServerReply {
             mentioned_pubkeys: record.mentioned_pubkeys.clone(),
             is_upvoted: Some(is_upvoted),
             is_downvoted: Some(is_downvoted),
+            user_nickname: None,      // Will be populated separately
+            user_profile_image: None, // Will be populated separately
         }
     }
 }

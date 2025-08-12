@@ -82,6 +82,7 @@ impl ApiHandlers {
         let mut posts = Vec::new();
         let k_replies_collection = self.db_manager.get_k_replies_collection();
         let k_votes_collection = self.db_manager.get_k_votes_collection();
+        let k_broadcasts_collection = self.db_manager.get_k_broadcasts_collection();
         
         for item in query_result {
             match item {
@@ -103,7 +104,7 @@ impl ApiHandlers {
                     let (up_votes_count, down_votes_count, is_upvoted, is_downvoted) = 
                         self.get_vote_data(&k_post_record.transaction_id, requester_pubkey, &k_votes_collection);
                     
-                    let server_post = ServerPost::from_k_post_record_with_replies_count_and_votes(
+                    let mut server_post = ServerPost::from_k_post_record_with_replies_count_and_votes(
                         &k_post_record, 
                         replies_count,
                         up_votes_count,
@@ -111,6 +112,10 @@ impl ApiHandlers {
                         is_upvoted,
                         is_downvoted
                     );
+                    
+                    // Enrich with user profile data from broadcasts
+                    self.enrich_post_with_user_profile(&mut server_post, &k_broadcasts_collection);
+                    
                     posts.push(server_post);
                 }
                 Err(err) => {
@@ -181,6 +186,7 @@ impl ApiHandlers {
         let mut posts = Vec::new();
         let k_replies_collection = self.db_manager.get_k_replies_collection();
         let k_votes_collection = self.db_manager.get_k_votes_collection();
+        let k_broadcasts_collection = self.db_manager.get_k_broadcasts_collection();
         
         for item in query_result {
             match item {
@@ -202,7 +208,7 @@ impl ApiHandlers {
                     let (up_votes_count, down_votes_count, is_upvoted, is_downvoted) = 
                         self.get_vote_data(&k_post_record.transaction_id, requester_pubkey, &k_votes_collection);
                     
-                    let server_post = ServerPost::from_k_post_record_with_replies_count_and_votes(
+                    let mut server_post = ServerPost::from_k_post_record_with_replies_count_and_votes(
                         &k_post_record, 
                         replies_count,
                         up_votes_count,
@@ -210,6 +216,10 @@ impl ApiHandlers {
                         is_upvoted,
                         is_downvoted
                     );
+                    
+                    // Enrich with user profile data from broadcasts
+                    self.enrich_post_with_user_profile(&mut server_post, &k_broadcasts_collection);
+                    
                     posts.push(server_post);
                 }
                 Err(err) => {
@@ -289,6 +299,8 @@ impl ApiHandlers {
         let k_posts_collection = self.db_manager.get_k_posts_collection();
         let k_replies_collection = self.db_manager.get_k_replies_collection();
         let k_votes_collection = self.db_manager.get_k_votes_collection();
+        let k_broadcasts_collection = self.db_manager.get_k_broadcasts_collection();
+        let k_broadcasts_collection = self.db_manager.get_k_broadcasts_collection();
 
         // Build query based on cursor parameters
         let mut query = doc! { "sender_pubkey": user_public_key };
@@ -322,6 +334,7 @@ impl ApiHandlers {
             }
         };
         
+        let k_broadcasts_collection = self.db_manager.get_k_broadcasts_collection();
         let mut all_posts = Vec::new();
         
         for item in query_result {
@@ -344,7 +357,7 @@ impl ApiHandlers {
                     let (up_votes_count, down_votes_count, is_upvoted, is_downvoted) = 
                         self.get_vote_data(&k_post_record.transaction_id, requester_pubkey, &k_votes_collection);
                     
-                    let server_post = ServerPost::from_k_post_record_with_replies_count_and_votes(
+                    let mut server_post = ServerPost::from_k_post_record_with_replies_count_and_votes(
                         &k_post_record, 
                         replies_count,
                         up_votes_count,
@@ -352,6 +365,10 @@ impl ApiHandlers {
                         is_upvoted,
                         is_downvoted
                     );
+                    
+                    // Enrich with user profile data from broadcasts
+                    self.enrich_post_with_user_profile(&mut server_post, &k_broadcasts_collection);
+                    
                     all_posts.push(server_post);
                 }
                 Err(err) => {
@@ -467,6 +484,7 @@ impl ApiHandlers {
             }
         };
         
+        let k_broadcasts_collection = self.db_manager.get_k_broadcasts_collection();
         let mut all_posts = Vec::new();
         
         for item in query_result {
@@ -489,7 +507,7 @@ impl ApiHandlers {
                     let (up_votes_count, down_votes_count, is_upvoted, is_downvoted) = 
                         self.get_vote_data(&k_post_record.transaction_id, requester_pubkey, &k_votes_collection);
                     
-                    let server_post = ServerPost::from_k_post_record_with_replies_count_and_votes(
+                    let mut server_post = ServerPost::from_k_post_record_with_replies_count_and_votes(
                         &k_post_record, 
                         replies_count,
                         up_votes_count,
@@ -497,6 +515,10 @@ impl ApiHandlers {
                         is_upvoted,
                         is_downvoted
                     );
+                    
+                    // Enrich with user profile data from broadcasts
+                    self.enrich_post_with_user_profile(&mut server_post, &k_broadcasts_collection);
+                    
                     all_posts.push(server_post);
                 }
                 Err(err) => {
@@ -628,6 +650,7 @@ impl ApiHandlers {
             }
         };
         
+        let k_broadcasts_collection = self.db_manager.get_k_broadcasts_collection();
         let mut all_replies = Vec::new();
         
         for item in query_result {
@@ -650,7 +673,7 @@ impl ApiHandlers {
                     let (up_votes_count, down_votes_count, is_upvoted, is_downvoted) = 
                         self.get_vote_data(&k_reply_record.transaction_id, requester_pubkey, &k_votes_collection);
                     
-                    let server_reply = ServerReply::from_k_reply_record_with_replies_count_and_votes(
+                    let mut server_reply = ServerReply::from_k_reply_record_with_replies_count_and_votes(
                         &k_reply_record, 
                         replies_count,
                         up_votes_count,
@@ -658,6 +681,10 @@ impl ApiHandlers {
                         is_upvoted,
                         is_downvoted
                     );
+                    
+                    // Enrich with user profile data from broadcasts
+                    self.enrich_post_with_user_profile(&mut server_reply, &k_broadcasts_collection);
+                    
                     all_replies.push(server_reply);
                 }
                 Err(err) => {
@@ -737,7 +764,8 @@ impl ApiHandlers {
                     posts.push(server_user_post);
                 }
                 Err(err) => {
-                    log_error!("Error reading K broadcast record: {}", err);
+                    // Failed to deserialize record - likely old format without required fields
+                    log_warn!("Error reading K broadcast record (skipping): {}", err);
                     continue;
                 }
             }
@@ -803,11 +831,16 @@ impl ApiHandlers {
         for item in query_result {
             match item {
                 Ok(k_broadcast_record) => {
-                    let server_user_post = ServerUserPost::from_k_broadcast_record(&k_broadcast_record);
+                    let mut server_user_post = ServerUserPost::from_k_broadcast_record(&k_broadcast_record);
+                    
+                    // Enrich with user profile data from broadcasts
+                    self.enrich_user_post_with_user_profile(&mut server_user_post, &k_broadcasts_collection);
+                    
                     all_posts.push(server_user_post);
                 }
                 Err(err) => {
-                    log_error!("Error reading K broadcast record: {}", err);
+                    // Failed to deserialize record - likely old format without required fields
+                    log_warn!("Error reading K broadcast record (skipping): {}", err);
                     continue;
                 }
             }
@@ -908,6 +941,7 @@ impl ApiHandlers {
 
         let k_replies_collection = self.db_manager.get_k_replies_collection();
         let k_votes_collection = self.db_manager.get_k_votes_collection();
+        let k_broadcasts_collection = self.db_manager.get_k_broadcasts_collection();
 
         // Build query to find all replies by this user
         let mut query = doc! { "sender_pubkey": user_public_key };
@@ -963,7 +997,7 @@ impl ApiHandlers {
                     let (up_votes_count, down_votes_count, is_upvoted, is_downvoted) = 
                         self.get_vote_data(&k_reply_record.transaction_id, requester_pubkey, &k_votes_collection);
                     
-                    let server_reply = ServerReply::from_k_reply_record_with_replies_count_and_votes(
+                    let mut server_reply = ServerReply::from_k_reply_record_with_replies_count_and_votes(
                         &k_reply_record, 
                         replies_count,
                         up_votes_count,
@@ -971,6 +1005,10 @@ impl ApiHandlers {
                         is_upvoted,
                         is_downvoted
                     );
+                    
+                    // Enrich with user profile data from broadcasts
+                    self.enrich_post_with_user_profile(&mut server_reply, &k_broadcasts_collection);
+                    
                     all_replies.push(server_reply);
                 }
                 Err(err) => {
@@ -1074,6 +1112,7 @@ impl ApiHandlers {
         let k_posts_collection = self.db_manager.get_k_posts_collection();
         let k_replies_collection = self.db_manager.get_k_replies_collection();
         let k_votes_collection = self.db_manager.get_k_votes_collection();
+        let k_broadcasts_collection = self.db_manager.get_k_broadcasts_collection();
 
         // Since PoloDB query operators don't work for array matching, we'll use manual search
         // but with proper pagination logic that collects results in chronological order
@@ -1120,7 +1159,7 @@ impl ApiHandlers {
                         let (up_votes_count, down_votes_count, is_upvoted, is_downvoted) = 
                             self.get_vote_data(&k_post_record.transaction_id, requester_pubkey, &k_votes_collection);
                         
-                        let server_post = ServerPost::from_k_post_record_with_replies_count_and_votes(
+                        let mut server_post = ServerPost::from_k_post_record_with_replies_count_and_votes(
                             &k_post_record, 
                             replies_count,
                             up_votes_count,
@@ -1128,6 +1167,10 @@ impl ApiHandlers {
                             is_upvoted,
                             is_downvoted
                         );
+                        
+                        // Enrich with user profile data from broadcasts
+                        self.enrich_post_with_user_profile(&mut server_post, &k_broadcasts_collection);
+                        
                         all_mentions.push(server_post);
                     }
                 }
@@ -1173,7 +1216,7 @@ impl ApiHandlers {
                         let (up_votes_count, down_votes_count, is_upvoted, is_downvoted) = 
                             self.get_vote_data(&k_reply_record.transaction_id, requester_pubkey, &k_votes_collection);
                         
-                        let server_reply = ServerReply::from_k_reply_record_with_replies_count_and_votes(
+                        let mut server_reply = ServerReply::from_k_reply_record_with_replies_count_and_votes(
                             &k_reply_record, 
                             replies_count,
                             up_votes_count,
@@ -1181,6 +1224,10 @@ impl ApiHandlers {
                             is_upvoted,
                             is_downvoted
                         );
+                        
+                        // Enrich with user profile data from broadcasts
+                        self.enrich_post_with_user_profile(&mut server_reply, &k_broadcasts_collection);
+                        
                         all_mentions.push(server_reply);
                     }
                 }
@@ -1321,15 +1368,20 @@ impl ApiHandlers {
                 let (up_votes_count, down_votes_count, is_upvoted, is_downvoted) = 
                     self.get_vote_data(post_id, requester_pubkey, &k_votes_collection);
                 
-                let server_post = ServerPost::from_k_post_record_with_replies_count_and_votes(
-                    &k_post_record, 
-                    replies_count,
-                    up_votes_count,
-                    down_votes_count,
-                    is_upvoted,
-                    is_downvoted
-                );
-                let response = PostDetailsResponse { post: server_post };
+                let mut server_post = ServerPost::from_k_post_record_with_replies_count_and_votes(
+                        &k_post_record, 
+                        replies_count,
+                        up_votes_count,
+                        down_votes_count,
+                        is_upvoted,
+                        is_downvoted
+                    );
+                    
+                    // Enrich with user profile data from broadcasts
+                    let k_broadcasts_collection = self.db_manager.get_k_broadcasts_collection();
+                    self.enrich_post_with_user_profile(&mut server_post, &k_broadcasts_collection);
+                    
+                    let response = PostDetailsResponse { post: server_post };
                 
                 return match serde_json::to_string(&response) {
                     Ok(json) => Ok(json),
@@ -1364,7 +1416,7 @@ impl ApiHandlers {
                 let (up_votes_count, down_votes_count, is_upvoted, is_downvoted) = 
                     self.get_vote_data(post_id, requester_pubkey, &k_votes_collection);
                 
-                let server_reply = ServerReply::from_k_reply_record_with_replies_count_and_votes(
+                let mut server_reply = ServerReply::from_k_reply_record_with_replies_count_and_votes(
                     &k_reply_record, 
                     replies_count,
                     up_votes_count,
@@ -1372,6 +1424,11 @@ impl ApiHandlers {
                     is_upvoted,
                     is_downvoted
                 );
+                
+                // Enrich with user profile data from broadcasts
+                let k_broadcasts_collection = self.db_manager.get_k_broadcasts_collection();
+                self.enrich_post_with_user_profile(&mut server_reply, &k_broadcasts_collection);
+                
                 let response = PostDetailsResponse { post: server_reply };
                 
                 return match serde_json::to_string(&response) {
@@ -1481,6 +1538,92 @@ impl ApiHandlers {
         }
 
         (up_votes_count, down_votes_count, is_upvoted, is_downvoted)
+    }
+
+    /// Enrich a post with user profile information from broadcasts
+    fn enrich_post_with_user_profile(
+        &self,
+        post: &mut ServerPost,
+        k_broadcasts_collection: &polodb_core::Collection<crate::models::KBroadcastRecord>
+    ) {
+        // Look up the latest broadcast for this user's public key
+        let broadcasts_query = doc! { "sender_pubkey": &post.user_public_key };
+        
+        match k_broadcasts_collection
+            .find(broadcasts_query)
+            .sort(doc! { "block_time": -1 }) // Latest first
+            .limit(1)
+            .run() {
+            Ok(mut cursor) => {
+                match cursor.next() {
+                    Some(Ok(broadcast_record)) => {
+                        // Set user profile fields if available
+                        post.user_nickname = Some(broadcast_record.base64_encoded_nickname);
+                        post.user_profile_image = broadcast_record.base64_encoded_profile_image;
+                    },
+                    Some(Err(_)) => {
+                        // Failed to deserialize record - likely old format without required fields
+                        // Return empty strings as fallback
+                        post.user_nickname = Some(String::new());
+                        post.user_profile_image = Some(String::new());
+                    },
+                    None => {
+                        // No broadcast record found for this user
+                        post.user_nickname = Some(String::new());
+                        post.user_profile_image = Some(String::new());
+                    }
+                }
+            },
+            Err(err) => {
+                log_error!("Error querying broadcasts for user {}: {}", post.user_public_key, err);
+                // Return empty strings on database error
+                post.user_nickname = Some(String::new());
+                post.user_profile_image = Some(String::new());
+            }
+        }
+    }
+
+    /// Enrich a user post with user profile information from broadcasts  
+    fn enrich_user_post_with_user_profile(
+        &self,
+        post: &mut ServerUserPost,
+        k_broadcasts_collection: &polodb_core::Collection<crate::models::KBroadcastRecord>
+    ) {
+        // Look up the latest broadcast for this user's public key
+        let broadcasts_query = doc! { "sender_pubkey": &post.user_public_key };
+        
+        match k_broadcasts_collection
+            .find(broadcasts_query)
+            .sort(doc! { "block_time": -1 }) // Latest first
+            .limit(1)
+            .run() {
+            Ok(mut cursor) => {
+                match cursor.next() {
+                    Some(Ok(broadcast_record)) => {
+                        // Set user profile fields if available
+                        post.user_nickname = Some(broadcast_record.base64_encoded_nickname);
+                        post.user_profile_image = broadcast_record.base64_encoded_profile_image;
+                    },
+                    Some(Err(_)) => {
+                        // Failed to deserialize record - likely old format without required fields
+                        // Return empty strings as fallback
+                        post.user_nickname = Some(String::new());
+                        post.user_profile_image = Some(String::new());
+                    },
+                    None => {
+                        // No broadcast record found for this user
+                        post.user_nickname = Some(String::new());
+                        post.user_profile_image = Some(String::new());
+                    }
+                }
+            },
+            Err(err) => {
+                log_error!("Error querying broadcasts for user {}: {}", post.user_public_key, err);
+                // Return empty strings on database error
+                post.user_nickname = Some(String::new());
+                post.user_profile_image = Some(String::new());
+            }
+        }
     }
 
     /// Create a standardized error response

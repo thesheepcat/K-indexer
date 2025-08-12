@@ -35,16 +35,18 @@ Action: `broadcast`
 
 **Payload Format:**
 ```
-k:1:broadcast:sender_pubkey:sender_signature:base64_encoded_message
+k:1:broadcast:sender_pubkey:sender_signature:base64_encoded_nickname:base64_encoded_profile_image:base64_encoded_message
 ```
 ### Field Descriptions
 - `sender_pubkey`: The public key of the message sender
 - `sender_signature`: Digital signature for consistency verification
+- `base64_encoded_nickname`: The user name (nickname) to broadcast, encoded in Base64
+- `base64_encoded_profile_image`: The profile image to broadcast, encoded in Base64
 - `base64_encoded_message`: The message to broadcast, encoded in Base64
 
 ### Example Usage
 ```
-k:1:post:02218b3732df2353978154ec5323b745bce9520a5ed506a96de4f4e3dad20dc44f:fad0be9e2e4576708e15a4e06b7dd97badab1e585bbe15542a20fe4eba016c1a681f759c9f51e5801d5eeafc6cc62491b064661abba8b4b96e8118b74039f397:SSBsb3ZlIGRlY2VudHJhbGl6YXRpb24h
+k:1:broadcast:02218b3732df2353978154ec5323b745bce9520a5ed506a96de4f4e3dad20dc44f:fad0be9e2e4576708e15a4e06b7dd97badab1e585bbe15542a20fe4eba016c1a681f759c9f51e5801d5eeafc6cc62491b064661abba8b4b96e8118b74039f397:TXkgbmlja25hbWU=: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:SSBsb3ZlIGRlY2VudHJhbGl6YXRpb24h
 ```
 
 ---
@@ -194,6 +196,49 @@ sequenceDiagram
 
 ---
 
+### ✅ Reposting user contents
+- User A can setup his own account to:
+  - Gets notified if someone repost its content (forwarding a post/reply);
+- User B can freely repost a User A content in it's own profile (whether he support User A or not);
+- Depending on User A settings (above), User A receive the repost, gets notified about the repost, read the repost or ignore it (not visualizing it).
+
+
+```mermaid
+sequenceDiagram
+    actor A as Alice (front-end)
+    participant Alice's indexer
+    A->>Alice Kaspa node: This is my new post!
+    Alice Kaspa node-->>Bob Kaspa node: This is my new post!
+    Bob Kaspa node->>Bob's indexer: This is my new post!
+    actor B as Bob (front-end)
+    Bob's indexer->>B: This is my new post!
+    B->>Bob Kaspa node: I repost Alice's post!
+    Bob Kaspa node-->>Alice Kaspa node: I repost Alice's post!
+    Alice Kaspa node->>Alice's indexer: I repost Alice's post!
+    Alice's indexer->>A: I repost Alice's post!
+```
+
+**Protocol Specifications**
+
+Action: `repost`
+
+**Payload Format:**
+```
+k:1:repost:sender_pubkey:sender_signature:post_id
+```
+
+### Field Descriptions- 
+  - `sender_pubkey`: The public key of the message sender
+  - `sender_signature`: Digital signature for consistency verification
+  - `post_id`: The reference to the post/reply being reposted
+ 
+
+### Example Usage
+  ```
+  k:1:repost:02218b3732df2353978154ec5323b745bce9520a5ed506a96de4f4e3dad20dc44f:fad0be9e2e4576708e15a4e06b7dd97badab1e585bbe15542a20fe4eba016c1a681f759c9f51e5801d5eeafc6cc62491b064661abba8b4b96e8118b74039f397:1e321a6fad0a3c6f3cbbb61f54fcc047ec364e497b2d74a93f04963461a4e942
+  ```
+
+---
 
 ### ❌ Watching a user (not yet confirmed)
 - User B activates the "watching" process: everytime User A posts something new, User B is alerted and visualize this new content on his K home page.
@@ -309,94 +354,6 @@ k:1:support:{"sender_pubkey":"abc123","sender_signature":"def456","message":"I s
 - `sender_signature`: Digital signature for message verification
 - `message`: The message to post when supporting someone
 - `recipient_pubkey`: The pubkey of the user being supported
-
----
-
-
-
-### ❌ Reposting/quoting user contents (not yet confirmed)
-- User A can setup his own account to:
-  - Gets notified if someone repost (forwarding a message, adding considerations) its content;
-  - Gets notified if someone quotes (forwarding a message) its content;
-- User B can freely repost and quote a User A content in it's own profile (whether he support User A or not);
-- Depending on User A settings (above), User A receive the repost/quote, gets notified about the repost/quote, read the repost/quote or ignore it (not visualizing it).
-
-
-```mermaid
-sequenceDiagram
-    actor A as Alice (front-end)
-    participant Alice's indexer
-    A->>Alice Kaspa node: This is my new post!
-    Alice Kaspa node-->>Bob Kaspa node: This is my new post!
-    Bob Kaspa node->>Bob's indexer: This is my new post!
-    actor B as Bob (front-end)
-    Bob's indexer->>B: This is my new post!
-    B->>Bob Kaspa node: I repost/quote Alice's post!
-    Bob Kaspa node-->>Alice Kaspa node: I repost/quote Alice's post!
-    Alice Kaspa node->>Alice's indexer: I repost/quote Alice's post!
-    Alice's indexer->>A: I repost/quote Alice's post!
-```
-
-**Protocol Specifications**
-
-Action: `repost`
-
-**Payload Format:**
-```
-k:1:repost:message_body
-```
-
-**Message Body Structure:**
-```json
-{
-  "sender_pubkey": "",
-  "sender_signature": "",
-  "tx_id": ""
-}
-```
-
-### Example Usage
-```
-k:1:repost:{"sender_pubkey":"abc123","sender_signature":"def456","tx_id": "123456789"}
-```
-
-### Field Descriptions
-- `sender_pubkey`: The public key of the message sender
-- `sender_signature`: Digital signature for message verification
-- `message`: empty
-- `tx_id`: The reference to the user's post being reposted
-
------------------------------
-
-Action: `quote`
-
-**Payload Format:**
-```
-k:1:quote:message_body
-```
-
-**Message Body Structure:**
-```json
-{
-  "sender_pubkey": "",
-  "sender_signature": "",
-  "message": "",
-  "tx_id": ""
-}
-```
-
-### Example Usage
-```
-k:1:quote:{"sender_pubkey":"abc123","sender_signature":"def456","message":"This is my comment!","tx_id": "123456789"}
-```
-
-### Field Descriptions
-- `sender_pubkey`: The public key of the message sender
-- `sender_signature`: Digital signature for message verification
-- `message`: The comment on the post being quoted
-- `tx_id`: The reference to the user's post being quoted
-
----
 
 
 ---

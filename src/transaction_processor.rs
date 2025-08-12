@@ -389,18 +389,22 @@ impl TransactionProcessor {
 
         match action {
             "broadcast" => {
-                // Expected format: broadcast:sender_pubkey:sender_signature:base64_message
-                if parts.len() < 4 {
-                    return Err(format!("Invalid broadcast format: expected at least 4 parts, got {}", parts.len()));
+                // Expected format: broadcast:sender_pubkey:sender_signature:base64_encoded_nickname:base64_encoded_profile_image:base64_encoded_message
+                if parts.len() < 6 {
+                    return Err(format!("Invalid broadcast format: expected 6 parts, got {}", parts.len()));
                 }
 
                 let sender_pubkey = parts[1].to_string();
                 let sender_signature = parts[2].to_string();
-                let base64_encoded_message = parts[3].to_string();
+                let base64_encoded_nickname = parts[3].to_string();
+                let base64_encoded_profile_image = if parts[4].is_empty() { None } else { Some(parts[4].to_string()) };
+                let base64_encoded_message = parts[5].to_string();
 
                 Ok(KActionType::Broadcast(KBroadcast {
                     sender_pubkey,
                     sender_signature,
+                    base64_encoded_nickname,
+                    base64_encoded_profile_image,
                     base64_encoded_message,
                 }))
             }
@@ -612,8 +616,14 @@ impl TransactionProcessor {
             None => "unknown".to_string(),
         };
 
-        // Construct the message to verify - it's just the base64 message for broadcasts
-        let message_to_verify = k_broadcast.base64_encoded_message.clone();
+        // Construct the message to verify - it's the new payload format: 
+        // base64_encoded_nickname:base64_encoded_profile_image:base64_encoded_message
+        let profile_image_part = k_broadcast.base64_encoded_profile_image.as_deref().unwrap_or("");
+        let message_to_verify = format!("{}:{}:{}", 
+            k_broadcast.base64_encoded_nickname,
+            profile_image_part,
+            k_broadcast.base64_encoded_message
+        );
 
         // Verify the signature
         if !self.verify_kaspa_signature(&message_to_verify, &k_broadcast.sender_signature, &k_broadcast.sender_pubkey) {
