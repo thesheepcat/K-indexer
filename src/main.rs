@@ -18,9 +18,6 @@ mod notification_handler;
 mod transaction_processor;
 mod web_server;
 
-#[cfg(test)]
-mod test_vote_implementation;
-
 use web_server::AppState;
 use cli::Args;
 use database::DatabaseManager;
