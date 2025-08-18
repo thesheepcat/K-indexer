@@ -2,3 +2,5 @@
 /Cargo.lock
 .continue
 k-indexer.db
+transaction_processing_spec.md
+new-transaction-processor/target
