@@ -1,15 +1,15 @@
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
+use futures::FutureExt;
 use polodb_core::Collection;
 use workflow_core::channel::{Channel, DuplexChannel};
 use workflow_log::prelude::*;
-use futures::FutureExt;
 
 use kaspa_wrpc_client::prelude::*;
 use kaspa_wrpc_client::result::Result;
 
-use crate::models::{KPostRecord, KReplyRecord, KBroadcastRecord, KVoteRecord};
+use crate::models::{KBroadcastRecord, KPostRecord, KReplyRecord, KVoteRecord};
 use crate::notification_handler::NotificationHandler;
 use crate::transaction_processor::TransactionProcessor;
 
@@ -188,7 +188,10 @@ impl KaspaConnection {
     pub async fn handle_connect(&self) -> Result<()> {
         // make an RPC method call to the node...
         let server_info = self.client().get_server_info().await?;
-        log_info!("Connected to Kaspa node - Server: {}", server_info.server_version);
+        log_info!(
+            "Connected to Kaspa node - Server: {}",
+            server_info.server_version
+        );
 
         // now that we have successfully connected we
         // can register for notifications

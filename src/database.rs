@@ -1,5 +1,5 @@
+use crate::models::{KBroadcastRecord, KPostRecord, KReplyRecord, KVoteRecord};
 use polodb_core::{Collection, Database};
-use crate::models::{KPostRecord, KReplyRecord, KBroadcastRecord, KVoteRecord};
 
 pub struct DatabaseManager {
     pub db: Database,
@@ -10,8 +10,6 @@ impl DatabaseManager {
         let db = Database::open_path(db_path)?;
         Ok(Self { db })
     }
-
-    
 
     pub fn get_k_posts_collection(&self) -> Collection<KPostRecord> {
         self.db.collection("k-posts")
