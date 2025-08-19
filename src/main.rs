@@ -11,7 +11,6 @@ use workflow_log::prelude::*;
 // Internal modules
 mod api_handlers;
 mod cli;
-mod database;
 mod database_polo_impl;
 mod database_trait;
 mod kaspa_connection;
@@ -21,7 +20,6 @@ mod transaction_processor;
 mod web_server;
 
 use cli::Args;
-use database::DatabaseManager;
 use database_polo_impl::PoloDbManager;
 use kaspa_connection::KaspaConnection;
 use web_server::AppState;
