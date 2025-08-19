@@ -3,31 +3,31 @@
 
 -- Create k_posts table for K protocol posts
 CREATE TABLE IF NOT EXISTS k_posts (
-    transaction_id VARCHAR(64) PRIMARY KEY,  -- Hex-encoded transaction ID (32 bytes = 64 hex chars)
+    transaction_id BYTEA PRIMARY KEY,       -- Binary transaction ID (32 bytes)
     block_time BIGINT NOT NULL,             -- Unix timestamp
-    sender_pubkey VARCHAR(66) NOT NULL,     -- Hex-encoded public key (33 bytes = 66 hex chars)
-    sender_signature VARCHAR(128) NOT NULL, -- Hex-encoded signature (64 bytes = 128 hex chars)
+    sender_pubkey BYTEA NOT NULL,           -- Binary public key (32 or 33 bytes)
+    sender_signature BYTEA NOT NULL,        -- Binary signature (64 bytes)
     base64_encoded_message TEXT NOT NULL,   -- Base64 encoded message content
     mentioned_pubkeys JSONB DEFAULT '[]'::jsonb -- Array of mentioned public keys as JSON
 );
 
 -- Create k_replies table for K protocol replies
 CREATE TABLE IF NOT EXISTS k_replies (
-    transaction_id VARCHAR(64) PRIMARY KEY,  -- Hex-encoded transaction ID (32 bytes = 64 hex chars)
+    transaction_id BYTEA PRIMARY KEY,       -- Binary transaction ID (32 bytes)
     block_time BIGINT NOT NULL,             -- Unix timestamp
-    sender_pubkey VARCHAR(66) NOT NULL,     -- Hex-encoded public key (33 bytes = 66 hex chars)
-    sender_signature VARCHAR(128) NOT NULL, -- Hex-encoded signature (64 bytes = 128 hex chars)
-    post_id VARCHAR(64) NOT NULL,           -- Transaction ID of the post being replied to
+    sender_pubkey BYTEA NOT NULL,           -- Binary public key (32 or 33 bytes)
+    sender_signature BYTEA NOT NULL,        -- Binary signature (64 bytes)
+    post_id BYTEA NOT NULL,                 -- Binary transaction ID of the post being replied to
     base64_encoded_message TEXT NOT NULL,   -- Base64 encoded message content
     mentioned_pubkeys JSONB DEFAULT '[]'::jsonb -- Array of mentioned public keys as JSON
 );
 
 -- Create k_broadcasts table for K protocol broadcasts (user profile updates)
 CREATE TABLE IF NOT EXISTS k_broadcasts (
-    transaction_id VARCHAR(64) PRIMARY KEY,  -- Hex-encoded transaction ID (32 bytes = 64 hex chars)
+    transaction_id BYTEA PRIMARY KEY,       -- Binary transaction ID (32 bytes)
     block_time BIGINT NOT NULL,             -- Unix timestamp
-    sender_pubkey VARCHAR(66) NOT NULL,     -- Hex-encoded public key (33 bytes = 66 hex chars)
-    sender_signature VARCHAR(128) NOT NULL, -- Hex-encoded signature (64 bytes = 128 hex chars)
+    sender_pubkey BYTEA NOT NULL,           -- Binary public key (32 or 33 bytes)
+    sender_signature BYTEA NOT NULL,        -- Binary signature (64 bytes)
     base64_encoded_nickname TEXT NOT NULL DEFAULT '', -- Base64 encoded user nickname
     base64_encoded_profile_image TEXT,      -- Base64 encoded profile image (optional)
     base64_encoded_message TEXT NOT NULL    -- Base64 encoded message content
@@ -35,13 +35,13 @@ CREATE TABLE IF NOT EXISTS k_broadcasts (
 
 -- Create k_votes table for K protocol votes (upvotes/downvotes)
 CREATE TABLE IF NOT EXISTS k_votes (
-    transaction_id VARCHAR(64) PRIMARY KEY,  -- Hex-encoded transaction ID (32 bytes = 64 hex chars)
+    transaction_id BYTEA PRIMARY KEY,       -- Binary transaction ID (32 bytes)
     block_time BIGINT NOT NULL,             -- Unix timestamp
-    sender_pubkey VARCHAR(66) NOT NULL,     -- Hex-encoded public key (33 bytes = 66 hex chars)
-    sender_signature VARCHAR(128) NOT NULL, -- Hex-encoded signature (64 bytes = 128 hex chars)
-    post_id VARCHAR(64) NOT NULL,           -- Transaction ID of the post being voted on
+    sender_pubkey BYTEA NOT NULL,           -- Binary public key (32 or 33 bytes)
+    sender_signature BYTEA NOT NULL,        -- Binary signature (64 bytes)
+    post_id BYTEA NOT NULL,                 -- Binary transaction ID of the post being voted on
     vote VARCHAR(10) NOT NULL CHECK (vote IN ('upvote', 'downvote')), -- Vote type constraint
-    author_pubkey VARCHAR(66) DEFAULT ''   -- Public key of the original post author (for future implementation)
+    author_pubkey BYTEA DEFAULT decode('', 'hex') -- Binary public key of the original post author
 );
 
 -- Create indexes for better query performance

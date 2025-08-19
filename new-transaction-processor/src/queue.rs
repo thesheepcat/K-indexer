@@ -47,7 +47,7 @@ impl NotificationQueue {
             if let Err(e) = sender.send(transaction_id.clone()) {
                 error!("Failed to send transaction {} to worker {}: {}", transaction_id, worker_index, e);
             } else {
-                info!("Sent transaction {} to worker {}", transaction_id, worker_index);
+                //info!("Sent transaction {} to worker {}", transaction_id, worker_index);
             }
         }
 

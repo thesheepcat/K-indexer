@@ -20,9 +20,6 @@ pub async fn create_pool(config: &AppConfig) -> Result<DbPool> {
 #[derive(Debug, Clone)]
 pub struct Transaction {
     pub transaction_id: String,
-    pub subnetwork_id: Option<i32>,
-    pub hash: Option<String>,
-    pub mass: Option<i32>,
     pub payload: Option<String>,
     pub block_time: Option<i64>,
 }
@@ -35,9 +32,6 @@ pub async fn fetch_transaction(pool: &DbPool, transaction_id_hex: &str) -> Resul
         r#"
         SELECT 
             transaction_id,
-            subnetwork_id,
-            hash,
-            mass,
             payload,
             block_time
         FROM transactions 
@@ -50,14 +44,10 @@ pub async fn fetch_transaction(pool: &DbPool, transaction_id_hex: &str) -> Resul
     
     if let Some(row) = row {
         let transaction_id: Vec<u8> = row.get("transaction_id");
-        let hash: Option<Vec<u8>> = row.get("hash");
         let payload: Option<Vec<u8>> = row.get("payload");
         
         Ok(Some(Transaction {
             transaction_id: hex::encode(&transaction_id),
-            subnetwork_id: row.get("subnetwork_id"),
-            hash: hash.map(|h| hex::encode(&h)),
-            mass: row.get("mass"),
             payload: payload.map(|p| hex::encode(&p)),
             block_time: row.get("block_time"),
         }))

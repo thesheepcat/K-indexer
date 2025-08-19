@@ -43,7 +43,7 @@ impl Worker {
     }
 
     async fn process_transaction(&self, transaction_id: String) {
-        info!("Worker {} processing transaction: {}", self.id, transaction_id);
+        //info!("Worker {} processing transaction: {}", self.id, transaction_id);
 
         match self.fetch_and_process_transaction(&transaction_id).await {
             Ok(Some(transaction)) => {
@@ -54,7 +54,7 @@ impl Worker {
                     if let Ok(payload_bytes) = hex::decode(payload_hex) {
                         if let Ok(payload_str) = std::str::from_utf8(&payload_bytes) {
                             if payload_str.starts_with("k:1:") {
-                                info!("Worker {} - Processing K protocol transaction: {}", self.id, transaction_id);
+                                //info!("Worker {} - Processing K protocol transaction: {}", self.id, transaction_id);
                                 if let Err(k_err) = self.k_processor.process_k_transaction(&transaction).await {
                                     error!("Worker {} - Error processing K protocol transaction {}: {}", self.id, transaction_id, k_err);
                                 }
@@ -79,32 +79,32 @@ impl Worker {
     }
 
     async fn fetch_and_process_transaction(&self, transaction_id: &str) -> Result<Option<Transaction>> {
-        info!("Worker {} received transaction data for processing: {}", self.id, transaction_id);
+        //info!("Worker {} received transaction data for processing: {}", self.id, transaction_id);
         
         fetch_transaction(&self.db_pool, transaction_id).await
     }
 
     fn log_transaction(&self, transaction: &Transaction) {
-        info!("=== Transaction Processed by Worker {} ===", self.id);
-        info!("Transaction ID (hex): {}", transaction.transaction_id);
-        //info!("Subnetwork ID: {:?}", transaction.subnetwork_id);
-        //info!("Hash (hex): {:?}", transaction.hash);
-        //info!("Mass: {:?}", transaction.mass);
+        //info!("=== Transaction Processed by Worker {} ===", self.id);
+        info!("Worker {} - Transaction ID (hex): {}", self.id, transaction.transaction_id);
+        //info!("Worker {} - Subnetwork ID: {:?}", self.id, transaction.subnetwork_id);
+        //info!("Worker {} - Hash (hex): {:?}", self.id, transaction.hash);
+        //info!("Worker {} - Mass: {:?}", self.id, transaction.mass);
         
         // Format payload with hex prefix and check if it starts with 6b3a
         /*  
         if let Some(ref payload) = transaction.payload {
-            info!("Payload (hex): 0x{}", payload);
+            info!("Worker {} - Payload (hex): 0x{}", self.id, payload);
             if payload.starts_with("6b3a") {
-                info!("Payload starts with 6b3a ✓ (trigger condition met)");
+                info!("Worker {} - Payload starts with 6b3a ✓ (trigger condition met)", self.id);
             }
-            info!("Payload length: {} bytes", payload.len() / 2);
+            info!("Worker {} - Payload length: {} bytes", self.id, payload.len() / 2);
         } else {
-            info!("Payload (hex): None");
+            info!("Worker {} - Payload (hex): None", self.id);
         }
         
-        info!("Block Time: {:?}", transaction.block_time);
-        info!("==========================================");
+        info!("Worker {} - Block Time: {:?}", self.id, transaction.block_time);
+        info!("Worker {} - ==========================================", self.id);
         */
     }
 
@@ -126,7 +126,7 @@ impl Worker {
                         if let Ok(payload_bytes) = hex::decode(payload_hex) {
                             if let Ok(payload_str) = std::str::from_utf8(&payload_bytes) {
                                 if payload_str.starts_with("k:1:") {
-                                    info!("Worker {} - Processing K protocol transaction on retry: {}", self.id, transaction_id);
+                                    //info!("Worker {} - Processing K protocol transaction on retry: {}", self.id, transaction_id);
                                     if let Err(k_err) = self.k_processor.process_k_transaction(&transaction).await {
                                         error!("Worker {} - Error processing K protocol transaction on retry {}: {}", self.id, transaction_id, k_err);
                                     }

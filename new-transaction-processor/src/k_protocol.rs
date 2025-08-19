@@ -303,11 +303,14 @@ impl KProtocolProcessor {
 
     /// Check if transaction already exists in any K protocol table
     pub async fn transaction_exists(&self, transaction_id: &str) -> Result<bool> {
+        // Convert hex string to bytea for database query
+        let transaction_id_bytes = hex::decode(transaction_id)?;
+        
         // Check in k_posts table
         let posts_result = sqlx::query(
             "SELECT transaction_id FROM k_posts WHERE transaction_id = $1"
         )
-        .bind(transaction_id)
+        .bind(&transaction_id_bytes)
         .fetch_optional(&self.db_pool)
         .await?;
 
@@ -319,7 +322,7 @@ impl KProtocolProcessor {
         let replies_result = sqlx::query(
             "SELECT transaction_id FROM k_replies WHERE transaction_id = $1"
         )
-        .bind(transaction_id)
+        .bind(&transaction_id_bytes)
         .fetch_optional(&self.db_pool)
         .await?;
 
@@ -331,7 +334,7 @@ impl KProtocolProcessor {
         let broadcasts_result = sqlx::query(
             "SELECT transaction_id FROM k_broadcasts WHERE transaction_id = $1"
         )
-        .bind(transaction_id)
+        .bind(&transaction_id_bytes)
         .fetch_optional(&self.db_pool)
         .await?;
 
@@ -343,7 +346,7 @@ impl KProtocolProcessor {
         let votes_result = sqlx::query(
             "SELECT transaction_id FROM k_votes WHERE transaction_id = $1"
         )
-        .bind(transaction_id)
+        .bind(&transaction_id_bytes)
         .fetch_optional(&self.db_pool)
         .await?;
 
@@ -445,6 +448,11 @@ impl KProtocolProcessor {
         // Convert mentioned_pubkeys to JSONB
         let mentioned_pubkeys_json = serde_json::to_value(&k_post.mentioned_pubkeys)?;
 
+        // Convert hex strings to bytea for database storage
+        let transaction_id_bytes = hex::decode(transaction_id)?;
+        let sender_pubkey_bytes = hex::decode(&k_post.sender_pubkey)?;
+        let sender_signature_bytes = hex::decode(&k_post.sender_signature)?;
+        
         // Insert into k_posts table
         sqlx::query(
             r#"
@@ -454,10 +462,10 @@ impl KProtocolProcessor {
             ) VALUES ($1, $2, $3, $4, $5, $6)
             "#
         )
-        .bind(transaction_id)
+        .bind(&transaction_id_bytes)
         .bind(block_time)
-        .bind(k_post.sender_pubkey)
-        .bind(k_post.sender_signature)
+        .bind(&sender_pubkey_bytes)
+        .bind(&sender_signature_bytes)
         .bind(k_post.base64_encoded_message)
         .bind(mentioned_pubkeys_json)
         .execute(&self.db_pool)
@@ -477,6 +485,12 @@ impl KProtocolProcessor {
         // Store values we need for logging before they're moved
         let post_id_for_log = k_reply.post_id.clone();
         
+        // Convert hex strings to bytea for database storage
+        let transaction_id_bytes = hex::decode(transaction_id)?;
+        let sender_pubkey_bytes = hex::decode(&k_reply.sender_pubkey)?;
+        let sender_signature_bytes = hex::decode(&k_reply.sender_signature)?;
+        let post_id_bytes = hex::decode(&k_reply.post_id)?;
+        
         // Insert into k_replies table
         sqlx::query(
             r#"
@@ -486,11 +500,11 @@ impl KProtocolProcessor {
             ) VALUES ($1, $2, $3, $4, $5, $6, $7)
             "#
         )
-        .bind(transaction_id)
+        .bind(&transaction_id_bytes)
         .bind(transaction.block_time.unwrap_or(0))
-        .bind(k_reply.sender_pubkey)
-        .bind(k_reply.sender_signature)
-        .bind(k_reply.post_id)
+        .bind(&sender_pubkey_bytes)
+        .bind(&sender_signature_bytes)
+        .bind(&post_id_bytes)
         .bind(k_reply.base64_encoded_message)
         .bind(mentioned_pubkeys_json)
         .execute(&self.db_pool)
@@ -504,6 +518,11 @@ impl KProtocolProcessor {
     pub async fn save_k_broadcast_to_database(&self, transaction: &Transaction, k_broadcast: KBroadcast) -> Result<()> {
         let transaction_id = &transaction.transaction_id;
 
+        // Convert hex strings to bytea for database storage
+        let transaction_id_bytes = hex::decode(transaction_id)?;
+        let sender_pubkey_bytes = hex::decode(&k_broadcast.sender_pubkey)?;
+        let sender_signature_bytes = hex::decode(&k_broadcast.sender_signature)?;
+        
         // Insert into k_broadcasts table
         sqlx::query(
             r#"
@@ -513,10 +532,10 @@ impl KProtocolProcessor {
             ) VALUES ($1, $2, $3, $4, $5, $6, $7)
             "#
         )
-        .bind(transaction_id)
+        .bind(&transaction_id_bytes)
         .bind(transaction.block_time.unwrap_or(0))
-        .bind(k_broadcast.sender_pubkey)
-        .bind(k_broadcast.sender_signature)
+        .bind(&sender_pubkey_bytes)
+        .bind(&sender_signature_bytes)
         .bind(k_broadcast.base64_encoded_nickname)
         .bind(k_broadcast.base64_encoded_profile_image)
         .bind(k_broadcast.base64_encoded_message)
@@ -535,6 +554,13 @@ impl KProtocolProcessor {
         let post_id_for_log = k_vote.post_id.clone();
         let vote_for_log = k_vote.vote.clone();
         
+        // Convert hex strings to bytea for database storage
+        let transaction_id_bytes = hex::decode(transaction_id)?;
+        let sender_pubkey_bytes = hex::decode(&k_vote.sender_pubkey)?;
+        let sender_signature_bytes = hex::decode(&k_vote.sender_signature)?;
+        let post_id_bytes = hex::decode(&k_vote.post_id)?;
+        let author_pubkey_bytes: Vec<u8> = Vec::new(); // Empty bytes for author_pubkey (future implementation)
+        
         // Insert into k_votes table
         sqlx::query(
             r#"
@@ -544,13 +570,13 @@ impl KProtocolProcessor {
             ) VALUES ($1, $2, $3, $4, $5, $6, $7)
             "#
         )
-        .bind(transaction_id)
+        .bind(&transaction_id_bytes)
         .bind(transaction.block_time.unwrap_or(0))
-        .bind(k_vote.sender_pubkey)
-        .bind(k_vote.sender_signature)
-        .bind(k_vote.post_id)
+        .bind(&sender_pubkey_bytes)
+        .bind(&sender_signature_bytes)
+        .bind(&post_id_bytes)
         .bind(k_vote.vote)
-        .bind("") // Empty string for author_pubkey (future implementation)
+        .bind(&author_pubkey_bytes)
         .execute(&self.db_pool)
         .await?;
 

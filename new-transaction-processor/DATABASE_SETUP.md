@@ -124,13 +124,13 @@ psql -h $DB_HOST -d $DB_NAME -U $DB_USER -c "\d k_votes"
 To test if the trigger works correctly, you can manually insert a test transaction with bytea data:
 
 ```sql
--- Insert test transaction with hex data (payload starts with 6b3a)
+-- Insert test transaction with hex data (payload starts with 6b3a313a)
 INSERT INTO transactions (transaction_id, subnetwork_id, mass, payload, block_time) 
 VALUES (
     decode('1234567890abcdef', 'hex'),  -- transaction_id as bytea
     1,                                 -- subnetwork_id as integer
     100000,                           -- mass as integer
-    decode('6b3a0123456789abcdef', 'hex'), -- payload as bytea starting with 6b3a
+    decode('6b3a313a0123456789abcdef', 'hex'), -- payload as bytea starting with 6b3a313a
     1640995200                        -- block_time as bigint (unix timestamp)
 );
 ```
@@ -144,10 +144,10 @@ The K protocol tables store parsed data from Kaspa transactions that contain K p
 ### k_posts
 Stores K protocol post messages:
 ```sql
-transaction_id VARCHAR(64) PRIMARY KEY  -- Hex-encoded transaction ID
+transaction_id BYTEA PRIMARY KEY       -- Binary transaction ID (32 bytes)
 block_time BIGINT NOT NULL             -- Unix timestamp from blockchain
-sender_pubkey VARCHAR(64) NOT NULL     -- Hex-encoded sender public key
-sender_signature VARCHAR(128) NOT NULL -- Hex-encoded message signature
+sender_pubkey BYTEA NOT NULL           -- Binary sender public key (32 or 33 bytes)
+sender_signature BYTEA NOT NULL        -- Binary message signature (64 bytes)
 base64_encoded_message TEXT NOT NULL   -- Base64 encoded message content
 mentioned_pubkeys JSONB DEFAULT '[]'   -- Array of mentioned user public keys
 ```
@@ -155,11 +155,11 @@ mentioned_pubkeys JSONB DEFAULT '[]'   -- Array of mentioned user public keys
 ### k_replies
 Stores K protocol reply messages:
 ```sql
-transaction_id VARCHAR(64) PRIMARY KEY  -- Hex-encoded transaction ID
+transaction_id BYTEA PRIMARY KEY       -- Binary transaction ID (32 bytes)
 block_time BIGINT NOT NULL             -- Unix timestamp from blockchain
-sender_pubkey VARCHAR(64) NOT NULL     -- Hex-encoded sender public key
-sender_signature VARCHAR(128) NOT NULL -- Hex-encoded message signature
-post_id VARCHAR(64) NOT NULL           -- Transaction ID of post being replied to
+sender_pubkey BYTEA NOT NULL           -- Binary sender public key (32 or 33 bytes)
+sender_signature BYTEA NOT NULL        -- Binary message signature (64 bytes)
+post_id BYTEA NOT NULL                 -- Binary transaction ID of post being replied to
 base64_encoded_message TEXT NOT NULL   -- Base64 encoded message content
 mentioned_pubkeys JSONB DEFAULT '[]'   -- Array of mentioned user public keys
 ```
@@ -167,10 +167,10 @@ mentioned_pubkeys JSONB DEFAULT '[]'   -- Array of mentioned user public keys
 ### k_broadcasts
 Stores K protocol broadcast messages (user profile updates):
 ```sql
-transaction_id VARCHAR(64) PRIMARY KEY  -- Hex-encoded transaction ID
+transaction_id BYTEA PRIMARY KEY       -- Binary transaction ID (32 bytes)
 block_time BIGINT NOT NULL             -- Unix timestamp from blockchain
-sender_pubkey VARCHAR(64) NOT NULL     -- Hex-encoded sender public key
-sender_signature VARCHAR(128) NOT NULL -- Hex-encoded message signature
+sender_pubkey BYTEA NOT NULL           -- Binary sender public key (32 or 33 bytes)
+sender_signature BYTEA NOT NULL        -- Binary message signature (64 bytes)
 base64_encoded_nickname TEXT NOT NULL  -- Base64 encoded user nickname
 base64_encoded_profile_image TEXT      -- Base64 encoded profile image (optional)
 base64_encoded_message TEXT NOT NULL   -- Base64 encoded message content
@@ -179,13 +179,13 @@ base64_encoded_message TEXT NOT NULL   -- Base64 encoded message content
 ### k_votes
 Stores K protocol vote messages (upvotes/downvotes):
 ```sql
-transaction_id VARCHAR(64) PRIMARY KEY  -- Hex-encoded transaction ID
+transaction_id BYTEA PRIMARY KEY       -- Binary transaction ID (32 bytes)
 block_time BIGINT NOT NULL             -- Unix timestamp from blockchain
-sender_pubkey VARCHAR(64) NOT NULL     -- Hex-encoded sender public key
-sender_signature VARCHAR(128) NOT NULL -- Hex-encoded message signature
-post_id VARCHAR(64) NOT NULL           -- Transaction ID of post being voted on
+sender_pubkey BYTEA NOT NULL           -- Binary sender public key (32 or 33 bytes)
+sender_signature BYTEA NOT NULL        -- Binary message signature (64 bytes)
+post_id BYTEA NOT NULL                 -- Binary transaction ID of post being voted on
 vote VARCHAR(10) NOT NULL              -- 'upvote' or 'downvote'
-author_pubkey VARCHAR(64) DEFAULT ''   -- Original post author public key (future)
+author_pubkey BYTEA DEFAULT decode('', 'hex') -- Binary original post author public key (future)
 ```
 
 ### Indexes
@@ -199,7 +199,7 @@ The migration creates comprehensive indexes for optimal query performance:
 ## How It Works
 
 1. **Trigger Activation**: The trigger fires after every INSERT operation on the `transactions` table
-2. **Payload Filtering**: Only transactions with payloads starting with `'6b3a'` (in hex format) trigger notifications
+2. **Payload Filtering**: Only transactions with payloads starting with `'6b3a313a'` (in hex format) trigger notifications
 3. **Data Conversion**: The trigger uses `encode(NEW.payload, 'hex')` to convert bytea to hex string for pattern matching
 4. **Notification**: A notification is sent to the `transaction_channel` with the hex-encoded `transaction_id` as the payload
 5. **Application Processing**: The Rust application receives hex transaction IDs, converts them back to bytea for database queries, and displays all data in hex format
@@ -208,7 +208,7 @@ The migration creates comprehensive indexes for optimal query performance:
 
 The trigger uses these default settings:
 - **Channel Name**: `transaction_channel`
-- **Payload Filter**: Transactions starting with `6b3a`
+- **Payload Filter**: Transactions starting with `6b3a313a`
 
 To modify these settings, edit the `migration_001_add_transaction_trigger.sql` file before deployment.
 
@@ -242,7 +242,10 @@ The trigger has minimal performance impact:
 
 ## Data Format Notes
 
-- **Transaction IDs**: Stored as `bytea` in the database, transmitted as hex strings in notifications
-- **Payloads**: Stored as `bytea`, checked in hex format (trigger looks for hex pattern `6b3a`)
+- **Transaction IDs**: Stored as `bytea` in all tables, transmitted as hex strings in notifications
+- **Public Keys**: Stored as `bytea` (32 or 33 bytes) for space efficiency, converted from hex strings
+- **Signatures**: Stored as `bytea` (64 bytes) for space efficiency, converted from hex strings
+- **Payloads**: Stored as `bytea`, checked in hex format (trigger looks for hex pattern `6b3a313a`)
 - **Hash Values**: Stored as `bytea`, displayed as hex strings in the application
 - **Hex Encoding**: All bytea fields are automatically converted to lowercase hex strings by the application
+- **Storage Efficiency**: Using bytea reduces storage by ~50% for binary data compared to hex VARCHAR
