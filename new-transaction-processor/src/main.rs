@@ -7,6 +7,7 @@ mod queue;
 mod worker;
 
 use anyhow::Result;
+use clap::Parser;
 use tokio::sync::mpsc;
 use tracing::{info, error, warn};
 use tracing_subscriber;
@@ -17,22 +18,89 @@ use listener::NotificationListener;
 use queue::NotificationQueue;
 use worker::WorkerPool;
 
+#[derive(Parser, Debug)]
+#[command(author, version, about = "K-indexer Transaction Processor", long_about = None)]
+struct Args {
+    #[arg(short = 'H', long, help = "Database host")]
+    db_host: Option<String>,
+
+    #[arg(short = 'P', long, help = "Database port")]
+    db_port: Option<u16>,
+
+    #[arg(short = 'd', long, help = "Database name")]
+    db_name: Option<String>,
+
+    #[arg(short = 'u', long, help = "Database username")]
+    db_user: Option<String>,
+
+    #[arg(short = 'p', long, help = "Database password")]
+    db_password: Option<String>,
+
+    #[arg(short = 'm', long, help = "Maximum database connections")]
+    db_max_connections: Option<usize>,
+
+    #[arg(short = 'w', long, help = "Number of worker threads")]
+    workers: Option<usize>,
+
+    #[arg(short = 'C', long, help = "PostgreSQL notification channel name")]
+    channel: Option<String>,
+
+    #[arg(short = 'r', long, help = "Number of retry attempts")]
+    retry_attempts: Option<u32>,
+
+    #[arg(short = 'D', long, help = "Retry delay in milliseconds")]
+    retry_delay: Option<u64>,
+
+    #[arg(short = 'c', long, help = "Load configuration from a TOML file")]
+    config: Option<String>,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
     info!("Starting Transaction Processor");
 
-    let config_path = std::env::current_dir()
-        .map(|p| p.join("config.toml"))
-        .unwrap_or_else(|_| "config.toml".into());
+    // Parse CLI arguments
+    let args = Args::parse();
     
-    info!("Looking for config file at: {:?}", config_path);
-    
-    let config = AppConfig::from_file(config_path.to_str().unwrap_or("config.toml")).unwrap_or_else(|e| {
-        warn!("Could not load config.toml: {}, using default configuration", e);
-        AppConfig::default()
-    });
+    // Load configuration
+    let config = if let Some(ref config_path) = args.config {
+        // If config file is specified, load from file and override with CLI args
+        match AppConfig::from_file(config_path) {
+            Ok(mut cfg) => {
+                info!("Loaded configuration from: {}", config_path);
+                cfg.apply_args(&args);
+                cfg
+            }
+            Err(e) => {
+                warn!("Could not load config file '{}': {}, using CLI arguments with defaults", config_path, e);
+                AppConfig::from_args(&args)
+            }
+        }
+    } else {
+        // Try to load default config.toml, override with CLI args
+        let config_path = std::env::current_dir()
+            .map(|p| p.join("config.toml"))
+            .unwrap_or_else(|_| "config.toml".into());
+        
+        if config_path.exists() {
+            match AppConfig::from_file(config_path.to_str().unwrap_or("config.toml")) {
+                Ok(mut cfg) => {
+                    info!("Loaded default configuration from: {:?}", config_path);
+                    cfg.apply_args(&args);
+                    cfg
+                }
+                Err(e) => {
+                    warn!("Could not load default config.toml: {}, using CLI arguments with defaults", e);
+                    AppConfig::from_args(&args)
+                }
+            }
+        } else {
+            info!("No config.toml found, using CLI arguments with defaults");
+            AppConfig::from_args(&args)
+        }
+    };
     info!("Configuration loaded: {} workers, channel: {}", 
           config.workers.count, config.processing.channel_name);
     info!("Database connection: {}:{}/{}", config.database.host, config.database.port, config.database.database);

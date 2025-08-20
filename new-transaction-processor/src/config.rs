@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use anyhow::Result;
+use crate::Args;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
@@ -38,27 +39,6 @@ impl AppConfig {
         Ok(config)
     }
 
-    pub fn default() -> Self {
-        Self {
-            database: DatabaseConfig {
-                host: "localhost".to_string(),
-                port: 5432,
-                database: "your_database".to_string(),
-                username: "your_user".to_string(),
-                password: "your_password".to_string(),
-                max_connections: 10,
-            },
-            workers: WorkerConfig {
-                count: 4,
-            },
-            processing: ProcessingConfig {
-                channel_name: "transaction_channel".to_string(),
-                retry_attempts: 3,
-                retry_delay_ms: 1000,
-            },
-        }
-    }
-
     pub fn connection_string(&self) -> String {
         format!(
             "postgresql://{}:{}@{}:{}/{}",
@@ -68,5 +48,59 @@ impl AppConfig {
             self.database.port,
             self.database.database
         )
+    }
+
+    pub fn from_args(args: &Args) -> Self {
+        Self {
+            database: DatabaseConfig {
+                host: args.db_host.clone().unwrap_or_else(|| "localhost".to_string()),
+                port: args.db_port.unwrap_or(5432),
+                database: args.db_name.clone().unwrap_or_else(|| "your_database".to_string()),
+                username: args.db_user.clone().unwrap_or_else(|| "your_user".to_string()),
+                password: args.db_password.clone().unwrap_or_else(|| "your_password".to_string()),
+                max_connections: args.db_max_connections.unwrap_or(10),
+            },
+            workers: WorkerConfig {
+                count: args.workers.unwrap_or(4),
+            },
+            processing: ProcessingConfig {
+                channel_name: args.channel.clone().unwrap_or_else(|| "transaction_channel".to_string()),
+                retry_attempts: args.retry_attempts.unwrap_or(3),
+                retry_delay_ms: args.retry_delay.unwrap_or(1000),
+            },
+        }
+    }
+
+    pub fn apply_args(&mut self, args: &Args) {
+        if let Some(ref host) = args.db_host {
+            self.database.host = host.clone();
+        }
+        if let Some(port) = args.db_port {
+            self.database.port = port;
+        }
+        if let Some(ref database) = args.db_name {
+            self.database.database = database.clone();
+        }
+        if let Some(ref username) = args.db_user {
+            self.database.username = username.clone();
+        }
+        if let Some(ref password) = args.db_password {
+            self.database.password = password.clone();
+        }
+        if let Some(max_connections) = args.db_max_connections {
+            self.database.max_connections = max_connections;
+        }
+        if let Some(workers) = args.workers {
+            self.workers.count = workers;
+        }
+        if let Some(ref channel) = args.channel {
+            self.processing.channel_name = channel.clone();
+        }
+        if let Some(retry_attempts) = args.retry_attempts {
+            self.processing.retry_attempts = retry_attempts;
+        }
+        if let Some(retry_delay) = args.retry_delay {
+            self.processing.retry_delay_ms = retry_delay;
+        }
     }
 }

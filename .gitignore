@@ -4,3 +4,4 @@
 k-indexer.db
 transaction_processing_spec.md
 new-transaction-processor/target
+new-webserver/target
