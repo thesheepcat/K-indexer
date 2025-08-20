@@ -10,7 +10,7 @@ use anyhow::Result;
 use clap::Parser;
 use tokio::sync::mpsc;
 use tracing::{info, error, warn};
-use tracing_subscriber;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use config::AppConfig;
 use database::{create_pool, verify_and_setup_database};
@@ -57,7 +57,14 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt::init();
+    // Initialize tracing with default INFO level
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "info".into()),
+        )
+        .with(tracing_subscriber::fmt::layer())
+        .init();
 
     info!("Starting Transaction Processor");
 
