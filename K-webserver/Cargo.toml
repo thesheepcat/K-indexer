@@ -1,5 +1,5 @@
 [package]
-name = "K-transaction-processor"
+name = "K-webserver"
 version = "0.1.0"
 edition = "2021"
 
@@ -8,14 +8,12 @@ tokio = { version = "1.0", features = ["full"] }
 sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-toml = "0.8"
 anyhow = "1.0"
-clap = { version = "4.5", features = ["derive"] }
+async-trait = "0.1"
+axum = "0.7"
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 hex = "0.4"
-futures = "0.3"
-chrono = { version = "0.4", features = ["serde"] }
-# Kaspa signature verification dependencies (from main K-indexer)
-kaspa-wallet-core = { git = "https://github.com/kaspanet/rusty-kaspa.git", features = ["wasm32-sdk"] }
-secp256k1 = "0.29"
+clap = { version = "4.0", features = ["derive"] }

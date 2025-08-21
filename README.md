@@ -5,15 +5,17 @@
 
 K-indexer is a simplified Kaspa transaction indexer designed specifically for indexing and serving K protocol transactions.
 
-## 🚀 What K-indexer Does
+**Note:** All legacy K-indexer code has been moved into the `K-indexer-legacy` folder.
 
-K-indexer provides a complete indexing and API solution for the K protocol:
+## 🚀 New Architecture
 
-- **🔗 Node Connection**: Connects to your running rusty-kaspa node
-- **📡 Real-time Processing**: Receives all transactions from new blocks in the BlockDAG
-- **🔍 Smart Filtering**: Identifies and extracts only K protocol transactions
-- **💾 Data Storage**: Persists K protocol data (posts, replies, users, etc) in a local database
-- **🌐 Web API**: Serves a REST API for K web applications to access indexed data
+The new indexer architecture is composed of the following components:
+
+- **🔗 Rusty-Kaspa Node**: A running rusty-kaspa node
+- **💾 PostgreSQL Database**: Database for storing indexed data
+- **📡 Simply-kaspa-indexer**: By supertypo (https://github.com/supertypo/simply-kaspa-indexer) to receive all transactions from Kaspa network and temporarily store them
+- **🔍 K-transaction-processor**: Filters incoming transactions and indexes all K-related data in proper database tables
+- **🌐 K-webserver**: Serves all K-related data to web applications via API calls
 
 ## 📚 Protocol Documentation
 
@@ -25,22 +27,16 @@ Technical specifications for the K protocol are available in the [official K rep
 
 ### Prerequisites
 
-- Linux Ubuntu/Mint (recommended)
-- Rust toolchain installed
-- rusty-kaspa repository locally available
+- Linux Ubuntu server (recommended)
+- Rust toolchain
+- Docker
 - Running rusty-kaspa node
 
 ### 📋 Step-by-Step Instructions
 
-> **💡 Tip**: Run K-indexer on the same network as your rusty-kaspa node network for optimal performance, reducing latency.
+To run the indexer, proceed in the following way:
 
-#### 1. **Clone K-indexer**
-```bash
-# Clone K-indexer in the same development folder
-git clone https://github.com/thesheepcat/K-indexer.git
-```
-
-#### 2. **Start Your Kaspa Node**
+#### 1. **Activate Rusty-Kaspa Node**
 Follow the [documentation here on how to run rusty-kaspa](https://kaspa.aspectron.org/running-rusty-kaspa.html)
 
 **Required Node Parameters:**
@@ -48,46 +44,82 @@ Follow the [documentation here on how to run rusty-kaspa](https://kaspa.aspectro
 - `--utxoindex`: Enable UTXO indexing
 - `--rpclisten-borsh=0.0.0.0:17120`: Enable BORSH RPC on all interfaces
 
-#### 3. **Build K-indexer**
+#### 2. **Setup PostgreSQL Database**
+Activate a Docker container for the PostgreSQL database:
+
 ```bash
-cd K-indexer
+docker run --name k-indexer-db-01 -e POSTGRES_PASSWORD=password -e POSTGRES_USER=username -e POSTGRES_DB=k-db-01 -p 5432:5432 -v postgres-data:/var/lib/postgresql/data postgres
+```
+
+Stop the container:
+```bash
+docker stop k-indexer-db-01
+```
+
+Start the container again:
+```bash
+docker start k-indexer-db-01
+```
+
+#### 3. **Setup simply-kaspa-indexer**
+Download simply-kaspa-indexer binaries or compile it from source: https://github.com/supertypo/simply-kaspa-indexer
+
+Run it:
+```bash
+./simply-kaspa-indexer-amd64 -s ws://0.0.0.0:17210 -n testnet-10 -d postgres://username:password@0.0.0.0:5432/k-db-01 --prune-db="0 * * * *" --retention=1h --disable=virtual_chain_processing,transaction_acceptance,blocks_table,block_parent_table,blocks_transactions_table,transactions_inputs_table,transactions_outputs_table,addresses_transactions_table,initial_utxo_import,vcp_wait_for_sync --exclude-fields=block_accepted_id_merkle_root,block_merge_set_blues_hashes,block_merge_set_reds_hashes,block_selected_parent_hash,block_bits,block_blue_work,block_blue_score,block_daa_score,block_hash_merkle_root,block_nonce,block_pruning_point,block_timestamp,block_utxo_commitment,block_version,tx_subnetwork_id,tx_hash,tx_mass,tx_in_previous_outpoint,tx_in_signature_script,tx_in_sig_op_count,tx_in_block_time,tx_out_amount,tx_out_script_public_key,tx_out_script_public_key_address,tx_out_block_time
+```
+
+#### 4. **Compile and Run K-transaction-processor**
+Navigate to the K-transaction-processor directory and compile:
+```bash
+cd K-transaction-processor
 cargo build --release
 ```
 
-#### 4. **Run K-indexer**
+Run the compiled binary:
 ```bash
-cd target/release
-./K-indexer --rusty-kaspa-address=localhost:17120 --database-path=/home/K-indexer/K-indexer.db
+./target/release/K-transaction-processor --db-host localhost --db-port 5432 --db-name k-db-01 --db-user username --db-password password --db-max-connections 10 --workers 4 --channel transaction_channel --retry-attempts 10 --retry-delay 1000
 ```
 
-### ✅ Verify Connection
-
-If everything is working correctly, you should see:
-
-```
-[2025-08-05 19:01:11 UTC] [INFO] Web server starting on 0.0.0.0:3000
-[2025-08-05 19:01:11 UTC] [INFO] Connected to Kaspa node - Server: 1.0.1
+#### 5. **Compile and Run K-webserver**
+Navigate to the K-webserver directory and compile:
+```bash
+cd K-webserver
+cargo build --release
 ```
 
-### 🌐 Network Access
-
-If you're running a frontend on a different machine:
-- Ensure **port 3000** is open and accessible
-- The API will be available at `http://your-server-ip:3000`
+Run the compiled binary:
+```bash
+./target/release/K-webserver --db-host localhost --db-port 5432 --db-name k-db-01 --db-user username --db-password password --bind-address 0.0.0.0:3000
+```
 
 ---
 
 ## 🔧 Configuration Options
 
+### K-transaction-processor Options
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `--rusty-kaspa-address` | `localhost:17120` | Address of your rusty-kaspa node |
-<<<<<<< HEAD
-| `--bind-address` | `3000` | REST API listening port |
-| `--database-path` | `k-indexer.db` | Path to database location  |
-=======
-| `--bind-address` | `0.0.0.0:3000` | REST API listening port |
->>>>>>> origin/master
+| `--db-host` | `localhost` | PostgreSQL database host |
+| `--db-port` | `5432` | PostgreSQL database port |
+| `--db-name` | `k-db-01` | PostgreSQL database name |
+| `--db-user` | `username` | PostgreSQL database username |
+| `--db-password` | `password` | PostgreSQL database password |
+| `--db-max-connections` | `10` | Maximum database connections |
+| `--workers` | `4` | Number of worker threads |
+| `--channel` | `transaction_channel` | Transaction channel name |
+| `--retry-attempts` | `10` | Number of retry attempts |
+| `--retry-delay` | `1000` | Retry delay in milliseconds |
+
+### K-webserver Options
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--db-host` | `localhost` | PostgreSQL database host |
+| `--db-port` | `5432` | PostgreSQL database port |
+| `--db-name` | `k-db-01` | PostgreSQL database name |
+| `--db-user` | `username` | PostgreSQL database username |
+| `--db-password` | `password` | PostgreSQL database password |
+| `--bind-address` | `0.0.0.0:3000` | REST API listening address and port |
 
 ---
 

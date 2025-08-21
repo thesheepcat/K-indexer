@@ -1,7 +1,9 @@
-/target
-/Cargo.lock
+/K-indexer-legacy/target
+/K-indexer-legacy/Cargo.lock
+/K-indexer-legacy/k-indexer.db
 .continue
-k-indexer.db
 transaction_processing_spec.md
-new-transaction-processor/target
-new-webserver/target
+K-transaction-processor/target
+K-transaction-processor/Cargo.lock
+K-webserver/target
+K-webserver/Cargo.lock

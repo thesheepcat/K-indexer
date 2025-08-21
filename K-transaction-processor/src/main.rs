@@ -9,7 +9,7 @@ mod worker;
 use anyhow::Result;
 use clap::Parser;
 use tokio::sync::mpsc;
-use tracing::{info, error, warn};
+use tracing::{info, error};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use config::AppConfig;
@@ -51,8 +51,6 @@ struct Args {
     #[arg(short = 'D', long, help = "Retry delay in milliseconds")]
     retry_delay: Option<u64>,
 
-    #[arg(short = 'c', long, help = "Load configuration from a TOML file")]
-    config: Option<String>,
 }
 
 #[tokio::main]
@@ -71,43 +69,8 @@ async fn main() -> Result<()> {
     // Parse CLI arguments
     let args = Args::parse();
     
-    // Load configuration
-    let config = if let Some(ref config_path) = args.config {
-        // If config file is specified, load from file and override with CLI args
-        match AppConfig::from_file(config_path) {
-            Ok(mut cfg) => {
-                info!("Loaded configuration from: {}", config_path);
-                cfg.apply_args(&args);
-                cfg
-            }
-            Err(e) => {
-                warn!("Could not load config file '{}': {}, using CLI arguments with defaults", config_path, e);
-                AppConfig::from_args(&args)
-            }
-        }
-    } else {
-        // Try to load default config.toml, override with CLI args
-        let config_path = std::env::current_dir()
-            .map(|p| p.join("config.toml"))
-            .unwrap_or_else(|_| "config.toml".into());
-        
-        if config_path.exists() {
-            match AppConfig::from_file(config_path.to_str().unwrap_or("config.toml")) {
-                Ok(mut cfg) => {
-                    info!("Loaded default configuration from: {:?}", config_path);
-                    cfg.apply_args(&args);
-                    cfg
-                }
-                Err(e) => {
-                    warn!("Could not load default config.toml: {}, using CLI arguments with defaults", e);
-                    AppConfig::from_args(&args)
-                }
-            }
-        } else {
-            info!("No config.toml found, using CLI arguments with defaults");
-            AppConfig::from_args(&args)
-        }
-    };
+    // Load configuration from CLI arguments only
+    let config = AppConfig::from_args(&args);
     info!("Configuration loaded: {} workers, channel: {}", 
           config.workers.count, config.processing.channel_name);
     info!("Database connection: {}:{}/{}", config.database.host, config.database.port, config.database.database);

@@ -1,14 +1,11 @@
-use serde::{Deserialize, Serialize};
-use std::fs;
-use anyhow::Result;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct AppConfig {
     pub database: DatabaseConfig,
     pub server: ServerConfig,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct DatabaseConfig {
     pub host: String,
     pub port: u16,
@@ -18,18 +15,12 @@ pub struct DatabaseConfig {
     pub max_connections: usize,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct ServerConfig {
     pub bind_address: String,
 }
 
 impl AppConfig {
-    pub fn from_file(path: &str) -> Result<Self> {
-        let content = fs::read_to_string(path)?;
-        let config: AppConfig = toml::from_str(&content)?;
-        Ok(config)
-    }
-
     pub fn from_args(args: &crate::Args) -> Self {
         Self {
             database: DatabaseConfig {

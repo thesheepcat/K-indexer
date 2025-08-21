@@ -37,8 +37,6 @@ struct Args {
     #[arg(short = 'b', long, default_value = "127.0.0.1:8080", help = "Server bind address")]
     bind_address: String,
 
-    #[arg(short = 'c', long, help = "Load configuration from a TOML file (overrides CLI arguments)")]
-    config: Option<String>,
 }
 
 #[tokio::main]
@@ -57,17 +55,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Parse CLI arguments
     let args = Args::parse();
     
-    // Load configuration
-    let config = if let Some(ref config_path) = args.config {
-        // If config file is specified, load from file
-        AppConfig::from_file(config_path).unwrap_or_else(|e| {
-            error!("Failed to load config file '{}': {}. Falling back to CLI arguments.", config_path, e);
-            AppConfig::from_args(&args)
-        })
-    } else {
-        // Use CLI arguments
-        AppConfig::from_args(&args)
-    };
+    // Load configuration from CLI arguments only
+    let config = AppConfig::from_args(&args);
     
     let connection_string = config.connection_string();
     info!("Connecting to database at {}:{}", config.database.host, config.database.port);
