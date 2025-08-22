@@ -12,8 +12,9 @@ anyhow = "1.0"
 async-trait = "0.1"
 axum = "0.7"
 tower = "0.4"
-tower-http = { version = "0.5", features = ["cors", "trace"] }
+tower-http = { version = "0.5", features = ["cors", "trace", "timeout", "limit"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 hex = "0.4"
 clap = { version = "4.0", features = ["derive"] }
+axum-prometheus = "0.9"

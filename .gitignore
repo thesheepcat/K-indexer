@@ -7,3 +7,4 @@ K-transaction-processor/target
 K-transaction-processor/Cargo.lock
 K-webserver/target
 K-webserver/Cargo.lock
+K-webserver/locust/__pycache__

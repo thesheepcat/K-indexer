@@ -1,25 +1,41 @@
 use axum::{
-    extract::{Query, State},
+    extract::{Query, State, ConnectInfo},
     http::StatusCode,
     response::Json,
     routing::get,
     Router,
 };
+use axum_prometheus::PrometheusMetricLayer;
 use serde::Deserialize;
-use std::sync::Arc;
-use tokio::net::TcpListener;
-use tower_http::cors::{Any, CorsLayer};
+use std::{sync::Arc, time::Duration, net::SocketAddr, collections::HashMap};
+use tokio::{net::TcpListener, sync::RwLock, time::Instant};
+use tower_http::{
+    cors::{Any, CorsLayer},
+    timeout::TimeoutLayer,
+    limit::RequestBodyLimitLayer,
+};
 use tracing::{error as log_error, info as log_info};
 
 use crate::api_handlers::ApiHandlers;
 use crate::database_trait::DatabaseInterface;
+use crate::config::ServerConfig;
 use crate::models::{
     ApiError, PaginatedPostsResponse, PaginatedRepliesResponse, PaginatedUsersResponse,
     PostDetailsResponse,
 };
 
+#[derive(Debug, Clone)]
+pub(crate) struct RateLimitEntry {
+    count: u32,
+    window_start: Instant,
+}
+
+type RateLimitMap = Arc<RwLock<HashMap<SocketAddr, RateLimitEntry>>>;
+
 pub struct AppState {
     pub api_handlers: ApiHandlers,
+    pub rate_limit_map: RateLimitMap,
+    pub server_config: ServerConfig,
 }
 
 pub struct WebServer {
@@ -81,23 +97,35 @@ struct GetPostDetailsQuery {
 }
 
 impl WebServer {
-    pub fn new(db: Arc<dyn DatabaseInterface>) -> Self {
+    pub fn new(db: Arc<dyn DatabaseInterface>, server_config: ServerConfig) -> Self {
         let api_handlers = ApiHandlers::new(db.clone());
-        let app_state = Arc::new(AppState { api_handlers });
+        let rate_limit_map = Arc::new(RwLock::new(HashMap::new()));
+        let app_state = Arc::new(AppState { 
+            api_handlers, 
+            rate_limit_map,
+            server_config,
+        });
 
         Self { app_state }
     }
 
     pub fn create_router(&self) -> Router {
+        let timeout_duration = Duration::from_secs(self.app_state.server_config.request_timeout);
+        let (prometheus_layer, metric_handle) = PrometheusMetricLayer::pair();
+        
         Router::new()
             .route("/", get(handle_root))
             .route("/health", get(handle_health))
+            .route("/metrics", get(move || async move { metric_handle.render() }))
             .route("/get-posts", get(handle_get_posts))
             .route("/get-posts-watching", get(handle_get_posts_watching))
             .route("/get-users", get(handle_get_users))
             .route("/get-replies", get(handle_get_replies))
             .route("/get-mentions", get(handle_get_mentions))
             .route("/get-post-details", get(handle_get_post_details))
+            .layer(prometheus_layer)
+            .layer(TimeoutLayer::new(timeout_duration))
+            .layer(RequestBodyLimitLayer::new(1024 * 1024)) // 1MB limit
             .layer(
                 CorsLayer::new()
                     .allow_origin(Any)
@@ -112,11 +140,44 @@ impl WebServer {
         let listener = TcpListener::bind(bind_address).await?;
 
         log_info!("Web server starting on {}", bind_address);
-        axum::serve(listener, router).await?;
+        axum::serve(listener, router.into_make_service_with_connect_info::<SocketAddr>()).await?;
 
         Ok(())
     }
 }
+
+// Rate limiting middleware
+async fn check_rate_limit(
+    state: &AppState,
+    client_addr: SocketAddr,
+) -> Result<(), (StatusCode, Json<ApiError>)> {
+    let now = Instant::now();
+    let mut rate_limits = state.rate_limit_map.write().await;
+    
+    let entry = rate_limits.entry(client_addr).or_insert(RateLimitEntry {
+        count: 0,
+        window_start: now,
+    });
+    
+    // Reset window if 1 minute has passed
+    if now.duration_since(entry.window_start) >= Duration::from_secs(60) {
+        entry.count = 0;
+        entry.window_start = now;
+    }
+    
+    entry.count += 1;
+    
+    if entry.count > state.server_config.rate_limit {
+        let error = ApiError {
+            error: "Rate limit exceeded. Too many requests per minute.".to_string(),
+            code: "RATE_LIMIT_EXCEEDED".to_string(),
+        };
+        return Err((StatusCode::TOO_MANY_REQUESTS, Json(error)));
+    }
+    
+    Ok(())
+}
+
 
 // API Handler Functions
 
@@ -133,9 +194,12 @@ async fn handle_health() -> Json<serde_json::Value> {
 }
 
 async fn handle_get_posts(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(app_state): State<Arc<AppState>>,
     Query(params): Query<GetPostsQuery>,
 ) -> Result<Json<PaginatedPostsResponse>, (StatusCode, Json<ApiError>)> {
+    // Check rate limit first
+    check_rate_limit(&app_state, addr).await?;
     // Check if user parameter is provided
     let user_public_key = match params.user {
         Some(user) => user,
@@ -232,9 +296,12 @@ async fn handle_get_posts(
 }
 
 async fn handle_get_post_details(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(app_state): State<Arc<AppState>>,
     Query(params): Query<GetPostDetailsQuery>,
 ) -> Result<Json<PostDetailsResponse>, (StatusCode, Json<ApiError>)> {
+    // Check rate limit first
+    check_rate_limit(&app_state, addr).await?;
     // Check if id parameter is provided
     let post_id = match params.id {
         Some(id) => id,
@@ -303,9 +370,12 @@ async fn handle_get_post_details(
 }
 
 async fn handle_get_mentions(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(app_state): State<Arc<AppState>>,
     Query(params): Query<GetMentionsQuery>,
 ) -> Result<Json<PaginatedPostsResponse>, (StatusCode, Json<ApiError>)> {
+    // Check rate limit first
+    check_rate_limit(&app_state, addr).await?;
     // Check if user parameter is provided
     let user_public_key = match params.user {
         Some(user) => user,
@@ -402,9 +472,12 @@ async fn handle_get_mentions(
 }
 
 async fn handle_get_users(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(app_state): State<Arc<AppState>>,
     Query(params): Query<GetUsersQuery>,
 ) -> Result<Json<PaginatedUsersResponse>, (StatusCode, Json<ApiError>)> {
+    // Check rate limit first
+    check_rate_limit(&app_state, addr).await?;
     // Validate required limit parameter
     let limit = match params.limit {
         Some(limit) => {
@@ -472,9 +545,12 @@ async fn handle_get_users(
 }
 
 async fn handle_get_posts_watching(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(app_state): State<Arc<AppState>>,
     Query(params): Query<GetPostsWatchingQuery>,
 ) -> Result<Json<PaginatedPostsResponse>, (StatusCode, Json<ApiError>)> {
+    // Check rate limit first
+    check_rate_limit(&app_state, addr).await?;
     // Check if requesterPubkey parameter is provided
     let requester_pubkey = match params.requester_pubkey {
         Some(pubkey) => pubkey,
@@ -556,9 +632,12 @@ async fn handle_get_posts_watching(
 }
 
 async fn handle_get_replies(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(app_state): State<Arc<AppState>>,
     Query(params): Query<GetRepliesQuery>,
 ) -> Result<Json<PaginatedRepliesResponse>, (StatusCode, Json<ApiError>)> {
+    // Check rate limit first
+    check_rate_limit(&app_state, addr).await?;
     // Check if requesterPubkey parameter is provided
     let requester_pubkey = match params.requester_pubkey {
         Some(pubkey) => pubkey,

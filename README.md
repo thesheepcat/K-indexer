@@ -48,19 +48,8 @@ Follow the [documentation here on how to run rusty-kaspa](https://kaspa.aspectro
 Activate a Docker container for the PostgreSQL database:
 
 ```bash
-docker run --name k-indexer-db-01 -e POSTGRES_PASSWORD=password -e POSTGRES_USER=username -e POSTGRES_DB=k-db-01 -p 5432:5432 -v postgres-data:/var/lib/postgresql/data postgres
+docker run -d --restart unless-stopped --name k-indexer-db-01 -e POSTGRES_PASSWORD=password -e POSTGRES_USER=username -e POSTGRES_DB=k-db-01 -p 5432:5432 -v postgres-data:/var/lib/postgresql/data postgres
 ```
-
-Stop the container:
-```bash
-docker stop k-indexer-db-01
-```
-
-Start the container again:
-```bash
-docker start k-indexer-db-01
-```
-
 #### 3. **Setup simply-kaspa-indexer**
 Download simply-kaspa-indexer binaries or compile it from source: https://github.com/supertypo/simply-kaspa-indexer
 
@@ -90,7 +79,13 @@ cargo build --release
 
 Run the compiled binary:
 ```bash
-./target/release/K-webserver --db-host localhost --db-port 5432 --db-name k-db-01 --db-user username --db-password password --bind-address 0.0.0.0:3000
+# Basic usage (uses auto-detected CPU cores and intelligent defaults)
+./target/release/K-webserver --db-host localhost --db-name k-db-01 --db-user username --db-password password
+
+# High-performance configuration
+./target/release/K-webserver --db-host localhost --db-name k-db-01 --db-user username --db-password password \
+  --bind-address 0.0.0.0:8080 --worker-threads 16 --db-max-connections 50 \
+  --request-timeout 45 --rate-limit 500
 ```
 
 ---
@@ -119,7 +114,11 @@ Run the compiled binary:
 | `--db-name` | `k-db-01` | PostgreSQL database name |
 | `--db-user` | `username` | PostgreSQL database username |
 | `--db-password` | `password` | PostgreSQL database password |
-| `--bind-address` | `0.0.0.0:3000` | REST API listening address and port |
+| `--bind-address` | `127.0.0.1:8080` | REST API listening address and port |
+| `--worker-threads` | auto-detect CPU cores | Number of Tokio worker threads for request processing |
+| `--db-max-connections` | `worker_threads * 3` (min 10) | Maximum database connection pool size |
+| `--request-timeout` | `30` | Request timeout in seconds |
+| `--rate-limit` | `100` | Rate limit: requests per minute per IP address |
 
 ---
 
