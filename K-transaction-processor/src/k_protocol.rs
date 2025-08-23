@@ -523,9 +523,14 @@ impl KProtocolProcessor {
         let sender_pubkey_bytes = hex::decode(&k_broadcast.sender_pubkey)?;
         let sender_signature_bytes = hex::decode(&k_broadcast.sender_signature)?;
         
-        // Insert into k_broadcasts table
+        // Use a single query to delete existing records and insert the new one atomically
         sqlx::query(
             r#"
+            WITH deleted AS (
+                DELETE FROM k_broadcasts 
+                WHERE sender_pubkey = $3
+                RETURNING transaction_id
+            )
             INSERT INTO k_broadcasts (
                 transaction_id, block_time, sender_pubkey, sender_signature, 
                 base64_encoded_nickname, base64_encoded_profile_image, base64_encoded_message
@@ -542,7 +547,7 @@ impl KProtocolProcessor {
         .execute(&self.db_pool)
         .await?;
 
-        info!("Saved K broadcast: {}", transaction_id);
+        info!("Saved K broadcast: {} (replaced any existing broadcasts for sender)", transaction_id);
         Ok(())
     }
 
