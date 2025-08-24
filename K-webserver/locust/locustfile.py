@@ -23,20 +23,26 @@ class KWebappAPIUser(HttpUser):
         
         # Sample post IDs for testing
         self.sample_post_ids = [
-            "63e35ea479377d8cb36165f12dbaeb8b9c35a6b20e4c411254cfb910b570a48f",
-            "ac0c73cf661259a3af663914e5d52f608a8430b47d9173164838d5198ae8d5d8",
-            "baf60e2b8ef9027204ef8d1157b0908881a9deb5e8ad54d3de4ba9988f5f2fc3",
-            "a44ca44bd09d54a6e6cc5919aca6e68cd7645498826e9c7bda92f824591d1495",
-            "b3d26a66b57504ada5847bb635c639f3ecd734bc4deccaed0e64d75b8bae1c04",
-            "794148d047ca5ef8729aea6aea0adda8d3eddbd593e01420d9930b4f9918d709",
-            "f05e5f02ff1e27fd44a160801c5e4c81b8e198e8fcefaedac2e396451646e889",
-            "9dc6942b6a3c880b49379b8bdbea1d8d68ec7bf8b6b3f941e9b86ffa2fd82d5e",
-            "361013d8b5debb512b599615ad3739e8058d1b838ce71cec9bf1c0afadf32929",
-            "fb44c8e5a5e14ee43c336e0d4ffe51bc64e883185fb83e5c1fe74dd305e6754a",
-            "d79efc9b9aef2c93a030dbb53177fa5ab674cd29c1483335ff768524aad9e5cb",
-            "78be2e16605ee6cd4f6903088d9e32936faa2655952a671475a940a2b7263fd3",
-            "e710db11e2eff2a2ceeac00a085988278aaa646843c3582b6a73c18485477bb8",
-            "602631308c97ba35f76d286ba69c34b580665cb83b5c5a35dc3f9f4c0a41b31c"
+            "ba13aef5f48d0c50b8413b3e97a9b96b7934b4ef172b52bbcb5d3629054fdae1",
+            "789df90a23784221db8430ce621c1b92b8f819661a5869b9c4337897699b9aa8",
+            "8ff32e368f53eb795f0612f9ff7fcf56aab438893fc7ace80ea2ff4a26787e69",
+            "3e5f09dfc177a0295ffd871bfc7c17a07a40a08b08b5d741da3e582a349a8a68",
+            "473e732c996bb682a42a31a03ee310e9c7eb0221cfcc973cb0666bd83c9e19f8",
+            "6a9176d00eb87faa617702a6b779d500618cbc614e337935cf1094bd1a5dcf82",
+            "2d6a49d15975909c12526b0b0dfda44b491439e61caef567f90f714ab4f98e39",
+            "2ff8738d44b000b79e4bdacc029d77a399012e705ddeb0bb7385c790e01bb702",
+            "1306a7f26d7ad994654a2f50e66418e02059785d608e96c02e0e44d217deae20",
+            "88ceeae0ded17c1687309597d0629227c71d2fa78843541e53efa41dad7fecad",
+            "c93bead84c1317523d3fa78907cf6d0d1615a7769031d26e883389223ebc06e2",
+            "ec2e9464aee5209d8de72f36a2cf3587e9c34c4241b64480532e73ae0a12e873",
+            "385aa34cdb40969d83842bdb55fc5ebafff6b1b6152852e94bea15440b16571d",
+            "ddede12334f78a1e808a8e6bdb16a95ecee12f539e2476ac483561b07b3f5cd9",
+            "6e9b79aea09d085a88736174beed12c42d16cf129d5d2433926391f86234c472",
+            "6d59b1e1318010d690ca9b0914b969f3ad9151ca7f9959216a48ffc38a91460d",
+            "55774ef271e906b36cbd84d438dd60bd5dc241c44efb06d40dd84b0337b83246",
+            "e5bda626da2a90b9326f8e23b6af9dc4af20237f10ee4852302feee13b30785e",
+            "f44cc1fb19eac3c7661bf8c7c25ad118675acc26cde211d7eae8d0a17724c813",
+            "448dc02b7df228af266a95ca2b431603bd90baea76af4fb59dd977ed3d429c91"
         ]
         
         # Default requester pubkey
@@ -353,7 +359,7 @@ class KWebappRealisticUser(HttpUser):
             post_id = random.choice(self.session_posts)
         else:
             # Fallback to hardcoded post ID
-            post_id = "63e35ea479377d8cb36165f12dbaeb8b9c35a6b20e4c411254cfb910b570a48f"
+            post_id = "6a9176d00eb87faa617702a6b779d500618cbc614e337935cf1094bd1a5dcf82"
             
         params = {
             'id': post_id,

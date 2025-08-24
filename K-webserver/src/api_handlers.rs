@@ -1,7 +1,7 @@
 use crate::database_trait::{DatabaseInterface, QueryOptions};
 use crate::models::{
     ApiError, KPostRecord, KReplyRecord, PaginatedPostsResponse,
-    PaginatedRepliesResponse, PaginatedUsersResponse, PaginationMetadata, PostDetailsResponse,
+    PaginatedRepliesResponse, PaginatedUsersResponse, PostDetailsResponse,
     ServerPost, ServerReply, ServerUserPost,
 };
 use serde_json;
@@ -24,8 +24,8 @@ impl ApiHandlers {
         user_public_key: &str,
         requester_pubkey: &str,
         limit: u32,
-        before: Option<u64>,
-        after: Option<u64>,
+        before: Option<String>,
+        after: Option<String>,
     ) -> Result<String, String> {
         // Validate user public key format (66 hex characters for compressed public key)
         if user_public_key.len() != 66 {
@@ -122,8 +122,8 @@ impl ApiHandlers {
         &self,
         requester_pubkey: &str,
         limit: u32,
-        before: Option<u64>,
-        after: Option<u64>,
+        before: Option<String>,
+        after: Option<String>,
     ) -> Result<String, String> {
         // Validate requester public key format (66 hex characters for compressed public key)
         if requester_pubkey.len() != 66 {
@@ -192,8 +192,8 @@ impl ApiHandlers {
     pub async fn get_users_paginated(
         &self,
         limit: u32,
-        before: Option<u64>,
-        after: Option<u64>,
+        before: Option<String>,
+        after: Option<String>,
     ) -> Result<String, String> {
         let options = QueryOptions {
             limit: Some(limit as u64),
@@ -252,8 +252,8 @@ impl ApiHandlers {
         post_id: &str,
         requester_pubkey: &str,
         limit: u32,
-        before: Option<u64>,
-        after: Option<u64>,
+        before: Option<String>,
+        after: Option<String>,
     ) -> Result<String, String> {
         // Validate post ID format (64 hex characters for transaction hash)
         if post_id.len() != 64 {
@@ -343,8 +343,8 @@ impl ApiHandlers {
         user_public_key: &str,
         requester_pubkey: &str,
         limit: u32,
-        before: Option<u64>,
-        after: Option<u64>,
+        before: Option<String>,
+        after: Option<String>,
     ) -> Result<String, String> {
         // Validate user public key format (66 hex characters for compressed public key)
         if user_public_key.len() != 66 {
@@ -445,8 +445,8 @@ impl ApiHandlers {
         user_public_key: &str,
         requester_pubkey: &str,
         limit: u32,
-        before: Option<u64>,
-        after: Option<u64>,
+        before: Option<String>,
+        after: Option<String>,
     ) -> Result<String, String> {
         // Validate user public key format (66 hex characters for compressed public key)
         if user_public_key.len() != 66 {
@@ -504,12 +504,12 @@ impl ApiHandlers {
         };
 
         // Get posts and replies mentioning user (combined query with proper ordering)
-        let mentions = match self
+        let mentions_result = match self
             .db
             .get_posts_mentioning_user(user_public_key, options)
             .await
         {
-            Ok(posts) => posts,
+            Ok(result) => result,
             Err(err) => {
                 log_error!("Error getting mentions for user: {}", err);
                 return Err(self.create_error_response(
@@ -520,38 +520,11 @@ impl ApiHandlers {
         };
 
         // Convert posts to ServerPost with voting information
-        let mut all_mentions = self
-            .enrich_posts_with_metadata(mentions, requester_pubkey)
+        let all_mentions = self
+            .enrich_posts_with_metadata(mentions_result.items, requester_pubkey)
             .await;
 
-        // Apply pagination logic
-        let has_more = all_mentions.len() > limit as usize;
-
-        // Take only the requested number of mentions
-        if has_more {
-            all_mentions.truncate(limit as usize);
-        }
-
-        // Calculate pagination cursors
-        let next_cursor = if has_more && !all_mentions.is_empty() {
-            // For next page (older posts), use the timestamp of the last post
-            Some(all_mentions.last().unwrap().timestamp.to_string())
-        } else {
-            None
-        };
-
-        let prev_cursor = if !all_mentions.is_empty() {
-            // For checking newer posts, use the timestamp of the first post
-            Some(all_mentions.first().unwrap().timestamp.to_string())
-        } else {
-            None
-        };
-
-        let pagination = PaginationMetadata {
-            has_more,
-            next_cursor,
-            prev_cursor,
-        };
+        let pagination = mentions_result.pagination;
 
         let response = PaginatedPostsResponse {
             posts: all_mentions,

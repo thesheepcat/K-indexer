@@ -31,8 +31,8 @@ impl std::error::Error for DatabaseError {}
 #[derive(Debug, Clone)]
 pub struct QueryOptions {
     pub limit: Option<u64>,
-    pub before: Option<u64>,
-    pub after: Option<u64>,
+    pub before: Option<String>,  // Compound cursors like "timestamp_id"
+    pub after: Option<String>,   // Compound cursors like "timestamp_id"
     pub sort_descending: bool,
 }
 
@@ -74,7 +74,7 @@ pub trait DatabaseInterface: Send + Sync {
         &self,
         user_public_key: &str,
         options: QueryOptions,
-    ) -> DatabaseResult<Vec<KPostRecord>>;
+    ) -> DatabaseResult<PaginatedResult<KPostRecord>>;
 
     // Reply operations
     async fn get_replies_by_post_id(

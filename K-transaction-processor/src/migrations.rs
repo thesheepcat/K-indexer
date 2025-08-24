@@ -4,7 +4,8 @@ CREATE TRIGGER transaction_notify_trigger AFTER INSERT ON transactions FOR EACH 
 COMMIT;"#;
 
 pub const MIGRATION_002_CREATE_K_PROTOCOL_TABLES: &str = r#"CREATE TABLE IF NOT EXISTS k_posts (
-    transaction_id BYTEA PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY,
+    transaction_id BYTEA UNIQUE NOT NULL,
     block_time BIGINT NOT NULL,
     sender_pubkey BYTEA NOT NULL,
     sender_signature BYTEA NOT NULL,
@@ -13,7 +14,8 @@ pub const MIGRATION_002_CREATE_K_PROTOCOL_TABLES: &str = r#"CREATE TABLE IF NOT 
 );
 
 CREATE TABLE IF NOT EXISTS k_replies (
-    transaction_id BYTEA PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY,
+    transaction_id BYTEA UNIQUE NOT NULL,
     block_time BIGINT NOT NULL,
     sender_pubkey BYTEA NOT NULL,
     sender_signature BYTEA NOT NULL,
@@ -23,7 +25,8 @@ CREATE TABLE IF NOT EXISTS k_replies (
 );
 
 CREATE TABLE IF NOT EXISTS k_broadcasts (
-    transaction_id BYTEA PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY,
+    transaction_id BYTEA UNIQUE NOT NULL,
     block_time BIGINT NOT NULL,
     sender_pubkey BYTEA NOT NULL,
     sender_signature BYTEA NOT NULL,
@@ -33,7 +36,8 @@ CREATE TABLE IF NOT EXISTS k_broadcasts (
 );
 
 CREATE TABLE IF NOT EXISTS k_votes (
-    transaction_id BYTEA PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY,
+    transaction_id BYTEA UNIQUE NOT NULL,
     block_time BIGINT NOT NULL,
     sender_pubkey BYTEA NOT NULL,
     sender_signature BYTEA NOT NULL,
@@ -42,13 +46,17 @@ CREATE TABLE IF NOT EXISTS k_votes (
     author_pubkey BYTEA DEFAULT decode('', 'hex')
 );
 
+CREATE INDEX IF NOT EXISTS idx_k_posts_transaction_id ON k_posts(transaction_id);
 CREATE INDEX IF NOT EXISTS idx_k_posts_sender_pubkey ON k_posts(sender_pubkey);
 CREATE INDEX IF NOT EXISTS idx_k_posts_block_time ON k_posts(block_time);
+CREATE INDEX IF NOT EXISTS idx_k_replies_transaction_id ON k_replies(transaction_id);
 CREATE INDEX IF NOT EXISTS idx_k_replies_sender_pubkey ON k_replies(sender_pubkey);
 CREATE INDEX IF NOT EXISTS idx_k_replies_post_id ON k_replies(post_id);
 CREATE INDEX IF NOT EXISTS idx_k_replies_block_time ON k_replies(block_time);
+CREATE INDEX IF NOT EXISTS idx_k_broadcasts_transaction_id ON k_broadcasts(transaction_id);
 CREATE INDEX IF NOT EXISTS idx_k_broadcasts_sender_pubkey ON k_broadcasts(sender_pubkey);
 CREATE INDEX IF NOT EXISTS idx_k_broadcasts_block_time ON k_broadcasts(block_time);
+CREATE INDEX IF NOT EXISTS idx_k_votes_transaction_id ON k_votes(transaction_id);
 CREATE INDEX IF NOT EXISTS idx_k_votes_sender_pubkey ON k_votes(sender_pubkey);
 CREATE INDEX IF NOT EXISTS idx_k_votes_post_id ON k_votes(post_id);
 CREATE INDEX IF NOT EXISTS idx_k_votes_vote ON k_votes(vote);

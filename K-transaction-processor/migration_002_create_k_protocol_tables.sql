@@ -3,7 +3,8 @@
 
 -- Create k_posts table for K protocol posts
 CREATE TABLE IF NOT EXISTS k_posts (
-    transaction_id BYTEA PRIMARY KEY,       -- Binary transaction ID (32 bytes)
+    id BIGSERIAL PRIMARY KEY,               -- Auto-generated unique identifier
+    transaction_id BYTEA UNIQUE NOT NULL,   -- Binary transaction ID (32 bytes)
     block_time BIGINT NOT NULL,             -- Unix timestamp
     sender_pubkey BYTEA NOT NULL,           -- Binary public key (32 or 33 bytes)
     sender_signature BYTEA NOT NULL,        -- Binary signature (64 bytes)
@@ -13,7 +14,8 @@ CREATE TABLE IF NOT EXISTS k_posts (
 
 -- Create k_replies table for K protocol replies
 CREATE TABLE IF NOT EXISTS k_replies (
-    transaction_id BYTEA PRIMARY KEY,       -- Binary transaction ID (32 bytes)
+    id BIGSERIAL PRIMARY KEY,               -- Auto-generated unique identifier
+    transaction_id BYTEA UNIQUE NOT NULL,   -- Binary transaction ID (32 bytes)
     block_time BIGINT NOT NULL,             -- Unix timestamp
     sender_pubkey BYTEA NOT NULL,           -- Binary public key (32 or 33 bytes)
     sender_signature BYTEA NOT NULL,        -- Binary signature (64 bytes)
@@ -24,7 +26,8 @@ CREATE TABLE IF NOT EXISTS k_replies (
 
 -- Create k_broadcasts table for K protocol broadcasts (user profile updates)
 CREATE TABLE IF NOT EXISTS k_broadcasts (
-    transaction_id BYTEA PRIMARY KEY,       -- Binary transaction ID (32 bytes)
+    id BIGSERIAL PRIMARY KEY,               -- Auto-generated unique identifier
+    transaction_id BYTEA UNIQUE NOT NULL,   -- Binary transaction ID (32 bytes)
     block_time BIGINT NOT NULL,             -- Unix timestamp
     sender_pubkey BYTEA NOT NULL,           -- Binary public key (32 or 33 bytes)
     sender_signature BYTEA NOT NULL,        -- Binary signature (64 bytes)
@@ -35,7 +38,8 @@ CREATE TABLE IF NOT EXISTS k_broadcasts (
 
 -- Create k_votes table for K protocol votes (upvotes/downvotes)
 CREATE TABLE IF NOT EXISTS k_votes (
-    transaction_id BYTEA PRIMARY KEY,       -- Binary transaction ID (32 bytes)
+    id BIGSERIAL PRIMARY KEY,               -- Auto-generated unique identifier
+    transaction_id BYTEA UNIQUE NOT NULL,   -- Binary transaction ID (32 bytes)
     block_time BIGINT NOT NULL,             -- Unix timestamp
     sender_pubkey BYTEA NOT NULL,           -- Binary public key (32 or 33 bytes)
     sender_signature BYTEA NOT NULL,        -- Binary signature (64 bytes)
@@ -47,19 +51,23 @@ CREATE TABLE IF NOT EXISTS k_votes (
 -- Create indexes for better query performance
 
 -- Indexes on k_posts
+CREATE INDEX IF NOT EXISTS idx_k_posts_transaction_id ON k_posts(transaction_id);
 CREATE INDEX IF NOT EXISTS idx_k_posts_sender_pubkey ON k_posts(sender_pubkey);
 CREATE INDEX IF NOT EXISTS idx_k_posts_block_time ON k_posts(block_time);
 
 -- Indexes on k_replies  
+CREATE INDEX IF NOT EXISTS idx_k_replies_transaction_id ON k_replies(transaction_id);
 CREATE INDEX IF NOT EXISTS idx_k_replies_sender_pubkey ON k_replies(sender_pubkey);
 CREATE INDEX IF NOT EXISTS idx_k_replies_post_id ON k_replies(post_id);
 CREATE INDEX IF NOT EXISTS idx_k_replies_block_time ON k_replies(block_time);
 
 -- Indexes on k_broadcasts
+CREATE INDEX IF NOT EXISTS idx_k_broadcasts_transaction_id ON k_broadcasts(transaction_id);
 CREATE INDEX IF NOT EXISTS idx_k_broadcasts_sender_pubkey ON k_broadcasts(sender_pubkey);
 CREATE INDEX IF NOT EXISTS idx_k_broadcasts_block_time ON k_broadcasts(block_time);
 
 -- Indexes on k_votes
+CREATE INDEX IF NOT EXISTS idx_k_votes_transaction_id ON k_votes(transaction_id);
 CREATE INDEX IF NOT EXISTS idx_k_votes_sender_pubkey ON k_votes(sender_pubkey);
 CREATE INDEX IF NOT EXISTS idx_k_votes_post_id ON k_votes(post_id);
 CREATE INDEX IF NOT EXISTS idx_k_votes_vote ON k_votes(vote);

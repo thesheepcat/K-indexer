@@ -55,6 +55,36 @@ impl PostgresDbManager {
         }
     }
 
+    fn create_compound_pagination_metadata<T>(
+        &self,
+        items: &[T],
+        _limit: u32,
+        has_more: bool,
+    ) -> PaginationMetadata
+    where
+        T: HasCompoundCursor,
+    {
+        let next_cursor = if has_more && !items.is_empty() {
+            let last_item = items.last().unwrap();
+            Some(Self::create_compound_cursor(last_item.get_timestamp(), last_item.get_id()))
+        } else {
+            None
+        };
+
+        let prev_cursor = if !items.is_empty() {
+            let first_item = items.first().unwrap();
+            Some(Self::create_compound_cursor(first_item.get_timestamp(), first_item.get_id()))
+        } else {
+            None
+        };
+
+        PaginationMetadata {
+            has_more,
+            next_cursor,
+            prev_cursor,
+        }
+    }
+
     fn decode_hex_to_bytes(hex_str: &str) -> DatabaseResult<Vec<u8>> {
         hex::decode(hex_str).map_err(|e| DatabaseError::InvalidInput(format!("Invalid hex string: {}", e)))
     }
@@ -72,15 +102,51 @@ impl PostgresDbManager {
             None => Vec::new(),
         }
     }
+
+    fn parse_compound_cursor(cursor: &str) -> DatabaseResult<(u64, i64)> {
+        if cursor.contains('_') {
+            let parts: Vec<&str> = cursor.split('_').collect();
+            if parts.len() == 2 {
+                let timestamp = parts[0].parse::<u64>()
+                    .map_err(|_| DatabaseError::InvalidInput("Invalid timestamp in cursor".to_string()))?;
+                let id = parts[1].parse::<i64>()
+                    .map_err(|_| DatabaseError::InvalidInput("Invalid ID in cursor".to_string()))?;
+                return Ok((timestamp, id));
+            }
+        }
+        // Fallback: treat as simple timestamp cursor for backward compatibility
+        let timestamp = cursor.parse::<u64>()
+            .map_err(|_| DatabaseError::InvalidInput("Invalid cursor format".to_string()))?;
+        Ok((timestamp, i64::MAX)) // Use MAX to include all records with same timestamp
+    }
+
+    fn create_compound_cursor(timestamp: u64, id: i64) -> String {
+        format!("{}_{}", timestamp, id)
+    }
 }
 
 trait HasTimestamp {
     fn get_timestamp(&self) -> u64;
 }
 
+trait HasCompoundCursor {
+    fn get_timestamp(&self) -> u64;
+    fn get_id(&self) -> i64;
+}
+
 impl HasTimestamp for KPostRecord {
     fn get_timestamp(&self) -> u64 {
         self.block_time
+    }
+}
+
+impl HasCompoundCursor for KPostRecord {
+    fn get_timestamp(&self) -> u64 {
+        self.block_time
+    }
+    
+    fn get_id(&self) -> i64 {
+        self.id
     }
 }
 
@@ -90,9 +156,29 @@ impl HasTimestamp for KReplyRecord {
     }
 }
 
+impl HasCompoundCursor for KReplyRecord {
+    fn get_timestamp(&self) -> u64 {
+        self.block_time
+    }
+    
+    fn get_id(&self) -> i64 {
+        self.id
+    }
+}
+
 impl HasTimestamp for KBroadcastRecord {
     fn get_timestamp(&self) -> u64 {
         self.block_time
+    }
+}
+
+impl HasCompoundCursor for KBroadcastRecord {
+    fn get_timestamp(&self) -> u64 {
+        self.block_time
+    }
+    
+    fn get_id(&self) -> i64 {
+        self.id
     }
 }
 
@@ -102,7 +188,18 @@ impl HasTimestamp for KVoteRecord {
     }
 }
 
+impl HasCompoundCursor for KVoteRecord {
+    fn get_timestamp(&self) -> u64 {
+        self.block_time
+    }
+    
+    fn get_id(&self) -> i64 {
+        self.id
+    }
+}
+
 #[async_trait]
+#[allow(unused_variables)]
 impl DatabaseInterface for PostgresDbManager {
     // Post operations
     async fn get_posts_by_user(
@@ -116,7 +213,7 @@ impl DatabaseInterface for PostgresDbManager {
 
         let mut query = String::from(
             r#"
-            SELECT transaction_id, block_time, sender_pubkey, sender_signature, 
+            SELECT id, transaction_id, block_time, sender_pubkey, sender_signature, 
                    base64_encoded_message, mentioned_pubkeys
             FROM k_posts 
             WHERE sender_pubkey = $1
@@ -125,20 +222,30 @@ impl DatabaseInterface for PostgresDbManager {
 
         let mut bind_count = 1;
         
-        if let Some(_) = options.before {
-            bind_count += 1;
-            query.push_str(&format!(" AND block_time < ${}", bind_count));
+        if let Some(before_cursor) = &options.before {
+            if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
+                bind_count += 2;
+                query.push_str(&format!(
+                    " AND (block_time < ${} OR (block_time = ${} AND id < ${}))",
+                    bind_count - 1, bind_count - 1, bind_count
+                ));
+            }
         }
 
-        if let Some(_) = options.after {
-            bind_count += 1;
-            query.push_str(&format!(" AND block_time > ${}", bind_count));
+        if let Some(after_cursor) = &options.after {
+            if let Ok((after_timestamp, after_id)) = Self::parse_compound_cursor(after_cursor) {
+                bind_count += 2;
+                query.push_str(&format!(
+                    " AND (block_time > ${} OR (block_time = ${} AND id > ${}))",
+                    bind_count - 1, bind_count - 1, bind_count
+                ));
+            }
         }
 
         if options.sort_descending {
-            query.push_str(" ORDER BY block_time DESC");
+            query.push_str(" ORDER BY block_time DESC, id DESC");
         } else {
-            query.push_str(" ORDER BY block_time ASC");
+            query.push_str(" ORDER BY block_time ASC, id ASC");
         }
 
         bind_count += 1;
@@ -146,12 +253,20 @@ impl DatabaseInterface for PostgresDbManager {
 
         let mut query_builder = sqlx::query(&query).bind(&sender_pubkey_bytes);
 
-        if let Some(before_timestamp) = options.before {
-            query_builder = query_builder.bind(before_timestamp as i64);
+        if let Some(before_cursor) = &options.before {
+            if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
+                query_builder = query_builder
+                    .bind(before_timestamp as i64)
+                    .bind(before_id);
+            }
         }
 
-        if let Some(after_timestamp) = options.after {
-            query_builder = query_builder.bind(after_timestamp as i64);
+        if let Some(after_cursor) = &options.after {
+            if let Ok((after_timestamp, after_id)) = Self::parse_compound_cursor(after_cursor) {
+                query_builder = query_builder
+                    .bind(after_timestamp as i64)
+                    .bind(after_id);
+            }
         }
 
         query_builder = query_builder.bind(offset_limit);
@@ -169,6 +284,7 @@ impl DatabaseInterface for PostgresDbManager {
             let mentioned_pubkeys_json: serde_json::Value = row.get("mentioned_pubkeys");
 
             posts.push(KPostRecord {
+                id: row.get::<i64, _>("id"),
                 transaction_id: Self::encode_bytes_to_hex(&transaction_id),
                 block_time: row.get::<i64, _>("block_time") as u64,
                 sender_pubkey: Self::encode_bytes_to_hex(&sender_pubkey),
@@ -183,7 +299,7 @@ impl DatabaseInterface for PostgresDbManager {
             posts.pop(); // Remove the extra item
         }
 
-        let pagination = self.create_pagination_metadata(&posts, limit as u32, has_more);
+        let pagination = self.create_compound_pagination_metadata(&posts, limit as u32, has_more);
 
         Ok(PaginatedResult {
             items: posts,
@@ -200,7 +316,7 @@ impl DatabaseInterface for PostgresDbManager {
 
         let mut query = String::from(
             r#"
-            SELECT transaction_id, block_time, sender_pubkey, sender_signature, 
+            SELECT id, transaction_id, block_time, sender_pubkey, sender_signature, 
                    base64_encoded_message, mentioned_pubkeys
             FROM k_posts 
             WHERE 1=1
@@ -209,20 +325,30 @@ impl DatabaseInterface for PostgresDbManager {
 
         let mut bind_count = 0;
         
-        if let Some(_) = options.before {
-            bind_count += 1;
-            query.push_str(&format!(" AND block_time < ${}", bind_count));
+        if let Some(before_cursor) = &options.before {
+            if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
+                bind_count += 2;
+                query.push_str(&format!(
+                    " AND (block_time < ${} OR (block_time = ${} AND id < ${}))",
+                    bind_count - 1, bind_count - 1, bind_count
+                ));
+            }
         }
 
-        if let Some(_) = options.after {
-            bind_count += 1;
-            query.push_str(&format!(" AND block_time > ${}", bind_count));
+        if let Some(after_cursor) = &options.after {
+            if let Ok((after_timestamp, after_id)) = Self::parse_compound_cursor(after_cursor) {
+                bind_count += 2;
+                query.push_str(&format!(
+                    " AND (block_time > ${} OR (block_time = ${} AND id > ${}))",
+                    bind_count - 1, bind_count - 1, bind_count
+                ));
+            }
         }
 
         if options.sort_descending {
-            query.push_str(" ORDER BY block_time DESC");
+            query.push_str(" ORDER BY block_time DESC, id DESC");
         } else {
-            query.push_str(" ORDER BY block_time ASC");
+            query.push_str(" ORDER BY block_time ASC, id ASC");
         }
 
         bind_count += 1;
@@ -230,12 +356,20 @@ impl DatabaseInterface for PostgresDbManager {
 
         let mut query_builder = sqlx::query(&query);
 
-        if let Some(before_timestamp) = options.before {
-            query_builder = query_builder.bind(before_timestamp as i64);
+        if let Some(before_cursor) = &options.before {
+            if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
+                query_builder = query_builder
+                    .bind(before_timestamp as i64)
+                    .bind(before_id);
+            }
         }
 
-        if let Some(after_timestamp) = options.after {
-            query_builder = query_builder.bind(after_timestamp as i64);
+        if let Some(after_cursor) = &options.after {
+            if let Ok((after_timestamp, after_id)) = Self::parse_compound_cursor(after_cursor) {
+                query_builder = query_builder
+                    .bind(after_timestamp as i64)
+                    .bind(after_id);
+            }
         }
 
         query_builder = query_builder.bind(offset_limit);
@@ -253,6 +387,7 @@ impl DatabaseInterface for PostgresDbManager {
             let mentioned_pubkeys_json: serde_json::Value = row.get("mentioned_pubkeys");
 
             posts.push(KPostRecord {
+                id: row.get::<i64, _>("id"),
                 transaction_id: Self::encode_bytes_to_hex(&transaction_id),
                 block_time: row.get::<i64, _>("block_time") as u64,
                 sender_pubkey: Self::encode_bytes_to_hex(&sender_pubkey),
@@ -267,7 +402,7 @@ impl DatabaseInterface for PostgresDbManager {
             posts.pop();
         }
 
-        let pagination = self.create_pagination_metadata(&posts, limit as u32, has_more);
+        let pagination = self.create_compound_pagination_metadata(&posts, limit as u32, has_more);
 
         Ok(PaginatedResult {
             items: posts,
@@ -280,7 +415,7 @@ impl DatabaseInterface for PostgresDbManager {
 
         let row = sqlx::query(
             r#"
-            SELECT transaction_id, block_time, sender_pubkey, sender_signature, 
+            SELECT id, transaction_id, block_time, sender_pubkey, sender_signature, 
                    base64_encoded_message, mentioned_pubkeys
             FROM k_posts 
             WHERE transaction_id = $1
@@ -298,6 +433,7 @@ impl DatabaseInterface for PostgresDbManager {
             let mentioned_pubkeys_json: serde_json::Value = row.get("mentioned_pubkeys");
 
             Ok(Some(KPostRecord {
+                id: row.get::<i64, _>("id"),
                 transaction_id: Self::encode_bytes_to_hex(&transaction_id),
                 block_time: row.get::<i64, _>("block_time") as u64,
                 sender_pubkey: Self::encode_bytes_to_hex(&sender_pubkey),
@@ -314,14 +450,16 @@ impl DatabaseInterface for PostgresDbManager {
         &self,
         user_public_key: &str,
         options: QueryOptions,
-    ) -> DatabaseResult<Vec<KPostRecord>> {
+    ) -> DatabaseResult<PaginatedResult<KPostRecord>> {
         let limit = options.limit.unwrap_or(20) as i64;
+        let offset_limit = limit + 1; // Get one extra to check if there are more
 
         // Build the combined query using UNION to search both k_posts and k_replies
         let mut query = String::from(
             r#"
             (
                 SELECT 
+                    id,
                     transaction_id, 
                     block_time, 
                     sender_pubkey, 
@@ -336,6 +474,7 @@ impl DatabaseInterface for PostgresDbManager {
             UNION ALL
             (
                 SELECT 
+                    id,
                     transaction_id, 
                     block_time, 
                     sender_pubkey, 
@@ -353,14 +492,24 @@ impl DatabaseInterface for PostgresDbManager {
         let mut bind_count = 1;
         let mut where_conditions = Vec::new();
         
-        if let Some(_) = options.before {
-            bind_count += 1;
-            where_conditions.push(format!("block_time < ${}", bind_count));
+        if let Some(before_cursor) = &options.before {
+            if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
+                bind_count += 2;
+                where_conditions.push(format!(
+                    "(block_time < ${} OR (block_time = ${} AND id < ${}))",
+                    bind_count - 1, bind_count - 1, bind_count
+                ));
+            }
         }
 
-        if let Some(_) = options.after {
-            bind_count += 1;
-            where_conditions.push(format!("block_time > ${}", bind_count));
+        if let Some(after_cursor) = &options.after {
+            if let Ok((after_timestamp, after_id)) = Self::parse_compound_cursor(after_cursor) {
+                bind_count += 2;
+                where_conditions.push(format!(
+                    "(block_time > ${} OR (block_time = ${} AND id > ${}))",
+                    bind_count - 1, bind_count - 1, bind_count
+                ));
+            }
         }
 
         // Add WHERE conditions to the outer query if needed
@@ -374,9 +523,9 @@ impl DatabaseInterface for PostgresDbManager {
 
         // Add ORDER BY and LIMIT to the outer query
         if options.sort_descending {
-            query.push_str(" ORDER BY block_time DESC");
+            query.push_str(" ORDER BY block_time DESC, id DESC");
         } else {
-            query.push_str(" ORDER BY block_time ASC");
+            query.push_str(" ORDER BY block_time ASC, id ASC");
         }
 
         bind_count += 1;
@@ -385,15 +534,23 @@ impl DatabaseInterface for PostgresDbManager {
         let mentioned_json = serde_json::json!([user_public_key]);
         let mut query_builder = sqlx::query(&query).bind(mentioned_json);
 
-        if let Some(before_timestamp) = options.before {
-            query_builder = query_builder.bind(before_timestamp as i64);
+        if let Some(before_cursor) = &options.before {
+            if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
+                query_builder = query_builder
+                    .bind(before_timestamp as i64)
+                    .bind(before_id);
+            }
         }
 
-        if let Some(after_timestamp) = options.after {
-            query_builder = query_builder.bind(after_timestamp as i64);
+        if let Some(after_cursor) = &options.after {
+            if let Ok((after_timestamp, after_id)) = Self::parse_compound_cursor(after_cursor) {
+                query_builder = query_builder
+                    .bind(after_timestamp as i64)
+                    .bind(after_id);
+            }
         }
 
-        query_builder = query_builder.bind(limit);
+        query_builder = query_builder.bind(offset_limit);
 
         let rows = query_builder
             .fetch_all(&self.pool)
@@ -408,6 +565,7 @@ impl DatabaseInterface for PostgresDbManager {
             let mentioned_pubkeys_json: serde_json::Value = row.get("mentioned_pubkeys");
 
             posts.push(KPostRecord {
+                id: row.get::<i64, _>("id"),
                 transaction_id: Self::encode_bytes_to_hex(&transaction_id),
                 block_time: row.get::<i64, _>("block_time") as u64,
                 sender_pubkey: Self::encode_bytes_to_hex(&sender_pubkey),
@@ -417,7 +575,17 @@ impl DatabaseInterface for PostgresDbManager {
             });
         }
 
-        Ok(posts)
+        let has_more = posts.len() > limit as usize;
+        if has_more {
+            posts.pop();
+        }
+
+        let pagination = self.create_compound_pagination_metadata(&posts, limit as u32, has_more);
+
+        Ok(PaginatedResult {
+            items: posts,
+            pagination,
+        })
     }
 
     // Reply operations
@@ -432,7 +600,7 @@ impl DatabaseInterface for PostgresDbManager {
 
         let mut query = String::from(
             r#"
-            SELECT transaction_id, block_time, sender_pubkey, sender_signature, 
+            SELECT id, transaction_id, block_time, sender_pubkey, sender_signature, 
                    post_id, base64_encoded_message, mentioned_pubkeys
             FROM k_replies 
             WHERE post_id = $1
@@ -441,20 +609,30 @@ impl DatabaseInterface for PostgresDbManager {
 
         let mut bind_count = 1;
         
-        if let Some(_) = options.before {
-            bind_count += 1;
-            query.push_str(&format!(" AND block_time < ${}", bind_count));
+        if let Some(before_cursor) = &options.before {
+            if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
+                bind_count += 2;
+                query.push_str(&format!(
+                    " AND (block_time < ${} OR (block_time = ${} AND id < ${}))",
+                    bind_count - 1, bind_count - 1, bind_count
+                ));
+            }
         }
 
-        if let Some(_) = options.after {
-            bind_count += 1;
-            query.push_str(&format!(" AND block_time > ${}", bind_count));
+        if let Some(after_cursor) = &options.after {
+            if let Ok((after_timestamp, after_id)) = Self::parse_compound_cursor(after_cursor) {
+                bind_count += 2;
+                query.push_str(&format!(
+                    " AND (block_time > ${} OR (block_time = ${} AND id > ${}))",
+                    bind_count - 1, bind_count - 1, bind_count
+                ));
+            }
         }
 
         if options.sort_descending {
-            query.push_str(" ORDER BY block_time DESC");
+            query.push_str(" ORDER BY block_time DESC, id DESC");
         } else {
-            query.push_str(" ORDER BY block_time ASC");
+            query.push_str(" ORDER BY block_time ASC, id ASC");
         }
 
         bind_count += 1;
@@ -462,12 +640,20 @@ impl DatabaseInterface for PostgresDbManager {
 
         let mut query_builder = sqlx::query(&query).bind(&post_id_bytes);
 
-        if let Some(before_timestamp) = options.before {
-            query_builder = query_builder.bind(before_timestamp as i64);
+        if let Some(before_cursor) = &options.before {
+            if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
+                query_builder = query_builder
+                    .bind(before_timestamp as i64)
+                    .bind(before_id);
+            }
         }
 
-        if let Some(after_timestamp) = options.after {
-            query_builder = query_builder.bind(after_timestamp as i64);
+        if let Some(after_cursor) = &options.after {
+            if let Ok((after_timestamp, after_id)) = Self::parse_compound_cursor(after_cursor) {
+                query_builder = query_builder
+                    .bind(after_timestamp as i64)
+                    .bind(after_id);
+            }
         }
 
         query_builder = query_builder.bind(offset_limit);
@@ -486,6 +672,7 @@ impl DatabaseInterface for PostgresDbManager {
             let mentioned_pubkeys_json: serde_json::Value = row.get("mentioned_pubkeys");
 
             replies.push(KReplyRecord {
+                id: row.get::<i64, _>("id"),
                 transaction_id: Self::encode_bytes_to_hex(&transaction_id),
                 block_time: row.get::<i64, _>("block_time") as u64,
                 sender_pubkey: Self::encode_bytes_to_hex(&sender_pubkey),
@@ -501,7 +688,7 @@ impl DatabaseInterface for PostgresDbManager {
             replies.pop();
         }
 
-        let pagination = self.create_pagination_metadata(&replies, limit as u32, has_more);
+        let pagination = self.create_compound_pagination_metadata(&replies, limit as u32, has_more);
 
         Ok(PaginatedResult {
             items: replies,
@@ -520,7 +707,7 @@ impl DatabaseInterface for PostgresDbManager {
 
         let mut query = String::from(
             r#"
-            SELECT transaction_id, block_time, sender_pubkey, sender_signature, 
+            SELECT id, transaction_id, block_time, sender_pubkey, sender_signature, 
                    post_id, base64_encoded_message, mentioned_pubkeys
             FROM k_replies 
             WHERE sender_pubkey = $1
@@ -529,20 +716,30 @@ impl DatabaseInterface for PostgresDbManager {
 
         let mut bind_count = 1;
         
-        if let Some(_) = options.before {
-            bind_count += 1;
-            query.push_str(&format!(" AND block_time < ${}", bind_count));
+        if let Some(before_cursor) = &options.before {
+            if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
+                bind_count += 2;
+                query.push_str(&format!(
+                    " AND (block_time < ${} OR (block_time = ${} AND id < ${}))",
+                    bind_count - 1, bind_count - 1, bind_count
+                ));
+            }
         }
 
-        if let Some(_) = options.after {
-            bind_count += 1;
-            query.push_str(&format!(" AND block_time > ${}", bind_count));
+        if let Some(after_cursor) = &options.after {
+            if let Ok((after_timestamp, after_id)) = Self::parse_compound_cursor(after_cursor) {
+                bind_count += 2;
+                query.push_str(&format!(
+                    " AND (block_time > ${} OR (block_time = ${} AND id > ${}))",
+                    bind_count - 1, bind_count - 1, bind_count
+                ));
+            }
         }
 
         if options.sort_descending {
-            query.push_str(" ORDER BY block_time DESC");
+            query.push_str(" ORDER BY block_time DESC, id DESC");
         } else {
-            query.push_str(" ORDER BY block_time ASC");
+            query.push_str(" ORDER BY block_time ASC, id ASC");
         }
 
         bind_count += 1;
@@ -550,12 +747,20 @@ impl DatabaseInterface for PostgresDbManager {
 
         let mut query_builder = sqlx::query(&query).bind(&sender_pubkey_bytes);
 
-        if let Some(before_timestamp) = options.before {
-            query_builder = query_builder.bind(before_timestamp as i64);
+        if let Some(before_cursor) = &options.before {
+            if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
+                query_builder = query_builder
+                    .bind(before_timestamp as i64)
+                    .bind(before_id);
+            }
         }
 
-        if let Some(after_timestamp) = options.after {
-            query_builder = query_builder.bind(after_timestamp as i64);
+        if let Some(after_cursor) = &options.after {
+            if let Ok((after_timestamp, after_id)) = Self::parse_compound_cursor(after_cursor) {
+                query_builder = query_builder
+                    .bind(after_timestamp as i64)
+                    .bind(after_id);
+            }
         }
 
         query_builder = query_builder.bind(offset_limit);
@@ -574,6 +779,7 @@ impl DatabaseInterface for PostgresDbManager {
             let mentioned_pubkeys_json: serde_json::Value = row.get("mentioned_pubkeys");
 
             replies.push(KReplyRecord {
+                id: row.get::<i64, _>("id"),
                 transaction_id: Self::encode_bytes_to_hex(&transaction_id),
                 block_time: row.get::<i64, _>("block_time") as u64,
                 sender_pubkey: Self::encode_bytes_to_hex(&sender_pubkey),
@@ -589,7 +795,7 @@ impl DatabaseInterface for PostgresDbManager {
             replies.pop();
         }
 
-        let pagination = self.create_pagination_metadata(&replies, limit as u32, has_more);
+        let pagination = self.create_compound_pagination_metadata(&replies, limit as u32, has_more);
 
         Ok(PaginatedResult {
             items: replies,
@@ -602,7 +808,7 @@ impl DatabaseInterface for PostgresDbManager {
 
         let row = sqlx::query(
             r#"
-            SELECT transaction_id, block_time, sender_pubkey, sender_signature, 
+            SELECT id, transaction_id, block_time, sender_pubkey, sender_signature, 
                    post_id, base64_encoded_message, mentioned_pubkeys
             FROM k_replies 
             WHERE transaction_id = $1
@@ -621,6 +827,7 @@ impl DatabaseInterface for PostgresDbManager {
             let mentioned_pubkeys_json: serde_json::Value = row.get("mentioned_pubkeys");
 
             Ok(Some(KReplyRecord {
+                id: row.get::<i64, _>("id"),
                 transaction_id: Self::encode_bytes_to_hex(&transaction_id),
                 block_time: row.get::<i64, _>("block_time") as u64,
                 sender_pubkey: Self::encode_bytes_to_hex(&sender_pubkey),
@@ -657,7 +864,7 @@ impl DatabaseInterface for PostgresDbManager {
 
         let mut query = String::from(
             r#"
-            SELECT transaction_id, block_time, sender_pubkey, sender_signature, 
+            SELECT id, transaction_id, block_time, sender_pubkey, sender_signature, 
                    base64_encoded_nickname, base64_encoded_profile_image, base64_encoded_message
             FROM k_broadcasts 
             WHERE 1=1
@@ -666,20 +873,30 @@ impl DatabaseInterface for PostgresDbManager {
 
         let mut bind_count = 0;
         
-        if let Some(_) = options.before {
-            bind_count += 1;
-            query.push_str(&format!(" AND block_time < ${}", bind_count));
+        if let Some(before_cursor) = &options.before {
+            if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
+                bind_count += 2;
+                query.push_str(&format!(
+                    " AND (block_time < ${} OR (block_time = ${} AND id < ${}))",
+                    bind_count - 1, bind_count - 1, bind_count
+                ));
+            }
         }
 
-        if let Some(_) = options.after {
-            bind_count += 1;
-            query.push_str(&format!(" AND block_time > ${}", bind_count));
+        if let Some(after_cursor) = &options.after {
+            if let Ok((after_timestamp, after_id)) = Self::parse_compound_cursor(after_cursor) {
+                bind_count += 2;
+                query.push_str(&format!(
+                    " AND (block_time > ${} OR (block_time = ${} AND id > ${}))",
+                    bind_count - 1, bind_count - 1, bind_count
+                ));
+            }
         }
 
         if options.sort_descending {
-            query.push_str(" ORDER BY block_time DESC");
+            query.push_str(" ORDER BY block_time DESC, id DESC");
         } else {
-            query.push_str(" ORDER BY block_time ASC");
+            query.push_str(" ORDER BY block_time ASC, id ASC");
         }
 
         bind_count += 1;
@@ -687,12 +904,20 @@ impl DatabaseInterface for PostgresDbManager {
 
         let mut query_builder = sqlx::query(&query);
 
-        if let Some(before_timestamp) = options.before {
-            query_builder = query_builder.bind(before_timestamp as i64);
+        if let Some(before_cursor) = &options.before {
+            if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
+                query_builder = query_builder
+                    .bind(before_timestamp as i64)
+                    .bind(before_id);
+            }
         }
 
-        if let Some(after_timestamp) = options.after {
-            query_builder = query_builder.bind(after_timestamp as i64);
+        if let Some(after_cursor) = &options.after {
+            if let Ok((after_timestamp, after_id)) = Self::parse_compound_cursor(after_cursor) {
+                query_builder = query_builder
+                    .bind(after_timestamp as i64)
+                    .bind(after_id);
+            }
         }
 
         query_builder = query_builder.bind(offset_limit);
@@ -709,6 +934,7 @@ impl DatabaseInterface for PostgresDbManager {
             let sender_signature: Vec<u8> = row.get("sender_signature");
 
             broadcasts.push(KBroadcastRecord {
+                id: row.get::<i64, _>("id"),
                 transaction_id: Self::encode_bytes_to_hex(&transaction_id),
                 block_time: row.get::<i64, _>("block_time") as u64,
                 sender_pubkey: Self::encode_bytes_to_hex(&sender_pubkey),
@@ -740,7 +966,7 @@ impl DatabaseInterface for PostgresDbManager {
 
         let row = sqlx::query(
             r#"
-            SELECT transaction_id, block_time, sender_pubkey, sender_signature, 
+            SELECT id, transaction_id, block_time, sender_pubkey, sender_signature, 
                    base64_encoded_nickname, base64_encoded_profile_image, base64_encoded_message
             FROM k_broadcasts 
             WHERE sender_pubkey = $1 
@@ -759,6 +985,7 @@ impl DatabaseInterface for PostgresDbManager {
             let sender_signature: Vec<u8> = row.get("sender_signature");
 
             Ok(Some(KBroadcastRecord {
+                id: row.get::<i64, _>("id"),
                 transaction_id: Self::encode_bytes_to_hex(&transaction_id),
                 block_time: row.get::<i64, _>("block_time") as u64,
                 sender_pubkey: Self::encode_bytes_to_hex(&sender_pubkey),
@@ -806,7 +1033,7 @@ impl DatabaseInterface for PostgresDbManager {
 
         let row = sqlx::query(
             r#"
-            SELECT transaction_id, block_time, sender_pubkey, sender_signature, 
+            SELECT id, transaction_id, block_time, sender_pubkey, sender_signature, 
                    post_id, vote
             FROM k_votes 
             WHERE post_id = $1 AND sender_pubkey = $2 
@@ -827,6 +1054,7 @@ impl DatabaseInterface for PostgresDbManager {
             let post_id: Vec<u8> = row.get("post_id");
 
             Ok(Some(KVoteRecord {
+                id: row.get::<i64, _>("id"),
                 transaction_id: Self::encode_bytes_to_hex(&transaction_id),
                 block_time: row.get::<i64, _>("block_time") as u64,
                 sender_pubkey: Self::encode_bytes_to_hex(&sender_pubkey),

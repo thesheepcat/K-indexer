@@ -32,6 +32,7 @@ pub struct KBroadcast {
 // Database model for K protocol broadcasts with additional metadata
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct KBroadcastRecord {
+    pub id: i64,
     pub transaction_id: String,
     pub block_time: u64,
     pub sender_pubkey: String,
@@ -54,6 +55,7 @@ pub struct KPost {
 // Database model for K protocol posts with additional metadata
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct KPostRecord {
+    pub id: i64,
     pub transaction_id: String,
     pub block_time: u64,
     pub sender_pubkey: String,
@@ -75,6 +77,7 @@ pub struct KReply {
 // Database model for K protocol replies with additional metadata
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct KReplyRecord {
+    pub id: i64,
     pub transaction_id: String,
     pub block_time: u64,
     pub sender_pubkey: String,
@@ -96,6 +99,7 @@ pub struct KVote {
 // Database model for K protocol votes with additional metadata
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct KVoteRecord {
+    pub id: i64,
     pub transaction_id: String,
     pub block_time: u64,
     pub sender_pubkey: String,

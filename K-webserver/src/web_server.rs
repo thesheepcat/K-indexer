@@ -48,8 +48,8 @@ struct GetPostsQuery {
     #[serde(rename = "requesterPubkey")]
     requester_pubkey: Option<String>,
     limit: Option<u32>,
-    before: Option<u64>,
-    after: Option<u64>,
+    before: Option<String>,
+    after: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -59,8 +59,8 @@ struct GetRepliesQuery {
     #[serde(rename = "requesterPubkey")]
     requester_pubkey: Option<String>,
     limit: Option<u32>,
-    before: Option<u64>,
-    after: Option<u64>,
+    before: Option<String>,  // Changed to String to support compound cursors
+    after: Option<String>,   // Changed to String to support compound cursors
 }
 
 #[derive(Debug, Deserialize)]
@@ -68,15 +68,15 @@ struct GetPostsWatchingQuery {
     #[serde(rename = "requesterPubkey")]
     requester_pubkey: Option<String>,
     limit: Option<u32>,
-    before: Option<u64>,
-    after: Option<u64>,
+    before: Option<String>,
+    after: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct GetUsersQuery {
     limit: Option<u32>,
-    before: Option<u64>,
-    after: Option<u64>,
+    before: Option<String>,
+    after: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -85,8 +85,8 @@ struct GetMentionsQuery {
     #[serde(rename = "requesterPubkey")]
     requester_pubkey: Option<String>,
     limit: Option<u32>,
-    before: Option<u64>,
-    after: Option<u64>,
+    before: Option<String>,
+    after: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
