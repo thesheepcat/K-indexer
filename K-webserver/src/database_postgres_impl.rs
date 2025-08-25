@@ -93,15 +93,6 @@ impl PostgresDbManager {
         hex::encode(bytes)
     }
 
-    fn parse_mentioned_pubkeys(json_value: &serde_json::Value) -> Vec<String> {
-        match json_value.as_array() {
-            Some(arr) => arr.iter()
-                .filter_map(|v| v.as_str())
-                .map(|s| s.to_string())
-                .collect(),
-            None => Vec::new(),
-        }
-    }
 
     fn parse_compound_cursor(cursor: &str) -> DatabaseResult<(u64, i64)> {
         if cursor.contains('_') {
@@ -213,10 +204,15 @@ impl DatabaseInterface for PostgresDbManager {
 
         let mut query = String::from(
             r#"
-            SELECT id, transaction_id, block_time, sender_pubkey, sender_signature, 
-                   base64_encoded_message, mentioned_pubkeys
-            FROM k_posts 
-            WHERE sender_pubkey = $1
+            SELECT p.id, p.transaction_id, p.block_time, p.sender_pubkey, p.sender_signature, 
+                   p.base64_encoded_message, 
+                   COALESCE(
+                       array_agg(encode(m.mentioned_pubkey, 'hex')) FILTER (WHERE m.mentioned_pubkey IS NOT NULL),
+                       '{}'::text[]
+                   ) as mentioned_pubkeys
+            FROM k_posts p
+            LEFT JOIN k_mentions m ON p.transaction_id = m.content_id AND m.content_type = 'post'
+            WHERE p.sender_pubkey = $1
             "#
         );
 
@@ -226,7 +222,7 @@ impl DatabaseInterface for PostgresDbManager {
             if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
                 bind_count += 2;
                 query.push_str(&format!(
-                    " AND (block_time < ${} OR (block_time = ${} AND id < ${}))",
+                    " AND (p.block_time < ${} OR (p.block_time = ${} AND p.id < ${}))",
                     bind_count - 1, bind_count - 1, bind_count
                 ));
             }
@@ -236,16 +232,18 @@ impl DatabaseInterface for PostgresDbManager {
             if let Ok((after_timestamp, after_id)) = Self::parse_compound_cursor(after_cursor) {
                 bind_count += 2;
                 query.push_str(&format!(
-                    " AND (block_time > ${} OR (block_time = ${} AND id > ${}))",
+                    " AND (p.block_time > ${} OR (p.block_time = ${} AND p.id > ${}))",
                     bind_count - 1, bind_count - 1, bind_count
                 ));
             }
         }
 
+        query.push_str(" GROUP BY p.id, p.transaction_id, p.block_time, p.sender_pubkey, p.sender_signature, p.base64_encoded_message");
+
         if options.sort_descending {
-            query.push_str(" ORDER BY block_time DESC, id DESC");
+            query.push_str(" ORDER BY p.block_time DESC, p.id DESC");
         } else {
-            query.push_str(" ORDER BY block_time ASC, id ASC");
+            query.push_str(" ORDER BY p.block_time ASC, p.id ASC");
         }
 
         bind_count += 1;
@@ -281,7 +279,7 @@ impl DatabaseInterface for PostgresDbManager {
             let transaction_id: Vec<u8> = row.get("transaction_id");
             let sender_pubkey: Vec<u8> = row.get("sender_pubkey");
             let sender_signature: Vec<u8> = row.get("sender_signature");
-            let mentioned_pubkeys_json: serde_json::Value = row.get("mentioned_pubkeys");
+            let mentioned_pubkeys_array: Vec<String> = row.get("mentioned_pubkeys");
 
             posts.push(KPostRecord {
                 id: row.get::<i64, _>("id"),
@@ -290,7 +288,7 @@ impl DatabaseInterface for PostgresDbManager {
                 sender_pubkey: Self::encode_bytes_to_hex(&sender_pubkey),
                 sender_signature: Self::encode_bytes_to_hex(&sender_signature),
                 base64_encoded_message: row.get("base64_encoded_message"),
-                mentioned_pubkeys: Self::parse_mentioned_pubkeys(&mentioned_pubkeys_json),
+                mentioned_pubkeys: mentioned_pubkeys_array,
             });
         }
 
@@ -316,9 +314,14 @@ impl DatabaseInterface for PostgresDbManager {
 
         let mut query = String::from(
             r#"
-            SELECT id, transaction_id, block_time, sender_pubkey, sender_signature, 
-                   base64_encoded_message, mentioned_pubkeys
-            FROM k_posts 
+            SELECT p.id, p.transaction_id, p.block_time, p.sender_pubkey, p.sender_signature, 
+                   p.base64_encoded_message,
+                   COALESCE(
+                       array_agg(encode(m.mentioned_pubkey, 'hex')) FILTER (WHERE m.mentioned_pubkey IS NOT NULL),
+                       '{}'::text[]
+                   ) as mentioned_pubkeys
+            FROM k_posts p
+            LEFT JOIN k_mentions m ON p.transaction_id = m.content_id AND m.content_type = 'post'
             WHERE 1=1
             "#
         );
@@ -329,7 +332,7 @@ impl DatabaseInterface for PostgresDbManager {
             if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
                 bind_count += 2;
                 query.push_str(&format!(
-                    " AND (block_time < ${} OR (block_time = ${} AND id < ${}))",
+                    " AND (p.block_time < ${} OR (p.block_time = ${} AND p.id < ${}))",
                     bind_count - 1, bind_count - 1, bind_count
                 ));
             }
@@ -339,16 +342,18 @@ impl DatabaseInterface for PostgresDbManager {
             if let Ok((after_timestamp, after_id)) = Self::parse_compound_cursor(after_cursor) {
                 bind_count += 2;
                 query.push_str(&format!(
-                    " AND (block_time > ${} OR (block_time = ${} AND id > ${}))",
+                    " AND (p.block_time > ${} OR (p.block_time = ${} AND p.id > ${}))",
                     bind_count - 1, bind_count - 1, bind_count
                 ));
             }
         }
 
+        query.push_str(" GROUP BY p.id, p.transaction_id, p.block_time, p.sender_pubkey, p.sender_signature, p.base64_encoded_message");
+
         if options.sort_descending {
-            query.push_str(" ORDER BY block_time DESC, id DESC");
+            query.push_str(" ORDER BY p.block_time DESC, p.id DESC");
         } else {
-            query.push_str(" ORDER BY block_time ASC, id ASC");
+            query.push_str(" ORDER BY p.block_time ASC, p.id ASC");
         }
 
         bind_count += 1;
@@ -384,7 +389,7 @@ impl DatabaseInterface for PostgresDbManager {
             let transaction_id: Vec<u8> = row.get("transaction_id");
             let sender_pubkey: Vec<u8> = row.get("sender_pubkey");
             let sender_signature: Vec<u8> = row.get("sender_signature");
-            let mentioned_pubkeys_json: serde_json::Value = row.get("mentioned_pubkeys");
+            let mentioned_pubkeys_array: Vec<String> = row.get("mentioned_pubkeys");
 
             posts.push(KPostRecord {
                 id: row.get::<i64, _>("id"),
@@ -393,7 +398,7 @@ impl DatabaseInterface for PostgresDbManager {
                 sender_pubkey: Self::encode_bytes_to_hex(&sender_pubkey),
                 sender_signature: Self::encode_bytes_to_hex(&sender_signature),
                 base64_encoded_message: row.get("base64_encoded_message"),
-                mentioned_pubkeys: Self::parse_mentioned_pubkeys(&mentioned_pubkeys_json),
+                mentioned_pubkeys: mentioned_pubkeys_array,
             });
         }
 
@@ -415,10 +420,16 @@ impl DatabaseInterface for PostgresDbManager {
 
         let row = sqlx::query(
             r#"
-            SELECT id, transaction_id, block_time, sender_pubkey, sender_signature, 
-                   base64_encoded_message, mentioned_pubkeys
-            FROM k_posts 
-            WHERE transaction_id = $1
+            SELECT p.id, p.transaction_id, p.block_time, p.sender_pubkey, p.sender_signature, 
+                   p.base64_encoded_message,
+                   COALESCE(
+                       array_agg(encode(m.mentioned_pubkey, 'hex')) FILTER (WHERE m.mentioned_pubkey IS NOT NULL),
+                       '{}'::text[]
+                   ) as mentioned_pubkeys
+            FROM k_posts p
+            LEFT JOIN k_mentions m ON p.transaction_id = m.content_id AND m.content_type = 'post'
+            WHERE p.transaction_id = $1
+            GROUP BY p.id, p.transaction_id, p.block_time, p.sender_pubkey, p.sender_signature, p.base64_encoded_message
             "#
         )
         .bind(&transaction_id_bytes)
@@ -430,7 +441,7 @@ impl DatabaseInterface for PostgresDbManager {
             let transaction_id: Vec<u8> = row.get("transaction_id");
             let sender_pubkey: Vec<u8> = row.get("sender_pubkey");
             let sender_signature: Vec<u8> = row.get("sender_signature");
-            let mentioned_pubkeys_json: serde_json::Value = row.get("mentioned_pubkeys");
+            let mentioned_pubkeys_array: Vec<String> = row.get("mentioned_pubkeys");
 
             Ok(Some(KPostRecord {
                 id: row.get::<i64, _>("id"),
@@ -439,7 +450,7 @@ impl DatabaseInterface for PostgresDbManager {
                 sender_pubkey: Self::encode_bytes_to_hex(&sender_pubkey),
                 sender_signature: Self::encode_bytes_to_hex(&sender_signature),
                 base64_encoded_message: row.get("base64_encoded_message"),
-                mentioned_pubkeys: Self::parse_mentioned_pubkeys(&mentioned_pubkeys_json),
+                mentioned_pubkeys: mentioned_pubkeys_array,
             }))
         } else {
             Ok(None)
@@ -454,37 +465,50 @@ impl DatabaseInterface for PostgresDbManager {
         let limit = options.limit.unwrap_or(20) as i64;
         let offset_limit = limit + 1; // Get one extra to check if there are more
 
-        // Build the combined query using UNION to search both k_posts and k_replies
+        // Convert hex user public key to bytes for comparison
+        let user_pubkey_bytes = Self::decode_hex_to_bytes(user_public_key)?;
+        
+        // Build the combined query using UNION to search both k_posts and k_replies via k_mentions
         let mut query = String::from(
             r#"
             (
                 SELECT 
-                    id,
-                    transaction_id, 
-                    block_time, 
-                    sender_pubkey, 
-                    sender_signature, 
-                    base64_encoded_message, 
-                    mentioned_pubkeys,
+                    p.id,
+                    p.transaction_id, 
+                    p.block_time, 
+                    p.sender_pubkey, 
+                    p.sender_signature, 
+                    p.base64_encoded_message,
+                    COALESCE(
+                        array_agg(encode(m2.mentioned_pubkey, 'hex')) FILTER (WHERE m2.mentioned_pubkey IS NOT NULL),
+                        '{}'::text[]
+                    ) as mentioned_pubkeys,
                     NULL as post_id,
                     'post' as content_type
-                FROM k_posts 
-                WHERE mentioned_pubkeys @> $1
+                FROM k_posts p
+                INNER JOIN k_mentions m1 ON p.transaction_id = m1.content_id AND m1.content_type = 'post' AND m1.mentioned_pubkey = $1
+                LEFT JOIN k_mentions m2 ON p.transaction_id = m2.content_id AND m2.content_type = 'post'
+                GROUP BY p.id, p.transaction_id, p.block_time, p.sender_pubkey, p.sender_signature, p.base64_encoded_message
             )
             UNION ALL
             (
                 SELECT 
-                    id,
-                    transaction_id, 
-                    block_time, 
-                    sender_pubkey, 
-                    sender_signature, 
-                    base64_encoded_message, 
-                    mentioned_pubkeys,
-                    post_id,
+                    r.id,
+                    r.transaction_id, 
+                    r.block_time, 
+                    r.sender_pubkey, 
+                    r.sender_signature, 
+                    r.base64_encoded_message,
+                    COALESCE(
+                        array_agg(encode(m2.mentioned_pubkey, 'hex')) FILTER (WHERE m2.mentioned_pubkey IS NOT NULL),
+                        '{}'::text[]
+                    ) as mentioned_pubkeys,
+                    r.post_id,
                     'reply' as content_type
-                FROM k_replies 
-                WHERE mentioned_pubkeys @> $1
+                FROM k_replies r
+                INNER JOIN k_mentions m1 ON r.transaction_id = m1.content_id AND m1.content_type = 'reply' AND m1.mentioned_pubkey = $1
+                LEFT JOIN k_mentions m2 ON r.transaction_id = m2.content_id AND m2.content_type = 'reply'
+                GROUP BY r.id, r.transaction_id, r.block_time, r.sender_pubkey, r.sender_signature, r.base64_encoded_message, r.post_id
             )
             "#
         );
@@ -531,8 +555,7 @@ impl DatabaseInterface for PostgresDbManager {
         bind_count += 1;
         query.push_str(&format!(" LIMIT ${}", bind_count));
 
-        let mentioned_json = serde_json::json!([user_public_key]);
-        let mut query_builder = sqlx::query(&query).bind(mentioned_json);
+        let mut query_builder = sqlx::query(&query).bind(&user_pubkey_bytes);
 
         if let Some(before_cursor) = &options.before {
             if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
@@ -562,7 +585,7 @@ impl DatabaseInterface for PostgresDbManager {
             let transaction_id: Vec<u8> = row.get("transaction_id");
             let sender_pubkey: Vec<u8> = row.get("sender_pubkey");
             let sender_signature: Vec<u8> = row.get("sender_signature");
-            let mentioned_pubkeys_json: serde_json::Value = row.get("mentioned_pubkeys");
+            let mentioned_pubkeys_array: Vec<String> = row.get("mentioned_pubkeys");
 
             posts.push(KPostRecord {
                 id: row.get::<i64, _>("id"),
@@ -571,7 +594,7 @@ impl DatabaseInterface for PostgresDbManager {
                 sender_pubkey: Self::encode_bytes_to_hex(&sender_pubkey),
                 sender_signature: Self::encode_bytes_to_hex(&sender_signature),
                 base64_encoded_message: row.get("base64_encoded_message"),
-                mentioned_pubkeys: Self::parse_mentioned_pubkeys(&mentioned_pubkeys_json),
+                mentioned_pubkeys: mentioned_pubkeys_array,
             });
         }
 
@@ -600,10 +623,15 @@ impl DatabaseInterface for PostgresDbManager {
 
         let mut query = String::from(
             r#"
-            SELECT id, transaction_id, block_time, sender_pubkey, sender_signature, 
-                   post_id, base64_encoded_message, mentioned_pubkeys
-            FROM k_replies 
-            WHERE post_id = $1
+            SELECT r.id, r.transaction_id, r.block_time, r.sender_pubkey, r.sender_signature, 
+                   r.post_id, r.base64_encoded_message,
+                   COALESCE(
+                       array_agg(encode(m.mentioned_pubkey, 'hex')) FILTER (WHERE m.mentioned_pubkey IS NOT NULL),
+                       '{}'::text[]
+                   ) as mentioned_pubkeys
+            FROM k_replies r
+            LEFT JOIN k_mentions m ON r.transaction_id = m.content_id AND m.content_type = 'reply'
+            WHERE r.post_id = $1
             "#
         );
 
@@ -613,7 +641,7 @@ impl DatabaseInterface for PostgresDbManager {
             if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
                 bind_count += 2;
                 query.push_str(&format!(
-                    " AND (block_time < ${} OR (block_time = ${} AND id < ${}))",
+                    " AND (r.block_time < ${} OR (r.block_time = ${} AND r.id < ${}))",
                     bind_count - 1, bind_count - 1, bind_count
                 ));
             }
@@ -623,16 +651,18 @@ impl DatabaseInterface for PostgresDbManager {
             if let Ok((after_timestamp, after_id)) = Self::parse_compound_cursor(after_cursor) {
                 bind_count += 2;
                 query.push_str(&format!(
-                    " AND (block_time > ${} OR (block_time = ${} AND id > ${}))",
+                    " AND (r.block_time > ${} OR (r.block_time = ${} AND r.id > ${}))",
                     bind_count - 1, bind_count - 1, bind_count
                 ));
             }
         }
 
+        query.push_str(" GROUP BY r.id, r.transaction_id, r.block_time, r.sender_pubkey, r.sender_signature, r.post_id, r.base64_encoded_message");
+
         if options.sort_descending {
-            query.push_str(" ORDER BY block_time DESC, id DESC");
+            query.push_str(" ORDER BY r.block_time DESC, r.id DESC");
         } else {
-            query.push_str(" ORDER BY block_time ASC, id ASC");
+            query.push_str(" ORDER BY r.block_time ASC, r.id ASC");
         }
 
         bind_count += 1;
@@ -669,7 +699,7 @@ impl DatabaseInterface for PostgresDbManager {
             let sender_pubkey: Vec<u8> = row.get("sender_pubkey");
             let sender_signature: Vec<u8> = row.get("sender_signature");
             let post_id: Vec<u8> = row.get("post_id");
-            let mentioned_pubkeys_json: serde_json::Value = row.get("mentioned_pubkeys");
+            let mentioned_pubkeys_array: Vec<String> = row.get("mentioned_pubkeys");
 
             replies.push(KReplyRecord {
                 id: row.get::<i64, _>("id"),
@@ -679,7 +709,7 @@ impl DatabaseInterface for PostgresDbManager {
                 sender_signature: Self::encode_bytes_to_hex(&sender_signature),
                 post_id: Self::encode_bytes_to_hex(&post_id),
                 base64_encoded_message: row.get("base64_encoded_message"),
-                mentioned_pubkeys: Self::parse_mentioned_pubkeys(&mentioned_pubkeys_json),
+                mentioned_pubkeys: mentioned_pubkeys_array,
             });
         }
 
@@ -707,10 +737,15 @@ impl DatabaseInterface for PostgresDbManager {
 
         let mut query = String::from(
             r#"
-            SELECT id, transaction_id, block_time, sender_pubkey, sender_signature, 
-                   post_id, base64_encoded_message, mentioned_pubkeys
-            FROM k_replies 
-            WHERE sender_pubkey = $1
+            SELECT r.id, r.transaction_id, r.block_time, r.sender_pubkey, r.sender_signature, 
+                   r.post_id, r.base64_encoded_message,
+                   COALESCE(
+                       array_agg(encode(m.mentioned_pubkey, 'hex')) FILTER (WHERE m.mentioned_pubkey IS NOT NULL),
+                       '{}'::text[]
+                   ) as mentioned_pubkeys
+            FROM k_replies r
+            LEFT JOIN k_mentions m ON r.transaction_id = m.content_id AND m.content_type = 'reply'
+            WHERE r.sender_pubkey = $1
             "#
         );
 
@@ -720,7 +755,7 @@ impl DatabaseInterface for PostgresDbManager {
             if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
                 bind_count += 2;
                 query.push_str(&format!(
-                    " AND (block_time < ${} OR (block_time = ${} AND id < ${}))",
+                    " AND (r.block_time < ${} OR (r.block_time = ${} AND r.id < ${}))",
                     bind_count - 1, bind_count - 1, bind_count
                 ));
             }
@@ -730,16 +765,18 @@ impl DatabaseInterface for PostgresDbManager {
             if let Ok((after_timestamp, after_id)) = Self::parse_compound_cursor(after_cursor) {
                 bind_count += 2;
                 query.push_str(&format!(
-                    " AND (block_time > ${} OR (block_time = ${} AND id > ${}))",
+                    " AND (r.block_time > ${} OR (r.block_time = ${} AND r.id > ${}))",
                     bind_count - 1, bind_count - 1, bind_count
                 ));
             }
         }
 
+        query.push_str(" GROUP BY r.id, r.transaction_id, r.block_time, r.sender_pubkey, r.sender_signature, r.post_id, r.base64_encoded_message");
+
         if options.sort_descending {
-            query.push_str(" ORDER BY block_time DESC, id DESC");
+            query.push_str(" ORDER BY r.block_time DESC, r.id DESC");
         } else {
-            query.push_str(" ORDER BY block_time ASC, id ASC");
+            query.push_str(" ORDER BY r.block_time ASC, r.id ASC");
         }
 
         bind_count += 1;
@@ -776,7 +813,7 @@ impl DatabaseInterface for PostgresDbManager {
             let sender_pubkey: Vec<u8> = row.get("sender_pubkey");
             let sender_signature: Vec<u8> = row.get("sender_signature");
             let post_id: Vec<u8> = row.get("post_id");
-            let mentioned_pubkeys_json: serde_json::Value = row.get("mentioned_pubkeys");
+            let mentioned_pubkeys_array: Vec<String> = row.get("mentioned_pubkeys");
 
             replies.push(KReplyRecord {
                 id: row.get::<i64, _>("id"),
@@ -786,7 +823,7 @@ impl DatabaseInterface for PostgresDbManager {
                 sender_signature: Self::encode_bytes_to_hex(&sender_signature),
                 post_id: Self::encode_bytes_to_hex(&post_id),
                 base64_encoded_message: row.get("base64_encoded_message"),
-                mentioned_pubkeys: Self::parse_mentioned_pubkeys(&mentioned_pubkeys_json),
+                mentioned_pubkeys: mentioned_pubkeys_array,
             });
         }
 
@@ -808,10 +845,16 @@ impl DatabaseInterface for PostgresDbManager {
 
         let row = sqlx::query(
             r#"
-            SELECT id, transaction_id, block_time, sender_pubkey, sender_signature, 
-                   post_id, base64_encoded_message, mentioned_pubkeys
-            FROM k_replies 
-            WHERE transaction_id = $1
+            SELECT r.id, r.transaction_id, r.block_time, r.sender_pubkey, r.sender_signature, 
+                   r.post_id, r.base64_encoded_message,
+                   COALESCE(
+                       array_agg(encode(m.mentioned_pubkey, 'hex')) FILTER (WHERE m.mentioned_pubkey IS NOT NULL),
+                       '{}'::text[]
+                   ) as mentioned_pubkeys
+            FROM k_replies r
+            LEFT JOIN k_mentions m ON r.transaction_id = m.content_id AND m.content_type = 'reply'
+            WHERE r.transaction_id = $1
+            GROUP BY r.id, r.transaction_id, r.block_time, r.sender_pubkey, r.sender_signature, r.post_id, r.base64_encoded_message
             "#
         )
         .bind(&transaction_id_bytes)
@@ -824,7 +867,7 @@ impl DatabaseInterface for PostgresDbManager {
             let sender_pubkey: Vec<u8> = row.get("sender_pubkey");
             let sender_signature: Vec<u8> = row.get("sender_signature");
             let post_id: Vec<u8> = row.get("post_id");
-            let mentioned_pubkeys_json: serde_json::Value = row.get("mentioned_pubkeys");
+            let mentioned_pubkeys_array: Vec<String> = row.get("mentioned_pubkeys");
 
             Ok(Some(KReplyRecord {
                 id: row.get::<i64, _>("id"),
@@ -834,7 +877,7 @@ impl DatabaseInterface for PostgresDbManager {
                 sender_signature: Self::encode_bytes_to_hex(&sender_signature),
                 post_id: Self::encode_bytes_to_hex(&post_id),
                 base64_encoded_message: row.get("base64_encoded_message"),
-                mentioned_pubkeys: Self::parse_mentioned_pubkeys(&mentioned_pubkeys_json),
+                mentioned_pubkeys: mentioned_pubkeys_array,
             }))
         } else {
             Ok(None)

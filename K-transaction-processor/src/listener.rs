@@ -58,8 +58,7 @@ impl NotificationListener {
             // Wait for a notification
             match listener.recv().await {
                 Ok(notification) => {
-                    info!("Listener received notification on channel '{}' with payload: '{}'", 
-                          notification.channel(), notification.payload());
+                    //info!("Listener received notification on channel '{}' with payload: '{}'", notification.channel(), notification.payload());
                     
                     // Send the transaction ID to the processing queue
                     let payload = notification.payload().to_string();

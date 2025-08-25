@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "K-transaction-processor", 
+    "K-webserver"
+]
+resolver = "2"

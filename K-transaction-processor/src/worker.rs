@@ -34,7 +34,7 @@ impl Worker {
         info!("Worker {} started", self.id);
 
         while let Some(transaction_id) = self.receiver.recv().await {
-            info!("Worker {} received notification for transaction: {}", self.id, transaction_id);
+            //info!("Worker {} received notification for transaction: {}", self.id, transaction_id);
             
             self.process_transaction(transaction_id).await;
         }
@@ -46,9 +46,7 @@ impl Worker {
         //info!("Worker {} processing transaction: {}", self.id, transaction_id);
 
         match self.fetch_and_process_transaction(&transaction_id).await {
-            Ok(Some(transaction)) => {
-                self.log_transaction(&transaction);
-                
+            Ok(Some(transaction)) => {                
                 // Process K protocol if payload starts with k:1:
                 if let Some(ref payload_hex) = transaction.payload {
                     if let Ok(payload_bytes) = hex::decode(payload_hex) {
@@ -83,16 +81,17 @@ impl Worker {
         
         fetch_transaction(&self.db_pool, transaction_id).await
     }
-
+    
+    /*
     fn log_transaction(&self, transaction: &Transaction) {
-        //info!("=== Transaction Processed by Worker {} ===", self.id);
-        info!("Worker {} - Transaction ID (hex): {}", self.id, transaction.transaction_id);
+        info!("=== Transaction Processed by Worker {} ===", self.id);
+        //info!("Worker {} - Transaction ID (hex): {}", self.id, transaction.transaction_id);
         //info!("Worker {} - Subnetwork ID: {:?}", self.id, transaction.subnetwork_id);
         //info!("Worker {} - Hash (hex): {:?}", self.id, transaction.hash);
         //info!("Worker {} - Mass: {:?}", self.id, transaction.mass);
         
         // Format payload with hex prefix and check if it starts with 6b3a
-        /*  
+          
         if let Some(ref payload) = transaction.payload {
             info!("Worker {} - Payload (hex): 0x{}", self.id, payload);
             if payload.starts_with("6b3a") {
@@ -105,8 +104,8 @@ impl Worker {
         
         info!("Worker {} - Block Time: {:?}", self.id, transaction.block_time);
         info!("Worker {} - ==========================================", self.id);
-        */
-    }
+        
+    }*/
 
     async fn retry_transaction(&self, transaction_id: &str) -> Result<()> {
         for attempt in 1..=self.config.processing.retry_attempts {
@@ -119,8 +118,6 @@ impl Worker {
             match self.fetch_and_process_transaction(transaction_id).await {
                 Ok(Some(transaction)) => {
                     info!("Worker {} - Retry successful for transaction {}", self.id, transaction_id);
-                    self.log_transaction(&transaction);
-                    
                     // Process K protocol if payload starts with k:1:
                     if let Some(ref payload_hex) = transaction.payload {
                         if let Ok(payload_bytes) = hex::decode(payload_hex) {

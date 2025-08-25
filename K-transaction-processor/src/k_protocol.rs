@@ -53,6 +53,7 @@ pub struct KVote {
     pub sender_signature: String,
     pub post_id: String,
     pub vote: String, // "upvote" or "downvote"
+    pub mentioned_pubkey: String,
 }
 
 // Database record structures for PostgreSQL
@@ -96,7 +97,6 @@ pub struct KVoteRecord {
     pub sender_signature: String,
     pub post_id: String,
     pub vote: String,
-    pub author_pubkey: String, // Public key of the original post author (for future implementation)
 }
 
 pub struct KProtocolProcessor {
@@ -275,15 +275,16 @@ impl KProtocolProcessor {
                 }))
             }
             "vote" => {
-                // Expected format: vote:sender_pubkey:sender_signature:post_id:vote
-                if parts.len() < 5 {
-                    return Err(anyhow::anyhow!("Invalid vote format: expected 5 parts, got {}", parts.len()));
+                // Expected format: vote:sender_pubkey:sender_signature:post_id:vote:mentioned_pubkey
+                if parts.len() < 6 {
+                    return Err(anyhow::anyhow!("Invalid vote format: expected 6 parts, got {}", parts.len()));
                 }
 
                 let sender_pubkey = parts[1].to_string();
                 let sender_signature = parts[2].to_string();
                 let post_id = parts[3].to_string();
                 let vote = parts[4].to_string();
+                let mentioned_pubkey = parts[5].to_string();
 
                 // Validate vote value
                 if vote != "upvote" && vote != "downvote" {
@@ -295,6 +296,7 @@ impl KProtocolProcessor {
                     sender_signature,
                     post_id,
                     vote,
+                    mentioned_pubkey,
                 }))
             }
             _ => Ok(KActionType::Unknown(action.to_string())),
@@ -306,51 +308,25 @@ impl KProtocolProcessor {
         // Convert hex string to bytea for database query
         let transaction_id_bytes = hex::decode(transaction_id)?;
         
-        // Check in k_posts table
-        let posts_result = sqlx::query(
-            "SELECT transaction_id FROM k_posts WHERE transaction_id = $1"
+        // Single query using UNION ALL to check all K protocol tables
+        let result = sqlx::query(
+            r#"
+            SELECT 1 FROM (
+                SELECT transaction_id FROM k_posts WHERE transaction_id = $1
+                UNION ALL
+                SELECT transaction_id FROM k_replies WHERE transaction_id = $1
+                UNION ALL  
+                SELECT transaction_id FROM k_broadcasts WHERE transaction_id = $1
+                UNION ALL
+                SELECT transaction_id FROM k_votes WHERE transaction_id = $1
+            ) AS combined LIMIT 1
+            "#
         )
         .bind(&transaction_id_bytes)
         .fetch_optional(&self.db_pool)
         .await?;
 
-        if posts_result.is_some() {
-            return Ok(true);
-        }
-
-        // Check in k_replies table
-        let replies_result = sqlx::query(
-            "SELECT transaction_id FROM k_replies WHERE transaction_id = $1"
-        )
-        .bind(&transaction_id_bytes)
-        .fetch_optional(&self.db_pool)
-        .await?;
-
-        if replies_result.is_some() {
-            return Ok(true);
-        }
-
-        // Check in k_broadcasts table
-        let broadcasts_result = sqlx::query(
-            "SELECT transaction_id FROM k_broadcasts WHERE transaction_id = $1"
-        )
-        .bind(&transaction_id_bytes)
-        .fetch_optional(&self.db_pool)
-        .await?;
-
-        if broadcasts_result.is_some() {
-            return Ok(true);
-        }
-
-        // Check in k_votes table
-        let votes_result = sqlx::query(
-            "SELECT transaction_id FROM k_votes WHERE transaction_id = $1"
-        )
-        .bind(&transaction_id_bytes)
-        .fetch_optional(&self.db_pool)
-        .await?;
-
-        Ok(votes_result.is_some())
+        Ok(result.is_some())
     }
 
     /// Process K protocol transaction
@@ -437,39 +413,64 @@ impl KProtocolProcessor {
             return Ok(()); // Skip posts with invalid signatures
         }
 
-        // Extract block time (use transaction block time or current time as fallback)
-        let block_time = transaction.block_time.unwrap_or_else(|| {
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs() as i64
-        });
-
-        // Convert mentioned_pubkeys to JSONB
-        let mentioned_pubkeys_json = serde_json::to_value(&k_post.mentioned_pubkeys)?;
+        // Extract block time
+        let block_time = transaction.block_time.unwrap_or(0);
 
         // Convert hex strings to bytea for database storage
         let transaction_id_bytes = hex::decode(transaction_id)?;
         let sender_pubkey_bytes = hex::decode(&k_post.sender_pubkey)?;
         let sender_signature_bytes = hex::decode(&k_post.sender_signature)?;
         
-        // Insert into k_posts table
-        sqlx::query(
-            r#"
-            INSERT INTO k_posts (
-                transaction_id, block_time, sender_pubkey, sender_signature, 
-                base64_encoded_message, mentioned_pubkeys
-            ) VALUES ($1, $2, $3, $4, $5, $6)
-            "#
-        )
-        .bind(&transaction_id_bytes)
-        .bind(block_time)
-        .bind(&sender_pubkey_bytes)
-        .bind(&sender_signature_bytes)
-        .bind(k_post.base64_encoded_message)
-        .bind(mentioned_pubkeys_json)
-        .execute(&self.db_pool)
-        .await?;
+        // Single query to insert post and all mentions using CTE
+        if k_post.mentioned_pubkeys.is_empty() {
+            // If no mentions, just insert the post
+            sqlx::query(
+                r#"
+                INSERT INTO k_posts (
+                    transaction_id, block_time, sender_pubkey, sender_signature, 
+                    base64_encoded_message
+                ) VALUES ($1, $2, $3, $4, $5)
+                "#
+            )
+            .bind(&transaction_id_bytes)
+            .bind(block_time)
+            .bind(&sender_pubkey_bytes)
+            .bind(&sender_signature_bytes)
+            .bind(k_post.base64_encoded_message)
+            .execute(&self.db_pool)
+            .await?;
+        } else {
+            // Convert mentioned pubkeys to bytea
+            let mentioned_pubkeys_bytes: Result<Vec<Vec<u8>>, _> = k_post.mentioned_pubkeys
+                .iter()
+                .map(|pk| hex::decode(pk))
+                .collect();
+            let mentioned_pubkeys_bytes = mentioned_pubkeys_bytes?;
+            
+            // Insert post and mentions in a single query using CTE
+            sqlx::query(
+                r#"
+                WITH post_insert AS (
+                    INSERT INTO k_posts (
+                        transaction_id, block_time, sender_pubkey, sender_signature, 
+                        base64_encoded_message
+                    ) VALUES ($1, $2, $3, $4, $5)
+                    RETURNING transaction_id, block_time
+                )
+                INSERT INTO k_mentions (content_id, content_type, mentioned_pubkey, block_time)
+                SELECT pi.transaction_id, 'post', unnest($6::bytea[]), pi.block_time
+                FROM post_insert pi
+                "#
+            )
+            .bind(&transaction_id_bytes)
+            .bind(block_time)
+            .bind(&sender_pubkey_bytes)
+            .bind(&sender_signature_bytes)
+            .bind(k_post.base64_encoded_message)
+            .bind(&mentioned_pubkeys_bytes)
+            .execute(&self.db_pool)
+            .await?;
+        }
 
         info!("Saved K post: {}", transaction_id);
         Ok(())
@@ -479,11 +480,21 @@ impl KProtocolProcessor {
     pub async fn save_k_reply_to_database(&self, transaction: &Transaction, k_reply: KReply) -> Result<()> {
         let transaction_id = &transaction.transaction_id;
 
-        // Convert mentioned_pubkeys to JSONB
-        let mentioned_pubkeys_json = serde_json::to_value(&k_reply.mentioned_pubkeys)?;
+        // Construct the message to verify - it's post_id + base64_message + mentioned_pubkeys JSON
+        let mentioned_pubkeys_json_str = serde_json::to_string(&k_reply.mentioned_pubkeys).unwrap_or_else(|_| "[]".to_string());
+        let message_to_verify = format!("{}:{}:{}", k_reply.post_id, k_reply.base64_encoded_message, mentioned_pubkeys_json_str);
+
+        // Verify the signature
+        if !self.verify_kaspa_signature(&message_to_verify, &k_reply.sender_signature, &k_reply.sender_pubkey) {
+            error!("Invalid signature for reply {}, skipping", transaction_id);
+            return Ok(()); // Skip replies with invalid signatures
+        }
 
         // Store values we need for logging before they're moved
         let post_id_for_log = k_reply.post_id.clone();
+        
+        // Extract block time
+        let block_time = transaction.block_time.unwrap_or(0);
         
         // Convert hex strings to bytea for database storage
         let transaction_id_bytes = hex::decode(transaction_id)?;
@@ -491,24 +502,58 @@ impl KProtocolProcessor {
         let sender_signature_bytes = hex::decode(&k_reply.sender_signature)?;
         let post_id_bytes = hex::decode(&k_reply.post_id)?;
         
-        // Insert into k_replies table
-        sqlx::query(
-            r#"
-            INSERT INTO k_replies (
-                transaction_id, block_time, sender_pubkey, sender_signature, 
-                post_id, base64_encoded_message, mentioned_pubkeys
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-            "#
-        )
-        .bind(&transaction_id_bytes)
-        .bind(transaction.block_time.unwrap_or(0))
-        .bind(&sender_pubkey_bytes)
-        .bind(&sender_signature_bytes)
-        .bind(&post_id_bytes)
-        .bind(k_reply.base64_encoded_message)
-        .bind(mentioned_pubkeys_json)
-        .execute(&self.db_pool)
-        .await?;
+        // Single query to insert reply and all mentions using CTE
+        if k_reply.mentioned_pubkeys.is_empty() {
+            // If no mentions, just insert the reply
+            sqlx::query(
+                r#"
+                INSERT INTO k_replies (
+                    transaction_id, block_time, sender_pubkey, sender_signature, 
+                    post_id, base64_encoded_message
+                ) VALUES ($1, $2, $3, $4, $5, $6)
+                "#
+            )
+            .bind(&transaction_id_bytes)
+            .bind(block_time)
+            .bind(&sender_pubkey_bytes)
+            .bind(&sender_signature_bytes)
+            .bind(&post_id_bytes)
+            .bind(k_reply.base64_encoded_message)
+            .execute(&self.db_pool)
+            .await?;
+        } else {
+            // Convert mentioned pubkeys to bytea
+            let mentioned_pubkeys_bytes: Result<Vec<Vec<u8>>, _> = k_reply.mentioned_pubkeys
+                .iter()
+                .map(|pk| hex::decode(pk))
+                .collect();
+            let mentioned_pubkeys_bytes = mentioned_pubkeys_bytes?;
+            
+            // Insert reply and mentions in a single query using CTE
+            sqlx::query(
+                r#"
+                WITH reply_insert AS (
+                    INSERT INTO k_replies (
+                        transaction_id, block_time, sender_pubkey, sender_signature, 
+                        post_id, base64_encoded_message
+                    ) VALUES ($1, $2, $3, $4, $5, $6)
+                    RETURNING transaction_id, block_time
+                )
+                INSERT INTO k_mentions (content_id, content_type, mentioned_pubkey, block_time)
+                SELECT ri.transaction_id, 'reply', unnest($7::bytea[]), ri.block_time
+                FROM reply_insert ri
+                "#
+            )
+            .bind(&transaction_id_bytes)
+            .bind(block_time)
+            .bind(&sender_pubkey_bytes)
+            .bind(&sender_signature_bytes)
+            .bind(&post_id_bytes)
+            .bind(k_reply.base64_encoded_message)
+            .bind(&mentioned_pubkeys_bytes)
+            .execute(&self.db_pool)
+            .await?;
+        }
 
         info!("Saved K reply: {} -> {}", transaction_id, post_id_for_log);
         Ok(())
@@ -517,6 +562,16 @@ impl KProtocolProcessor {
     /// Save K broadcast to database
     pub async fn save_k_broadcast_to_database(&self, transaction: &Transaction, k_broadcast: KBroadcast) -> Result<()> {
         let transaction_id = &transaction.transaction_id;
+
+        // Construct the message to verify - it's nickname + profile_image + message
+        let profile_image_str = k_broadcast.base64_encoded_profile_image.as_deref().unwrap_or("");
+        let message_to_verify = format!("{}:{}:{}", k_broadcast.base64_encoded_nickname, profile_image_str, k_broadcast.base64_encoded_message);
+
+        // Verify the signature
+        if !self.verify_kaspa_signature(&message_to_verify, &k_broadcast.sender_signature, &k_broadcast.sender_pubkey) {
+            error!("Invalid signature for broadcast {}, skipping", transaction_id);
+            return Ok(()); // Skip broadcasts with invalid signatures
+        }
 
         // Convert hex strings to bytea for database storage
         let transaction_id_bytes = hex::decode(transaction_id)?;
@@ -555,33 +610,51 @@ impl KProtocolProcessor {
     pub async fn save_k_vote_to_database(&self, transaction: &Transaction, k_vote: KVote) -> Result<()> {
         let transaction_id = &transaction.transaction_id;
 
+        // Construct the message to verify - it's post_id + vote + mentioned_pubkey
+        let message_to_verify = format!("{}:{}:{}", k_vote.post_id, k_vote.vote, k_vote.mentioned_pubkey);
+
+        // Verify the signature
+        if !self.verify_kaspa_signature(&message_to_verify, &k_vote.sender_signature, &k_vote.sender_pubkey) {
+            error!("Invalid signature for vote {}, skipping", transaction_id);
+            return Ok(()); // Skip votes with invalid signatures
+        }
+
         // Store values we need for logging before they're moved
         let post_id_for_log = k_vote.post_id.clone();
         let vote_for_log = k_vote.vote.clone();
+        
+        // Extract block time
+        let block_time = transaction.block_time.unwrap_or(0);
         
         // Convert hex strings to bytea for database storage
         let transaction_id_bytes = hex::decode(transaction_id)?;
         let sender_pubkey_bytes = hex::decode(&k_vote.sender_pubkey)?;
         let sender_signature_bytes = hex::decode(&k_vote.sender_signature)?;
         let post_id_bytes = hex::decode(&k_vote.post_id)?;
-        let author_pubkey_bytes: Vec<u8> = Vec::new(); // Empty bytes for author_pubkey (future implementation)
+        let mentioned_pubkey_bytes = hex::decode(&k_vote.mentioned_pubkey)?;
         
-        // Insert into k_votes table
+        // Single query to insert vote and mention using CTE
         sqlx::query(
             r#"
-            INSERT INTO k_votes (
-                transaction_id, block_time, sender_pubkey, sender_signature, 
-                post_id, vote, author_pubkey
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+            WITH vote_insert AS (
+                INSERT INTO k_votes (
+                    transaction_id, block_time, sender_pubkey, sender_signature, 
+                    post_id, vote
+                ) VALUES ($1, $2, $3, $4, $5, $6)
+                RETURNING transaction_id, block_time
+            )
+            INSERT INTO k_mentions (content_id, content_type, mentioned_pubkey, block_time)
+            SELECT vi.transaction_id, 'vote', $7, vi.block_time
+            FROM vote_insert vi
             "#
         )
         .bind(&transaction_id_bytes)
-        .bind(transaction.block_time.unwrap_or(0))
+        .bind(block_time)
         .bind(&sender_pubkey_bytes)
         .bind(&sender_signature_bytes)
         .bind(&post_id_bytes)
         .bind(k_vote.vote)
-        .bind(&author_pubkey_bytes)
+        .bind(&mentioned_pubkey_bytes)
         .execute(&self.db_pool)
         .await?;
 

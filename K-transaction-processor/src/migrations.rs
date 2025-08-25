@@ -9,8 +9,7 @@ pub const MIGRATION_002_CREATE_K_PROTOCOL_TABLES: &str = r#"CREATE TABLE IF NOT 
     block_time BIGINT NOT NULL,
     sender_pubkey BYTEA NOT NULL,
     sender_signature BYTEA NOT NULL,
-    base64_encoded_message TEXT NOT NULL,
-    mentioned_pubkeys JSONB DEFAULT '[]'::jsonb
+    base64_encoded_message TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS k_replies (
@@ -20,8 +19,7 @@ CREATE TABLE IF NOT EXISTS k_replies (
     sender_pubkey BYTEA NOT NULL,
     sender_signature BYTEA NOT NULL,
     post_id BYTEA NOT NULL,
-    base64_encoded_message TEXT NOT NULL,
-    mentioned_pubkeys JSONB DEFAULT '[]'::jsonb
+    base64_encoded_message TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS k_broadcasts (
@@ -42,8 +40,15 @@ CREATE TABLE IF NOT EXISTS k_votes (
     sender_pubkey BYTEA NOT NULL,
     sender_signature BYTEA NOT NULL,
     post_id BYTEA NOT NULL,
-    vote VARCHAR(10) NOT NULL CHECK (vote IN ('upvote', 'downvote')),
-    author_pubkey BYTEA DEFAULT decode('', 'hex')
+    vote VARCHAR(10) NOT NULL CHECK (vote IN ('upvote', 'downvote'))
+);
+
+CREATE TABLE IF NOT EXISTS k_mentions (
+    id BIGSERIAL PRIMARY KEY,
+    content_id BYTEA NOT NULL,
+    content_type VARCHAR(10) NOT NULL,
+    mentioned_pubkey BYTEA NOT NULL,
+    block_time BIGINT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_k_posts_transaction_id ON k_posts(transaction_id);
@@ -61,5 +66,8 @@ CREATE INDEX IF NOT EXISTS idx_k_votes_sender_pubkey ON k_votes(sender_pubkey);
 CREATE INDEX IF NOT EXISTS idx_k_votes_post_id ON k_votes(post_id);
 CREATE INDEX IF NOT EXISTS idx_k_votes_vote ON k_votes(vote);
 CREATE INDEX IF NOT EXISTS idx_k_votes_block_time ON k_votes(block_time);
+CREATE INDEX IF NOT EXISTS idx_k_mentions_content_id ON k_mentions(content_id);
+CREATE INDEX IF NOT EXISTS idx_k_mentions_mentioned_pubkey ON k_mentions(mentioned_pubkey);
+CREATE INDEX IF NOT EXISTS idx_k_mentions_content_type ON k_mentions(content_type);
 CREATE INDEX IF NOT EXISTS idx_k_votes_post_id_sender ON k_votes(post_id, sender_pubkey);
 CREATE INDEX IF NOT EXISTS idx_k_replies_post_id_block_time ON k_replies(post_id, block_time DESC);"#;
