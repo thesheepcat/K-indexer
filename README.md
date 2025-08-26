@@ -17,6 +17,38 @@ The new indexer architecture is composed of the following components:
 - **🔍 K-transaction-processor**: Filters incoming transactions and indexes all K-related data in proper database tables
 - **🌐 K-webserver**: Serves all K-related data to web applications via API calls
 
+### Process Flow
+
+```mermaid
+sequenceDiagram
+    participant KN as Kaspa Node
+    participant SKI as Simply-Kaspa-Indexer
+    participant DB as PostgreSQL Database
+    participant NL as K-Transaction-Processor<br/>Listener
+    participant NQ as Notification Queue
+    participant WP as Worker Pool<br/>(Multiple Workers)
+    participant WS as K-Webserver
+    participant API as Web Applications
+
+    KN->>SKI: Send transactions via WebSocket
+    SKI->>DB: Store transactions in transactions table
+    DB->>DB: Database trigger fires on new transaction
+    DB->>NL: NOTIFY on transaction_channel
+    NL->>NQ: Forward transaction_id to queue
+    NQ->>WP: Distribute transaction_id to available worker
+    
+    WP->>DB: Fetch transaction details by ID
+    DB->>WP: Return transaction data
+    WP->>WP: Check if payload starts with "k:1:"
+    
+    WP->>DB: Parse and store data in K tables<br/>(k_posts, k_replies, k_votes, etc.)
+    
+    API->>WS: Request K protocol data
+    WS->>DB: Query K tables
+    DB->>WS: Return K protocol data
+    WS->>API: Serve JSON response
+```
+
 ## 📚 Protocol Documentation
 
 Technical specifications for the K protocol are available in the [official K repository](https://github.com/thesheepcat/K).

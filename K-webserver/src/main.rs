@@ -80,7 +80,7 @@ async fn async_main(args: Args, worker_threads: usize) -> Result<(), Box<dyn std
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    info!("Starting K-indexer PostgreSQL webserver...");
+    info!("Starting K-indexer PostgreSQL webserver v{}", env!("CARGO_PKG_VERSION"));
     info!("Using {} worker threads", worker_threads);
     info!("Request timeout: {}s", args.request_timeout);
     info!("Rate limit: {} requests/minute per IP", args.rate_limit);

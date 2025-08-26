@@ -64,7 +64,7 @@ async fn main() -> Result<()> {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    info!("Starting Transaction Processor");
+    info!("Starting Transaction Processor v{}", env!("CARGO_PKG_VERSION"));
 
     // Parse CLI arguments
     let args = Args::parse();
