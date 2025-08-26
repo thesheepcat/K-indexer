@@ -27,33 +27,6 @@ impl PostgresDbManager {
         Ok(Self { pool })
     }
 
-    fn create_pagination_metadata<T>(
-        &self,
-        items: &[T],
-        _limit: u32,
-        has_more: bool,
-    ) -> PaginationMetadata
-    where
-        T: HasTimestamp,
-    {
-        let next_cursor = if has_more && !items.is_empty() {
-            Some(items.last().unwrap().get_timestamp().to_string())
-        } else {
-            None
-        };
-
-        let prev_cursor = if !items.is_empty() {
-            Some(items.first().unwrap().get_timestamp().to_string())
-        } else {
-            None
-        };
-
-        PaginationMetadata {
-            has_more,
-            next_cursor,
-            prev_cursor,
-        }
-    }
 
     fn create_compound_pagination_metadata<T>(
         &self,
@@ -116,19 +89,9 @@ impl PostgresDbManager {
     }
 }
 
-trait HasTimestamp {
-    fn get_timestamp(&self) -> u64;
-}
-
 trait HasCompoundCursor {
     fn get_timestamp(&self) -> u64;
     fn get_id(&self) -> i64;
-}
-
-impl HasTimestamp for KPostRecord {
-    fn get_timestamp(&self) -> u64 {
-        self.block_time
-    }
 }
 
 impl HasCompoundCursor for KPostRecord {
@@ -138,12 +101,6 @@ impl HasCompoundCursor for KPostRecord {
     
     fn get_id(&self) -> i64 {
         self.id
-    }
-}
-
-impl HasTimestamp for KReplyRecord {
-    fn get_timestamp(&self) -> u64 {
-        self.block_time
     }
 }
 
@@ -157,12 +114,6 @@ impl HasCompoundCursor for KReplyRecord {
     }
 }
 
-impl HasTimestamp for KBroadcastRecord {
-    fn get_timestamp(&self) -> u64 {
-        self.block_time
-    }
-}
-
 impl HasCompoundCursor for KBroadcastRecord {
     fn get_timestamp(&self) -> u64 {
         self.block_time
@@ -170,12 +121,6 @@ impl HasCompoundCursor for KBroadcastRecord {
     
     fn get_id(&self) -> i64 {
         self.id
-    }
-}
-
-impl HasTimestamp for KVoteRecord {
-    fn get_timestamp(&self) -> u64 {
-        self.block_time
     }
 }
 
@@ -993,7 +938,7 @@ impl DatabaseInterface for PostgresDbManager {
             broadcasts.pop();
         }
 
-        let pagination = self.create_pagination_metadata(&broadcasts, limit as u32, has_more);
+        let pagination = self.create_compound_pagination_metadata(&broadcasts, limit as u32, has_more);
 
         Ok(PaginatedResult {
             items: broadcasts,

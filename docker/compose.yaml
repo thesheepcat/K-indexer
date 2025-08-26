@@ -18,8 +18,3 @@ services:
     network_mode: "host"
     volumes:
       - /var/k-db/:/var/lib/postgresql/data/
-
-
-
-
-

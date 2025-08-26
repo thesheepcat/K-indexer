@@ -44,25 +44,18 @@ Follow the [documentation here on how to run rusty-kaspa](https://kaspa.aspectro
 - `--utxoindex`: Enable UTXO indexing
 - `--rpclisten-borsh=0.0.0.0:17120`: Enable BORSH RPC on all interfaces
 
-#### 2. **Setup PostgreSQL Database**
-Activate a Docker container for the PostgreSQL database:
+#### 2. **Setup Database and Services**
+Navigate to docker/ folder and use docker compose to activate Postgres database and simply-kaspa-indexer by SuperTypo:
 
 ```bash
-docker run -d --restart unless-stopped --name k-indexer-db -e POSTGRES_PASSWORD=password -e POSTGRES_USER=username -e POSTGRES_DB=k-db -p 5432:5432 -v postgres-data:/var/lib/postgresql/data postgres
-```
-#### 3. **Setup simply-kaspa-indexer**
-Download simply-kaspa-indexer binaries or compile it from source: https://github.com/supertypo/simply-kaspa-indexer
-
-Run it:
-```bash
-./simply-kaspa-indexer-amd64 -s ws://0.0.0.0:17120 -n testnet-10 -d postgres://username:password@0.0.0.0:5432/k-db --prune-db="0 * * * *" --retention=1h --disable=virtual_chain_processing,transaction_acceptance,blocks_table,block_parent_table,blocks_transactions_table,transactions_inputs_table,transactions_outputs_table,addresses_transactions_table,initial_utxo_import,vcp_wait_for_sync --exclude-fields=block_accepted_id_merkle_root,block_merge_set_blues_hashes,block_merge_set_reds_hashes,block_selected_parent_hash,block_bits,block_blue_work,block_blue_score,block_daa_score,block_hash_merkle_root,block_nonce,block_pruning_point,block_timestamp,block_utxo_commitment,block_version,tx_subnetwork_id,tx_hash,tx_mass,tx_in_previous_outpoint,tx_in_signature_script,tx_in_sig_op_count,tx_in_block_time,tx_out_amount,tx_out_script_public_key,tx_out_script_public_key_address,tx_out_block_time
+cd K-indexer/docker/
+docker compose up -d
 ```
 
-#### 4. **Compile and Run K-transaction-processor**
-Navigate to the K-transaction-processor directory and compile:
+#### 3. **Compile and Run K-transaction-processor**
+On the main folder compile K-transaction-processor:
 ```bash
-cd K-transaction-processor
-cargo build --release
+cargo build --release -p K-transaction-processor
 ```
 
 Run the compiled binary:
@@ -70,11 +63,10 @@ Run the compiled binary:
 ./target/release/K-transaction-processor --db-host localhost --db-port 5432 --db-name k-db --db-user username --db-password password --db-max-connections 10 --workers 4 --channel transaction_channel --retry-attempts 10 --retry-delay 1000
 ```
 
-#### 5. **Compile and Run K-webserver**
-Navigate to the K-webserver directory and compile:
+#### 4. **Compile and Run K-webserver**
+On the main folder compile K-webserver:
 ```bash
-cd K-webserver
-cargo build --release
+cargo build --release -p K-webserver
 ```
 
 Run the compiled binary:
