@@ -188,8 +188,8 @@ async fn handle_root() -> &'static str {
 async fn handle_health() -> Json<serde_json::Value> {
     Json(serde_json::json!({
         "status": "healthy",
-        "service": "K-indexer",
-        "version": "0.1.0"
+        "service": env!("CARGO_PKG_NAME"),
+        "version": env!("CARGO_PKG_VERSION")
     }))
 }
 
