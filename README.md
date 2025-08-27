@@ -80,7 +80,7 @@ Follow the [documentation here on how to run rusty-kaspa](https://kaspa.aspectro
 Navigate to docker/ folder and use docker compose to activate Postgres database and simply-kaspa-indexer by SuperTypo:
 
 ```bash
-cd K-indexer/docker/
+cd K-indexer/docker/PROD_compose
 docker compose up -d
 ```
 
