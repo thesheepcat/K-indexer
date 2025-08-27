@@ -44,8 +44,8 @@ pub struct KBroadcastRecord {
     #[serde(default)]
     pub base64_encoded_nickname: String,
     pub base64_encoded_profile_image: Option<String>, // Optional profile image
-    pub base64_encoded_message: String, // Stored as Base64 encoded string
-    pub created_at: u64, // Timestamp when record was created
+    pub base64_encoded_message: String,               // Stored as Base64 encoded string
+    pub created_at: u64,                              // Timestamp when record was created
 }
 
 impl KBroadcastRecord {
@@ -124,21 +124,21 @@ impl KPostRecord {
 // API Response models
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ServerPost {
-    pub id: String,              // 32-byte cryptographic hash (64 hex characters)
+    pub id: String, // 32-byte cryptographic hash (64 hex characters)
     #[serde(rename = "userPublicKey")]
     pub user_public_key: String, // 32-byte public key (64 hex characters)
     #[serde(rename = "postContent")]
-    pub post_content: String,    // Base64 encoded content
-    pub signature: String,       // Schnorr signature as hex string
-    pub timestamp: u64,          // Unix timestamp
+    pub post_content: String, // Base64 encoded content
+    pub signature: String, // Schnorr signature as hex string
+    pub timestamp: u64, // Unix timestamp
     #[serde(rename = "repliesCount")]
-    pub replies_count: u64,     // Number of direct replies
+    pub replies_count: u64, // Number of direct replies
     #[serde(rename = "upVotesCount")]
-    pub up_votes_count: u64,     // Number of upvotes
+    pub up_votes_count: u64, // Number of upvotes
     #[serde(rename = "downVotesCount")]
-    pub down_votes_count: u64,   // Number of downvotes
+    pub down_votes_count: u64, // Number of downvotes
     #[serde(rename = "repostsCount")]
-    pub reposts_count: u64,      // Number of reposts
+    pub reposts_count: u64, // Number of reposts
     #[serde(rename = "parentPostId")]
     pub parent_post_id: Option<String>, // ID of the post being replied to (null for original posts)
     #[serde(rename = "mentionedPubkeys")]
@@ -159,13 +159,13 @@ pub struct PostsResponse {
 }
 
 // Pagination metadata for paginated endpoints
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PaginationMetadata {
     #[serde(rename = "hasMore")]
     pub has_more: bool,
     #[serde(rename = "nextCursor")]
     pub next_cursor: Option<String>,
-    #[serde(rename = "prevCursor")]  
+    #[serde(rename = "prevCursor")]
     pub prev_cursor: Option<String>,
 }
 
@@ -179,18 +179,18 @@ pub struct PaginatedPostsResponse {
 // API Response model for user broadcasts (simplified structure for Users API)
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ServerUserPost {
-    pub id: String,              // 32-byte cryptographic hash (64 hex characters)
+    pub id: String, // 32-byte cryptographic hash (64 hex characters)
     #[serde(rename = "userPublicKey")]
     pub user_public_key: String, // 32-byte public key (64 hex characters)
     #[serde(rename = "postContent")]
-    pub post_content: String,    // Base64 encoded content (max 100 chars when decoded)
-    pub signature: String,       // Schnorr signature as hex string
-    pub timestamp: u64,          // Unix timestamp
+    pub post_content: String, // Base64 encoded content (max 100 chars when decoded)
+    pub signature: String, // Schnorr signature as hex string
+    pub timestamp: u64, // Unix timestamp
     #[serde(rename = "userNickname", skip_serializing_if = "Option::is_none")]
     pub user_nickname: Option<String>, // Base64 encoded user nickname (optional)
     #[serde(rename = "userProfileImage", skip_serializing_if = "Option::is_none")]
     pub user_profile_image: Option<String>, // Base64 encoded profile image (optional)
-    // Note: Users API omits repliesCount, upVotesCount, downVotesCount, repostsCount, parentPostId, mentionedPubkeys
+                    // Note: Users API omits repliesCount, upVotesCount, downVotesCount, repostsCount, parentPostId, mentionedPubkeys
 }
 
 impl ServerUserPost {
@@ -241,7 +241,7 @@ impl ServerPost {
             replies_count,
             up_votes_count: 0,    // Hardcoded default value
             down_votes_count: 0,  // Hardcoded default value
-            reposts_count: 0,  // TODO: Implement repost counting
+            reposts_count: 0,     // TODO: Implement repost counting
             parent_post_id: None, // Original posts have no parent
             mentioned_pubkeys: record.mentioned_pubkeys.clone(),
             is_upvoted: None,
@@ -268,7 +268,7 @@ impl ServerPost {
             replies_count,
             up_votes_count,
             down_votes_count,
-            reposts_count: 0,  // TODO: Implement repost counting
+            reposts_count: 0,     // TODO: Implement repost counting
             parent_post_id: None, // Original posts have no parent
             mentioned_pubkeys: record.mentioned_pubkeys.clone(),
             is_upvoted: Some(is_upvoted),
@@ -288,7 +288,7 @@ pub struct KReplyRecord {
     pub receiver_address: String,
     pub sender_pubkey: String,
     pub sender_signature: String,
-    pub post_id: String, // ID of the post being replied to
+    pub post_id: String,                // ID of the post being replied to
     pub base64_encoded_message: String, // Stored as Base64 encoded string
     pub mentioned_pubkeys: Vec<String>,
     pub created_at: u64, // Timestamp when record was created
@@ -336,7 +336,10 @@ pub struct PaginatedRepliesResponse {
 }
 
 impl ServerReply {
-    pub fn from_k_reply_record_with_replies_count(record: &KReplyRecord, replies_count: u64) -> Self {
+    pub fn from_k_reply_record_with_replies_count(
+        record: &KReplyRecord,
+        replies_count: u64,
+    ) -> Self {
         Self {
             id: record.transaction_id.clone(),
             user_public_key: record.sender_pubkey.clone(),
@@ -344,9 +347,9 @@ impl ServerReply {
             signature: record.sender_signature.clone(),
             timestamp: record.block_time,
             replies_count,
-            up_votes_count: 0,              // TODO: Hardcoded default value
-            down_votes_count: 0,            // TODO: Hardcoded default value
-            reposts_count: 0,               // TODO: Hardcoded default value
+            up_votes_count: 0,   // TODO: Hardcoded default value
+            down_votes_count: 0, // TODO: Hardcoded default value
+            reposts_count: 0,    // TODO: Hardcoded default value
             parent_post_id: Some(record.post_id.clone()), // Replies always have a parent post while posts don't.
             mentioned_pubkeys: record.mentioned_pubkeys.clone(),
             is_upvoted: None,
@@ -373,7 +376,7 @@ impl ServerReply {
             replies_count,
             up_votes_count,
             down_votes_count,
-            reposts_count: 0,               // TODO: Hardcoded default value
+            reposts_count: 0, // TODO: Hardcoded default value
             parent_post_id: Some(record.post_id.clone()), // Replies always have a parent post while posts don't.
             mentioned_pubkeys: record.mentioned_pubkeys.clone(),
             is_upvoted: Some(is_upvoted),
@@ -411,7 +414,7 @@ pub struct KVoteRecord {
     pub sender_pubkey: String,
     pub sender_signature: String,
     pub post_id: String,
-    pub vote: String, // "upvote" or "downvote"
+    pub vote: String,    // "upvote" or "downvote"
     pub created_at: u64, // Timestamp when record was created
 }
 
