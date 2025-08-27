@@ -161,7 +161,7 @@ impl KProtocolProcessor {
         // Verify the message signature using Kaspa's verify_message function
         match verify_message(&personal_message, &signature_bytes, &public_key) {
             Ok(()) => {
-                info!("Kaspa message signature verification successful");
+                //info!("Kaspa message signature verification successful");
                 true
             },
             Err(err) => {
