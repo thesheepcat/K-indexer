@@ -131,21 +131,6 @@ pub enum ContentRecord {
     Reply(KReplyRecord),
 }
 
-impl ContentRecord {
-    pub fn transaction_id(&self) -> &str {
-        match self {
-            ContentRecord::Post(post) => &post.transaction_id,
-            ContentRecord::Reply(reply) => &reply.transaction_id,
-        }
-    }
-
-    pub fn content_type(&self) -> &'static str {
-        match self {
-            ContentRecord::Post(_) => "post",
-            ContentRecord::Reply(_) => "reply",
-        }
-    }
-}
 
 // API Response models
 #[derive(Debug, Serialize, Deserialize)]
@@ -252,32 +237,6 @@ pub struct ApiError {
 }
 
 impl ServerPost {
-    pub fn from_k_post_record_with_replies_count_and_votes(
-        record: &KPostRecord,
-        replies_count: u64,
-        up_votes_count: u64,
-        down_votes_count: u64,
-        is_upvoted: bool,
-        is_downvoted: bool,
-    ) -> Self {
-        Self {
-            id: record.transaction_id.clone(),
-            user_public_key: record.sender_pubkey.clone(),
-            post_content: record.base64_encoded_message.clone(),
-            signature: record.sender_signature.clone(),
-            timestamp: record.block_time,
-            replies_count,
-            up_votes_count,
-            down_votes_count,
-            reposts_count: 0,
-            parent_post_id: None,
-            mentioned_pubkeys: record.mentioned_pubkeys.clone(),
-            is_upvoted: Some(is_upvoted),
-            is_downvoted: Some(is_downvoted),
-            user_nickname: None,
-            user_profile_image: None,
-        }
-    }
 
     // New method to construct from enriched KPostRecord with all metadata
     pub fn from_enriched_k_post_record(record: &KPostRecord) -> Self {
@@ -315,32 +274,6 @@ pub struct PaginatedRepliesResponse {
 }
 
 impl ServerReply {
-    pub fn from_k_reply_record_with_replies_count_and_votes(
-        record: &KReplyRecord,
-        replies_count: u64,
-        up_votes_count: u64,
-        down_votes_count: u64,
-        is_upvoted: bool,
-        is_downvoted: bool,
-    ) -> Self {
-        Self {
-            id: record.transaction_id.clone(),
-            user_public_key: record.sender_pubkey.clone(),
-            post_content: record.base64_encoded_message.clone(),
-            signature: record.sender_signature.clone(),
-            timestamp: record.block_time,
-            replies_count,
-            up_votes_count,
-            down_votes_count,
-            reposts_count: 0,
-            parent_post_id: Some(record.post_id.clone()),
-            mentioned_pubkeys: record.mentioned_pubkeys.clone(),
-            is_upvoted: Some(is_upvoted),
-            is_downvoted: Some(is_downvoted),
-            user_nickname: None,
-            user_profile_image: None,
-        }
-    }
 
     // New method to construct from enriched KReplyRecord with all metadata
     pub fn from_enriched_k_reply_record(record: &KReplyRecord) -> Self {

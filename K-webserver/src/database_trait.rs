@@ -1,4 +1,4 @@
-use crate::models::{KBroadcastRecord, KPostRecord, KReplyRecord, KVoteRecord, PaginationMetadata, ContentRecord};
+use crate::models::{KBroadcastRecord, KPostRecord, KReplyRecord, PaginationMetadata, ContentRecord};
 use async_trait::async_trait;
 use std::result::Result as StdResult;
 
