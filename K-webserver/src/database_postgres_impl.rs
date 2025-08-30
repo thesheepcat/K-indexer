@@ -1303,16 +1303,46 @@ impl DatabaseInterface for PostgresDbManager {
         let limit = options.limit.unwrap_or(20) as i64;
         let offset_limit = limit + 1; // Get one extra to check if there are more
 
-        let mut query = String::from(
+        let mut bind_count = 1;
+        let mut cursor_conditions = String::new();
+        
+        // Add cursor logic to the all_posts CTE (same as get_all_posts_with_metadata)
+        if let Some(before_cursor) = &options.before {
+            if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
+                bind_count += 2;
+                cursor_conditions.push_str(&format!(
+                    " AND (p.block_time < ${} OR (p.block_time = ${} AND p.id < ${}))",
+                    bind_count - 1, bind_count - 1, bind_count
+                ));
+            }
+        }
+
+        if let Some(after_cursor) = &options.after {
+            if let Ok((after_timestamp, after_id)) = Self::parse_compound_cursor(after_cursor) {
+                bind_count += 2;
+                cursor_conditions.push_str(&format!(
+                    " AND (p.block_time > ${} OR (p.block_time = ${} AND p.id > ${}))",
+                    bind_count - 1, bind_count - 1, bind_count
+                ));
+            }
+        }
+
+        let order_clause = if options.sort_descending {
+            " ORDER BY p.block_time DESC, p.id DESC"
+        } else {
+            " ORDER BY p.block_time ASC, p.id ASC"
+        };
+
+        let query = format!(
             r#"
             WITH all_posts AS (
                 -- Get limited posts for specific user first to reduce data volume
                 SELECT p.id, p.transaction_id, p.block_time, p.sender_pubkey, 
                        p.sender_signature, p.base64_encoded_message
                 FROM k_posts p
-                WHERE p.sender_pubkey = $1
-                ORDER BY p.block_time DESC, p.id DESC
-                LIMIT $2
+                WHERE p.sender_pubkey = $1{cursor_conditions}
+                {order_clause}
+                LIMIT ${limit_param}
             ),
             post_stats AS (
                 -- Pre-aggregate metadata only for limited posts
@@ -1345,8 +1375,8 @@ impl DatabaseInterface for PostgresDbManager {
                         post_id,
                         COUNT(*) FILTER (WHERE vote = 'upvote') as up_votes_count,
                         COUNT(*) FILTER (WHERE vote = 'downvote') as down_votes_count,
-                        bool_or(vote = 'upvote' AND sender_pubkey = $3) as user_upvoted,
-                        bool_or(vote = 'downvote' AND sender_pubkey = $3) as user_downvoted
+                        bool_or(vote = 'upvote' AND sender_pubkey = ${requester_param}) as user_upvoted,
+                        bool_or(vote = 'downvote' AND sender_pubkey = ${requester_param}) as user_downvoted
                     FROM k_votes v
                     WHERE EXISTS (SELECT 1 FROM all_posts lp WHERE lp.transaction_id = v.post_id)
                     GROUP BY post_id
@@ -1385,44 +1415,16 @@ impl DatabaseInterface for PostgresDbManager {
                 LIMIT 1
             ) b ON true
             WHERE 1=1
-            "#
+            "#,
+            cursor_conditions = cursor_conditions,
+            order_clause = order_clause,
+            limit_param = bind_count + 1,
+            requester_param = bind_count + 2
         );
 
-        let mut bind_count = 3;
-        
-        if let Some(before_cursor) = &options.before {
-            if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
-                bind_count += 2;
-                query.push_str(&format!(
-                    " AND (ps.block_time < ${} OR (ps.block_time = ${} AND ps.id < ${}))",
-                    bind_count - 1, bind_count - 1, bind_count
-                ));
-            }
-        }
-
-        if let Some(after_cursor) = &options.after {
-            if let Ok((after_timestamp, after_id)) = Self::parse_compound_cursor(after_cursor) {
-                bind_count += 2;
-                query.push_str(&format!(
-                    " AND (ps.block_time > ${} OR (ps.block_time = ${} AND ps.id > ${}))",
-                    bind_count - 1, bind_count - 1, bind_count
-                ));
-            }
-        }
-
-        if options.sort_descending {
-            query.push_str(" ORDER BY ps.block_time DESC, ps.id DESC");
-        } else {
-            query.push_str(" ORDER BY ps.block_time ASC, ps.id ASC");
-        }
-
-        query.push_str(&format!(" LIMIT ${}", bind_count + 1));
-
-        // Build query
+        // Build query with parameter binding following get-mentions pattern
         let mut query_builder = sqlx::query(&query)
-            .bind(&user_pubkey_bytes)
-            .bind(offset_limit)
-            .bind(&requester_pubkey_bytes);
+            .bind(&user_pubkey_bytes);
 
         // Add cursor parameters if present
         if let Some(before_cursor) = &options.before {
@@ -1437,7 +1439,7 @@ impl DatabaseInterface for PostgresDbManager {
             }
         }
 
-        query_builder = query_builder.bind(offset_limit);
+        query_builder = query_builder.bind(offset_limit).bind(&requester_pubkey_bytes);
 
         let rows = query_builder
             .fetch_all(&self.pool)
@@ -1494,90 +1496,14 @@ impl DatabaseInterface for PostgresDbManager {
         let limit = options.limit.unwrap_or(20) as i64;
         let offset_limit = limit + 1; // Get one extra to check if there are more
 
-        let mut query = String::from(
-            r#"
-            SELECT 
-                r.id, 
-                r.transaction_id, 
-                r.block_time, 
-                r.sender_pubkey, 
-                r.sender_signature, 
-                r.post_id,
-                r.base64_encoded_message,
-                COALESCE(
-                    array_agg(DISTINCT encode(m.mentioned_pubkey, 'hex')) FILTER (WHERE m.mentioned_pubkey IS NOT NULL),
-                    '{{}}'::text[]
-                ) as mentioned_pubkeys,
-                
-                -- Replies count using subquery (nested replies to this reply)
-                COALESCE(reply_counts.replies_count, 0) as replies_count,
-                
-                -- Vote counts using subqueries
-                COALESCE(vote_counts.up_votes_count, 0) as up_votes_count,
-                COALESCE(vote_counts.down_votes_count, 0) as down_votes_count,
-                
-                -- User's vote status
-                COALESCE(user_vote.is_upvoted, false) as is_upvoted,
-                COALESCE(user_vote.is_downvoted, false) as is_downvoted,
-                
-                -- User profile data from latest broadcast
-                COALESCE(user_profile.base64_encoded_nickname, '') as user_nickname,
-                user_profile.base64_encoded_profile_image as user_profile_image
-                
-            FROM k_replies r
-            
-            -- LEFT JOIN for mentions
-            LEFT JOIN k_mentions m ON r.transaction_id = m.content_id AND m.content_type = 'reply'
-            
-            -- LEFT JOIN for replies count (nested replies to this reply)
-            LEFT JOIN (
-                SELECT post_id, COUNT(*) as replies_count
-                FROM k_replies
-                GROUP BY post_id
-            ) reply_counts ON r.transaction_id = reply_counts.post_id
-            
-            -- LEFT JOIN for vote counts
-            LEFT JOIN (
-                SELECT 
-                    post_id,
-                    COUNT(*) FILTER (WHERE vote = 'upvote') as up_votes_count,
-                    COUNT(*) FILTER (WHERE vote = 'downvote') as down_votes_count
-                FROM k_votes
-                GROUP BY post_id
-            ) vote_counts ON r.transaction_id = vote_counts.post_id
-            
-            -- LEFT JOIN for user's vote status
-            LEFT JOIN (
-                SELECT 
-                    post_id,
-                    sender_pubkey,
-                    bool_or(vote = 'upvote') as is_upvoted,
-                    bool_or(vote = 'downvote') as is_downvoted
-                FROM k_votes 
-                WHERE sender_pubkey = $1
-                GROUP BY post_id, sender_pubkey
-            ) user_vote ON r.transaction_id = user_vote.post_id
-            
-            -- LEFT JOIN for user profile data (latest broadcast)
-            LEFT JOIN (
-                SELECT DISTINCT ON (sender_pubkey) 
-                    sender_pubkey,
-                    base64_encoded_nickname,
-                    base64_encoded_profile_image
-                FROM k_broadcasts 
-                ORDER BY sender_pubkey, block_time DESC
-            ) user_profile ON r.sender_pubkey = user_profile.sender_pubkey
-            
-            WHERE r.post_id = $1
-            "#
-        );
-
-        let mut bind_count = 2;
+        let mut bind_count = 1;
+        let mut cursor_conditions = String::new();
         
+        // Add cursor logic to the limited_replies CTE (same as other optimized queries)
         if let Some(before_cursor) = &options.before {
             if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
                 bind_count += 2;
-                query.push_str(&format!(
+                cursor_conditions.push_str(&format!(
                     " AND (r.block_time < ${} OR (r.block_time = ${} AND r.id < ${}))",
                     bind_count - 1, bind_count - 1, bind_count
                 ));
@@ -1587,27 +1513,111 @@ impl DatabaseInterface for PostgresDbManager {
         if let Some(after_cursor) = &options.after {
             if let Ok((after_timestamp, after_id)) = Self::parse_compound_cursor(after_cursor) {
                 bind_count += 2;
-                query.push_str(&format!(
+                cursor_conditions.push_str(&format!(
                     " AND (r.block_time > ${} OR (r.block_time = ${} AND r.id > ${}))",
                     bind_count - 1, bind_count - 1, bind_count
                 ));
             }
         }
 
-        query.push_str(" GROUP BY r.id, r.transaction_id, r.block_time, r.sender_pubkey, r.sender_signature, r.post_id, r.base64_encoded_message, reply_counts.replies_count, vote_counts.up_votes_count, vote_counts.down_votes_count, user_vote.is_upvoted, user_vote.is_downvoted, user_profile.base64_encoded_nickname, user_profile.base64_encoded_profile_image");
-
-        if options.sort_descending {
-            query.push_str(" ORDER BY r.block_time DESC, r.id DESC");
+        let order_clause = if options.sort_descending {
+            " ORDER BY r.block_time DESC, r.id DESC"
         } else {
-            query.push_str(" ORDER BY r.block_time ASC, r.id ASC");
-        }
+            " ORDER BY r.block_time ASC, r.id ASC"
+        };
 
-        query.push_str(&format!(" LIMIT ${}", bind_count + 1));
+        let query = format!(
+            r#"
+            WITH limited_replies AS (
+                -- Get limited replies for specific post first to reduce data volume
+                SELECT r.id, r.transaction_id, r.block_time, r.sender_pubkey, 
+                       r.sender_signature, r.post_id, r.base64_encoded_message
+                FROM k_replies r
+                WHERE r.post_id = $1{cursor_conditions}
+                {order_clause}
+                LIMIT ${limit_param}
+            ),
+            reply_stats AS (
+                -- Pre-aggregate metadata only for limited replies
+                SELECT 
+                    lr.id, lr.transaction_id, lr.block_time, lr.sender_pubkey,
+                    lr.sender_signature, lr.post_id, lr.base64_encoded_message,
+                    
+                    -- Replies count (optimized with EXISTS) - nested replies to this reply
+                    COALESCE(r.replies_count, 0) as replies_count,
+                    
+                    -- Vote statistics (optimized with EXISTS)
+                    COALESCE(v.up_votes_count, 0) as up_votes_count,
+                    COALESCE(v.down_votes_count, 0) as down_votes_count,
+                    COALESCE(v.user_upvoted, false) as is_upvoted,
+                    COALESCE(v.user_downvoted, false) as is_downvoted
+                    
+                FROM limited_replies lr
+                
+                -- Optimized replies aggregation with EXISTS filter (nested replies)
+                LEFT JOIN (
+                    SELECT post_id, COUNT(*) as replies_count
+                    FROM k_replies r
+                    WHERE EXISTS (SELECT 1 FROM limited_replies lr WHERE lr.transaction_id = r.post_id)
+                    GROUP BY post_id
+                ) r ON lr.transaction_id = r.post_id
+                
+                -- Optimized vote aggregation with EXISTS filter and combined user vote
+                LEFT JOIN (
+                    SELECT 
+                        post_id,
+                        COUNT(*) FILTER (WHERE vote = 'upvote') as up_votes_count,
+                        COUNT(*) FILTER (WHERE vote = 'downvote') as down_votes_count,
+                        bool_or(vote = 'upvote' AND sender_pubkey = ${requester_param}) as user_upvoted,
+                        bool_or(vote = 'downvote' AND sender_pubkey = ${requester_param}) as user_downvoted
+                    FROM k_votes v
+                    WHERE EXISTS (SELECT 1 FROM limited_replies lr WHERE lr.transaction_id = v.post_id)
+                    GROUP BY post_id
+                ) v ON lr.transaction_id = v.post_id
+            )
+            SELECT 
+                rs.id, rs.transaction_id, rs.block_time, rs.sender_pubkey,
+                rs.sender_signature, rs.post_id, rs.base64_encoded_message,
+                
+                -- Get mentioned pubkeys efficiently with subquery
+                COALESCE(
+                    ARRAY(
+                        SELECT encode(m.mentioned_pubkey, 'hex') 
+                        FROM k_mentions m 
+                        WHERE m.content_id = rs.transaction_id AND m.content_type = 'reply'
+                    ),
+                    '{{}}'::text[]
+                ) as mentioned_pubkeys,
+                
+                rs.replies_count,
+                rs.up_votes_count,
+                rs.down_votes_count,
+                rs.is_upvoted,
+                rs.is_downvoted,
+                
+                -- User profile lookup with LATERAL join
+                COALESCE(b.base64_encoded_nickname, '') as user_nickname,
+                b.base64_encoded_profile_image as user_profile_image
+                
+            FROM reply_stats rs
+            LEFT JOIN LATERAL (
+                SELECT base64_encoded_nickname, base64_encoded_profile_image
+                FROM k_broadcasts b
+                WHERE b.sender_pubkey = rs.sender_pubkey
+                ORDER BY b.block_time DESC
+                LIMIT 1
+            ) b ON true
+            WHERE 1=1
+            "#,
+            cursor_conditions = cursor_conditions,
+            order_clause = order_clause,
+            limit_param = bind_count + 1,
+            requester_param = bind_count + 2
+        );
 
-        // Build query
+        // Build query with parameter binding following optimized pattern
         let mut query_builder = sqlx::query(&query)
-            .bind(&post_id_bytes)
-            .bind(&requester_pubkey_bytes);
+            .bind(&post_id_bytes);
 
         // Add cursor parameters if present
         if let Some(before_cursor) = &options.before {
@@ -1622,7 +1632,7 @@ impl DatabaseInterface for PostgresDbManager {
             }
         }
 
-        query_builder = query_builder.bind(offset_limit);
+        query_builder = query_builder.bind(offset_limit).bind(&requester_pubkey_bytes);
 
         let rows = query_builder
             .fetch_all(&self.pool)
@@ -1681,16 +1691,46 @@ impl DatabaseInterface for PostgresDbManager {
         let limit = options.limit.unwrap_or(20) as i64;
         let offset_limit = limit + 1; // Get one extra to check if there are more
 
-        let mut query = String::from(
+        let mut bind_count = 1;
+        let mut cursor_conditions = String::new();
+        
+        // Add cursor logic to the limited_replies CTE (same as get_posts_by_user_with_metadata)
+        if let Some(before_cursor) = &options.before {
+            if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
+                bind_count += 2;
+                cursor_conditions.push_str(&format!(
+                    " AND (r.block_time < ${} OR (r.block_time = ${} AND r.id < ${}))",
+                    bind_count - 1, bind_count - 1, bind_count
+                ));
+            }
+        }
+
+        if let Some(after_cursor) = &options.after {
+            if let Ok((after_timestamp, after_id)) = Self::parse_compound_cursor(after_cursor) {
+                bind_count += 2;
+                cursor_conditions.push_str(&format!(
+                    " AND (r.block_time > ${} OR (r.block_time = ${} AND r.id > ${}))",
+                    bind_count - 1, bind_count - 1, bind_count
+                ));
+            }
+        }
+
+        let order_clause = if options.sort_descending {
+            " ORDER BY r.block_time DESC, r.id DESC"
+        } else {
+            " ORDER BY r.block_time ASC, r.id ASC"
+        };
+
+        let query = format!(
             r#"
             WITH limited_replies AS (
                 -- Get limited replies for specific user first to reduce data volume
                 SELECT r.id, r.transaction_id, r.block_time, r.sender_pubkey, 
                        r.sender_signature, r.post_id, r.base64_encoded_message
                 FROM k_replies r
-                WHERE r.sender_pubkey = $1
-                ORDER BY r.block_time DESC, r.id DESC
-                LIMIT $2
+                WHERE r.sender_pubkey = $1{cursor_conditions}
+                {order_clause}
+                LIMIT ${limit_param}
             ),
             reply_stats AS (
                 -- Pre-aggregate metadata only for limited replies
@@ -1723,8 +1763,8 @@ impl DatabaseInterface for PostgresDbManager {
                         post_id,
                         COUNT(*) FILTER (WHERE vote = 'upvote') as up_votes_count,
                         COUNT(*) FILTER (WHERE vote = 'downvote') as down_votes_count,
-                        bool_or(vote = 'upvote' AND sender_pubkey = $3) as user_upvoted,
-                        bool_or(vote = 'downvote' AND sender_pubkey = $3) as user_downvoted
+                        bool_or(vote = 'upvote' AND sender_pubkey = ${requester_param}) as user_upvoted,
+                        bool_or(vote = 'downvote' AND sender_pubkey = ${requester_param}) as user_downvoted
                     FROM k_votes v
                     WHERE EXISTS (SELECT 1 FROM limited_replies lr WHERE lr.transaction_id = v.post_id)
                     GROUP BY post_id
@@ -1763,44 +1803,16 @@ impl DatabaseInterface for PostgresDbManager {
                 LIMIT 1
             ) b ON true
             WHERE 1=1
-            "#
+            "#,
+            cursor_conditions = cursor_conditions,
+            order_clause = order_clause,
+            limit_param = bind_count + 1,
+            requester_param = bind_count + 2
         );
 
-        let mut bind_count = 3;
-        
-        if let Some(before_cursor) = &options.before {
-            if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
-                bind_count += 2;
-                query.push_str(&format!(
-                    " AND (rs.block_time < ${} OR (rs.block_time = ${} AND rs.id < ${}))",
-                    bind_count - 1, bind_count - 1, bind_count
-                ));
-            }
-        }
-
-        if let Some(after_cursor) = &options.after {
-            if let Ok((after_timestamp, after_id)) = Self::parse_compound_cursor(after_cursor) {
-                bind_count += 2;
-                query.push_str(&format!(
-                    " AND (rs.block_time > ${} OR (rs.block_time = ${} AND rs.id > ${}))",
-                    bind_count - 1, bind_count - 1, bind_count
-                ));
-            }
-        }
-
-        if options.sort_descending {
-            query.push_str(" ORDER BY rs.block_time DESC, rs.id DESC");
-        } else {
-            query.push_str(" ORDER BY rs.block_time ASC, rs.id ASC");
-        }
-
-        query.push_str(&format!(" LIMIT ${}", bind_count + 1));
-
-        // Build query
+        // Build query with parameter binding following get-posts pattern
         let mut query_builder = sqlx::query(&query)
-            .bind(&user_pubkey_bytes)
-            .bind(offset_limit)
-            .bind(&requester_pubkey_bytes);
+            .bind(&user_pubkey_bytes);
 
         // Add cursor parameters if present
         if let Some(before_cursor) = &options.before {
@@ -1815,7 +1827,7 @@ impl DatabaseInterface for PostgresDbManager {
             }
         }
 
-        query_builder = query_builder.bind(offset_limit);
+        query_builder = query_builder.bind(offset_limit).bind(&requester_pubkey_bytes);
 
         let rows = query_builder
             .fetch_all(&self.pool)
@@ -1874,10 +1886,40 @@ impl DatabaseInterface for PostgresDbManager {
         let limit = options.limit.unwrap_or(20) as i64;
         let offset_limit = limit + 1; // Get one extra to check if there are more
 
-        let mut query = String::from(
+        let mut bind_count = 1;
+        let mut cursor_conditions = String::new();
+        
+        // Add cursor logic to the mentioned_posts CTE (same as other optimized queries)
+        if let Some(before_cursor) = &options.before {
+            if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
+                bind_count += 2;
+                cursor_conditions.push_str(&format!(
+                    " AND (p.block_time < ${} OR (p.block_time = ${} AND p.id < ${}))",
+                    bind_count - 1, bind_count - 1, bind_count
+                ));
+            }
+        }
+
+        if let Some(after_cursor) = &options.after {
+            if let Ok((after_timestamp, after_id)) = Self::parse_compound_cursor(after_cursor) {
+                bind_count += 2;
+                cursor_conditions.push_str(&format!(
+                    " AND (p.block_time > ${} OR (p.block_time = ${} AND p.id > ${}))",
+                    bind_count - 1, bind_count - 1, bind_count
+                ));
+            }
+        }
+
+        let order_clause = if options.sort_descending {
+            " ORDER BY p.block_time DESC, p.id DESC"
+        } else {
+            " ORDER BY p.block_time ASC, p.id ASC"
+        };
+
+        let query = format!(
             r#"
             WITH mentioned_posts AS (
-                -- Get posts that mention the specific user with efficient filtering
+                -- Get posts that mention the specific user with efficient filtering and LIMIT
                 SELECT p.id, p.transaction_id, p.block_time, p.sender_pubkey, 
                        p.sender_signature, p.base64_encoded_message
                 FROM k_posts p
@@ -1886,7 +1928,9 @@ impl DatabaseInterface for PostgresDbManager {
                     FROM k_mentions m 
                     WHERE m.content_type = 'post' 
                       AND m.mentioned_pubkey = $1
-                )
+                ){cursor_conditions}
+                {order_clause}
+                LIMIT ${limit_param}
             ),
             post_stats AS (
                 -- Pre-aggregate all metadata in one pass
@@ -1919,8 +1963,8 @@ impl DatabaseInterface for PostgresDbManager {
                         post_id,
                         COUNT(*) FILTER (WHERE vote = 'upvote') as up_votes_count,
                         COUNT(*) FILTER (WHERE vote = 'downvote') as down_votes_count,
-                        bool_or(vote = 'upvote' AND sender_pubkey = $1) as user_upvoted,
-                        bool_or(vote = 'downvote' AND sender_pubkey = $1) as user_downvoted
+                        bool_or(vote = 'upvote' AND sender_pubkey = ${requester_param}) as user_upvoted,
+                        bool_or(vote = 'downvote' AND sender_pubkey = ${requester_param}) as user_downvoted
                     FROM k_votes v
                     WHERE EXISTS (SELECT 1 FROM mentioned_posts mp WHERE mp.transaction_id = v.post_id)
                     GROUP BY post_id
@@ -1959,43 +2003,16 @@ impl DatabaseInterface for PostgresDbManager {
                 LIMIT 1
             ) b ON true
             WHERE 1=1
-            "#
+            "#,
+            cursor_conditions = cursor_conditions,
+            order_clause = order_clause,
+            limit_param = bind_count + 1,
+            requester_param = bind_count + 2
         );
 
-        let mut bind_count = 2;
-        
-        if let Some(before_cursor) = &options.before {
-            if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
-                bind_count += 2;
-                query.push_str(&format!(
-                    " AND (ps.block_time < ${} OR (ps.block_time = ${} AND ps.id < ${}))",
-                    bind_count - 1, bind_count - 1, bind_count
-                ));
-            }
-        }
-
-        if let Some(after_cursor) = &options.after {
-            if let Ok((after_timestamp, after_id)) = Self::parse_compound_cursor(after_cursor) {
-                bind_count += 2;
-                query.push_str(&format!(
-                    " AND (ps.block_time > ${} OR (ps.block_time = ${} AND ps.id > ${}))",
-                    bind_count - 1, bind_count - 1, bind_count
-                ));
-            }
-        }
-
-        if options.sort_descending {
-            query.push_str(" ORDER BY ps.block_time DESC, ps.id DESC");
-        } else {
-            query.push_str(" ORDER BY ps.block_time ASC, ps.id ASC");
-        }
-
-        query.push_str(&format!(" LIMIT ${}", bind_count + 1));
-
-        // Build query
+        // Build query with parameter binding following optimized pattern
         let mut query_builder = sqlx::query(&query)
-            .bind(&mentioned_user_pubkey_bytes)
-            .bind(&requester_pubkey_bytes);
+            .bind(&mentioned_user_pubkey_bytes);
 
         // Add cursor parameters if present
         if let Some(before_cursor) = &options.before {
@@ -2010,7 +2027,7 @@ impl DatabaseInterface for PostgresDbManager {
             }
         }
 
-        query_builder = query_builder.bind(offset_limit);
+        query_builder = query_builder.bind(offset_limit).bind(&requester_pubkey_bytes);
 
         let rows = query_builder
             .fetch_all(&self.pool)
