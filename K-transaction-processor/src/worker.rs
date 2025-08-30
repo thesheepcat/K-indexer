@@ -1,9 +1,9 @@
-use tokio::sync::mpsc;
-use anyhow::Result;
-use tracing::{info, error, warn};
-use crate::database::{DbPool, fetch_transaction, Transaction};
 use crate::config::AppConfig;
+use crate::database::{fetch_transaction, DbPool, Transaction};
 use crate::k_protocol::KProtocolProcessor;
+use anyhow::Result;
+use tokio::sync::mpsc;
+use tracing::{error, info, warn};
 
 pub struct Worker {
     id: usize,
@@ -35,7 +35,7 @@ impl Worker {
 
         while let Some(transaction_id) = self.receiver.recv().await {
             //info!("Worker {} received notification for transaction: {}", self.id, transaction_id);
-            
+
             self.process_transaction(transaction_id).await;
         }
 
@@ -46,42 +46,59 @@ impl Worker {
         //info!("Worker {} processing transaction: {}", self.id, transaction_id);
 
         match self.fetch_and_process_transaction(&transaction_id).await {
-            Ok(Some(transaction)) => {                
+            Ok(Some(transaction)) => {
                 // Process K protocol if payload starts with k:1:
                 if let Some(ref payload_hex) = transaction.payload {
                     if let Ok(payload_bytes) = hex::decode(payload_hex) {
                         if let Ok(payload_str) = std::str::from_utf8(&payload_bytes) {
                             if payload_str.starts_with("k:1:") {
                                 //info!("Worker {} - Processing K protocol transaction: {}", self.id, transaction_id);
-                                if let Err(k_err) = self.k_processor.process_k_transaction(&transaction).await {
+                                if let Err(k_err) =
+                                    self.k_processor.process_k_transaction(&transaction).await
+                                {
                                     error!("Worker {} - Error processing K protocol transaction {}: {}", self.id, transaction_id, k_err);
                                 }
                             } else {
-                                info!("Worker {} - Transaction {} does not contain K protocol data", self.id, transaction_id);
+                                info!(
+                                    "Worker {} - Transaction {} does not contain K protocol data",
+                                    self.id, transaction_id
+                                );
                             }
                         }
                     }
                 }
             }
             Ok(None) => {
-                warn!("Worker {} - Transaction {} not found in database", self.id, transaction_id);
+                warn!(
+                    "Worker {} - Transaction {} not found in database",
+                    self.id, transaction_id
+                );
             }
             Err(e) => {
-                error!("Worker {} - Error processing transaction {}: {}", self.id, transaction_id, e);
-                
+                error!(
+                    "Worker {} - Error processing transaction {}: {}",
+                    self.id, transaction_id, e
+                );
+
                 if let Err(retry_err) = self.retry_transaction(&transaction_id).await {
-                    error!("Worker {} - Failed to retry transaction {}: {}", self.id, transaction_id, retry_err);
+                    error!(
+                        "Worker {} - Failed to retry transaction {}: {}",
+                        self.id, transaction_id, retry_err
+                    );
                 }
             }
         }
     }
 
-    async fn fetch_and_process_transaction(&self, transaction_id: &str) -> Result<Option<Transaction>> {
+    async fn fetch_and_process_transaction(
+        &self,
+        transaction_id: &str,
+    ) -> Result<Option<Transaction>> {
         //info!("Worker {} received transaction data for processing: {}", self.id, transaction_id);
-        
+
         fetch_transaction(&self.db_pool, transaction_id).await
     }
-    
+
     /*
     fn log_transaction(&self, transaction: &Transaction) {
         info!("=== Transaction Processed by Worker {} ===", self.id);
@@ -89,9 +106,9 @@ impl Worker {
         //info!("Worker {} - Subnetwork ID: {:?}", self.id, transaction.subnetwork_id);
         //info!("Worker {} - Hash (hex): {:?}", self.id, transaction.hash);
         //info!("Worker {} - Mass: {:?}", self.id, transaction.mass);
-        
+
         // Format payload with hex prefix and check if it starts with 6b3a
-          
+
         if let Some(ref payload) = transaction.payload {
             info!("Worker {} - Payload (hex): 0x{}", self.id, payload);
             if payload.starts_with("6b3a") {
@@ -101,30 +118,39 @@ impl Worker {
         } else {
             info!("Worker {} - Payload (hex): None", self.id);
         }
-        
+
         info!("Worker {} - Block Time: {:?}", self.id, transaction.block_time);
         info!("Worker {} - ==========================================", self.id);
-        
+
     }*/
 
     async fn retry_transaction(&self, transaction_id: &str) -> Result<()> {
         for attempt in 1..=self.config.processing.retry_attempts {
-            warn!("Worker {} - Retry attempt {} for transaction {}", self.id, attempt, transaction_id);
-            
+            warn!(
+                "Worker {} - Retry attempt {} for transaction {}",
+                self.id, attempt, transaction_id
+            );
+
             tokio::time::sleep(tokio::time::Duration::from_millis(
                 self.config.processing.retry_delay_ms,
-            )).await;
+            ))
+            .await;
 
             match self.fetch_and_process_transaction(transaction_id).await {
                 Ok(Some(transaction)) => {
-                    info!("Worker {} - Retry successful for transaction {}", self.id, transaction_id);
+                    info!(
+                        "Worker {} - Retry successful for transaction {}",
+                        self.id, transaction_id
+                    );
                     // Process K protocol if payload starts with k:1:
                     if let Some(ref payload_hex) = transaction.payload {
                         if let Ok(payload_bytes) = hex::decode(payload_hex) {
                             if let Ok(payload_str) = std::str::from_utf8(&payload_bytes) {
                                 if payload_str.starts_with("k:1:") {
                                     //info!("Worker {} - Processing K protocol transaction on retry: {}", self.id, transaction_id);
-                                    if let Err(k_err) = self.k_processor.process_k_transaction(&transaction).await {
+                                    if let Err(k_err) =
+                                        self.k_processor.process_k_transaction(&transaction).await
+                                    {
                                         error!("Worker {} - Error processing K protocol transaction on retry {}: {}", self.id, transaction_id, k_err);
                                     }
                                 }
@@ -134,15 +160,24 @@ impl Worker {
                     return Ok(());
                 }
                 Ok(None) => {
-                    warn!("Worker {} - Transaction {} still not found on retry {}", self.id, transaction_id, attempt);
+                    warn!(
+                        "Worker {} - Transaction {} still not found on retry {}",
+                        self.id, transaction_id, attempt
+                    );
                 }
                 Err(e) => {
-                    error!("Worker {} - Retry {} failed for transaction {}: {}", self.id, attempt, transaction_id, e);
+                    error!(
+                        "Worker {} - Retry {} failed for transaction {}: {}",
+                        self.id, attempt, transaction_id, e
+                    );
                 }
             }
         }
 
-        error!("Worker {} - All retry attempts exhausted for transaction {}", self.id, transaction_id);
+        error!(
+            "Worker {} - All retry attempts exhausted for transaction {}",
+            self.id, transaction_id
+        );
         Ok(())
     }
 }

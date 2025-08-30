@@ -1,12 +1,11 @@
 use crate::database_trait::{DatabaseInterface, QueryOptions};
 use crate::models::{
-    ApiError, PaginatedPostsResponse, PaginatedRepliesResponse, 
-    PaginatedUsersResponse, PostDetailsResponse, ServerPost, 
-    ServerReply, ServerUserPost, ContentRecord,
+    ApiError, ContentRecord, PaginatedPostsResponse, PaginatedRepliesResponse,
+    PaginatedUsersResponse, PostDetailsResponse, ServerPost, ServerReply, ServerUserPost,
 };
 use serde_json;
 use std::sync::Arc;
-use tracing::{error as log_error};
+use tracing::error as log_error;
 
 pub struct ApiHandlers {
     db: Arc<dyn DatabaseInterface>,
@@ -81,7 +80,11 @@ impl ApiHandlers {
         };
 
         // Use the new optimized single-query method
-        let posts_result = match self.db.get_posts_by_user_with_metadata(user_public_key, requester_pubkey, options).await {
+        let posts_result = match self
+            .db
+            .get_posts_by_user_with_metadata(user_public_key, requester_pubkey, options)
+            .await
+        {
             Ok(result) => result,
             Err(err) => {
                 log_error!(
@@ -97,7 +100,8 @@ impl ApiHandlers {
         };
 
         // Convert enriched KPostRecords to ServerPosts using the new method
-        let all_posts: Vec<ServerPost> = posts_result.items
+        let all_posts: Vec<ServerPost> = posts_result
+            .items
             .iter()
             .map(ServerPost::from_enriched_k_post_record)
             .collect();
@@ -160,10 +164,17 @@ impl ApiHandlers {
         };
 
         // Use the new optimized single-query method
-        let posts_result = match self.db.get_all_posts_with_metadata(requester_pubkey, options).await {
+        let posts_result = match self
+            .db
+            .get_all_posts_with_metadata(requester_pubkey, options)
+            .await
+        {
             Ok(result) => result,
             Err(err) => {
-                log_error!("Database error while querying paginated posts with metadata: {}", err);
+                log_error!(
+                    "Database error while querying paginated posts with metadata: {}",
+                    err
+                );
                 return Err(self.create_error_response(
                     "Internal server error during database query",
                     "DATABASE_ERROR",
@@ -172,7 +183,8 @@ impl ApiHandlers {
         };
 
         // Convert enriched KPostRecords to ServerPosts using the new method
-        let all_posts: Vec<ServerPost> = posts_result.items
+        let all_posts: Vec<ServerPost> = posts_result
+            .items
             .iter()
             .map(ServerPost::from_enriched_k_post_record)
             .collect();
@@ -308,7 +320,11 @@ impl ApiHandlers {
         };
 
         // Use the new optimized single-query method
-        let replies_result = match self.db.get_replies_by_post_id_with_metadata(post_id, requester_pubkey, options).await {
+        let replies_result = match self
+            .db
+            .get_replies_by_post_id_with_metadata(post_id, requester_pubkey, options)
+            .await
+        {
             Ok(result) => result,
             Err(err) => {
                 log_error!(
@@ -324,7 +340,8 @@ impl ApiHandlers {
         };
 
         // Convert enriched KReplyRecords to ServerReplies using the new method
-        let all_replies: Vec<ServerReply> = replies_result.items
+        let all_replies: Vec<ServerReply> = replies_result
+            .items
             .iter()
             .map(ServerReply::from_enriched_k_reply_record)
             .collect();
@@ -410,7 +427,11 @@ impl ApiHandlers {
         };
 
         // Use the new optimized single-query method
-        let replies_result = match self.db.get_replies_by_user_with_metadata(user_public_key, requester_pubkey, options).await {
+        let replies_result = match self
+            .db
+            .get_replies_by_user_with_metadata(user_public_key, requester_pubkey, options)
+            .await
+        {
             Ok(result) => result,
             Err(err) => {
                 log_error!(
@@ -426,7 +447,8 @@ impl ApiHandlers {
         };
 
         // Convert enriched KReplyRecords to ServerReplies using the new method
-        let all_replies: Vec<ServerReply> = replies_result.items
+        let all_replies: Vec<ServerReply> = replies_result
+            .items
             .iter()
             .map(ServerReply::from_enriched_k_reply_record)
             .collect();
@@ -533,12 +555,15 @@ impl ApiHandlers {
         };
 
         // Convert enriched ContentRecords (posts and replies) to ServerPosts
-        let all_mentions: Vec<ServerPost> = mentions_result.items
+        let all_mentions: Vec<ServerPost> = mentions_result
+            .items
             .iter()
-            .map(|content_record| {
-                match content_record {
-                    ContentRecord::Post(post_record) => ServerPost::from_enriched_k_post_record(post_record),
-                    ContentRecord::Reply(reply_record) => ServerReply::from_enriched_k_reply_record(reply_record),
+            .map(|content_record| match content_record {
+                ContentRecord::Post(post_record) => {
+                    ServerPost::from_enriched_k_post_record(post_record)
+                }
+                ContentRecord::Reply(reply_record) => {
+                    ServerReply::from_enriched_k_reply_record(reply_record)
                 }
             })
             .collect();
@@ -608,7 +633,11 @@ impl ApiHandlers {
         }
 
         // Use the new merged function to get content with metadata in a single query
-        match self.db.get_content_by_id_with_metadata(content_id, requester_pubkey).await {
+        match self
+            .db
+            .get_content_by_id_with_metadata(content_id, requester_pubkey)
+            .await
+        {
             Ok(Some(content_record)) => {
                 let response = match content_record {
                     ContentRecord::Post(k_post_record) => {
@@ -616,7 +645,8 @@ impl ApiHandlers {
                         PostDetailsResponse { post: server_post }
                     }
                     ContentRecord::Reply(k_reply_record) => {
-                        let server_reply = ServerReply::from_enriched_k_reply_record(&k_reply_record);
+                        let server_reply =
+                            ServerReply::from_enriched_k_reply_record(&k_reply_record);
                         PostDetailsResponse { post: server_reply }
                     }
                 };
@@ -649,7 +679,6 @@ impl ApiHandlers {
             }
         }
     }
-
 
     /// Create a standardized error response
     fn create_error_response(&self, message: &str, code: &str) -> String {

@@ -43,7 +43,6 @@ pub struct KBroadcastRecord {
     pub base64_encoded_message: String,
 }
 
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct KPost {
     pub sender_pubkey: String,
@@ -71,7 +70,6 @@ pub struct KPostRecord {
     pub user_nickname: Option<String>,
     pub user_profile_image: Option<String>,
 }
-
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct KReply {
@@ -103,7 +101,6 @@ pub struct KReplyRecord {
     pub user_profile_image: Option<String>,
 }
 
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct KVote {
     pub sender_pubkey: String,
@@ -130,7 +127,6 @@ pub enum ContentRecord {
     Post(KPostRecord),
     Reply(KReplyRecord),
 }
-
 
 // API Response models
 #[derive(Debug, Serialize, Deserialize)]
@@ -237,7 +233,6 @@ pub struct ApiError {
 }
 
 impl ServerPost {
-
     // New method to construct from enriched KPostRecord with all metadata
     pub fn from_enriched_k_post_record(record: &KPostRecord) -> Self {
         Self {
@@ -274,7 +269,6 @@ pub struct PaginatedRepliesResponse {
 }
 
 impl ServerReply {
-
     // New method to construct from enriched KReplyRecord with all metadata
     pub fn from_enriched_k_reply_record(record: &KReplyRecord) -> Self {
         Self {

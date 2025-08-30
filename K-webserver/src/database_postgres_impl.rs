@@ -1,11 +1,13 @@
+use anyhow::Result;
 use async_trait::async_trait;
 use sqlx::{postgres::PgPoolOptions, PgPool, Row};
-use anyhow::Result;
 
 use crate::database_trait::{
     DatabaseError, DatabaseInterface, DatabaseResult, PaginatedResult, QueryOptions,
 };
-use crate::models::{KBroadcastRecord, KPostRecord, KReplyRecord, KVoteRecord, PaginationMetadata, ContentRecord};
+use crate::models::{
+    ContentRecord, KBroadcastRecord, KPostRecord, KReplyRecord, KVoteRecord, PaginationMetadata,
+};
 
 pub struct PostgresDbManager {
     pub pool: PgPool,
@@ -18,15 +20,12 @@ impl PostgresDbManager {
             .acquire_timeout(std::time::Duration::from_secs(30))
             .connect(connection_string)
             .await?;
-        
+
         // Test the pool connection
-        sqlx::query("SELECT 1")
-            .fetch_one(&pool)
-            .await?;
-        
+        sqlx::query("SELECT 1").fetch_one(&pool).await?;
+
         Ok(Self { pool })
     }
-
 
     fn create_compound_pagination_metadata<T>(
         &self,
@@ -39,14 +38,20 @@ impl PostgresDbManager {
     {
         let next_cursor = if has_more && !items.is_empty() {
             let last_item = items.last().unwrap();
-            Some(Self::create_compound_cursor(last_item.get_timestamp(), last_item.get_id()))
+            Some(Self::create_compound_cursor(
+                last_item.get_timestamp(),
+                last_item.get_id(),
+            ))
         } else {
             None
         };
 
         let prev_cursor = if !items.is_empty() {
             let first_item = items.first().unwrap();
-            Some(Self::create_compound_cursor(first_item.get_timestamp(), first_item.get_id()))
+            Some(Self::create_compound_cursor(
+                first_item.get_timestamp(),
+                first_item.get_id(),
+            ))
         } else {
             None
         };
@@ -59,27 +64,30 @@ impl PostgresDbManager {
     }
 
     fn decode_hex_to_bytes(hex_str: &str) -> DatabaseResult<Vec<u8>> {
-        hex::decode(hex_str).map_err(|e| DatabaseError::InvalidInput(format!("Invalid hex string: {}", e)))
+        hex::decode(hex_str)
+            .map_err(|e| DatabaseError::InvalidInput(format!("Invalid hex string: {}", e)))
     }
 
     fn encode_bytes_to_hex(bytes: &[u8]) -> String {
         hex::encode(bytes)
     }
 
-
     fn parse_compound_cursor(cursor: &str) -> DatabaseResult<(u64, i64)> {
         if cursor.contains('_') {
             let parts: Vec<&str> = cursor.split('_').collect();
             if parts.len() == 2 {
-                let timestamp = parts[0].parse::<u64>()
-                    .map_err(|_| DatabaseError::InvalidInput("Invalid timestamp in cursor".to_string()))?;
-                let id = parts[1].parse::<i64>()
+                let timestamp = parts[0].parse::<u64>().map_err(|_| {
+                    DatabaseError::InvalidInput("Invalid timestamp in cursor".to_string())
+                })?;
+                let id = parts[1]
+                    .parse::<i64>()
                     .map_err(|_| DatabaseError::InvalidInput("Invalid ID in cursor".to_string()))?;
                 return Ok((timestamp, id));
             }
         }
         // Fallback: treat as simple timestamp cursor for backward compatibility
-        let timestamp = cursor.parse::<u64>()
+        let timestamp = cursor
+            .parse::<u64>()
             .map_err(|_| DatabaseError::InvalidInput("Invalid cursor format".to_string()))?;
         Ok((timestamp, i64::MAX)) // Use MAX to include all records with same timestamp
     }
@@ -98,7 +106,7 @@ impl HasCompoundCursor for KPostRecord {
     fn get_timestamp(&self) -> u64 {
         self.block_time
     }
-    
+
     fn get_id(&self) -> i64 {
         self.id
     }
@@ -108,7 +116,7 @@ impl HasCompoundCursor for KReplyRecord {
     fn get_timestamp(&self) -> u64 {
         self.block_time
     }
-    
+
     fn get_id(&self) -> i64 {
         self.id
     }
@@ -118,7 +126,7 @@ impl HasCompoundCursor for KBroadcastRecord {
     fn get_timestamp(&self) -> u64 {
         self.block_time
     }
-    
+
     fn get_id(&self) -> i64 {
         self.id
     }
@@ -128,7 +136,7 @@ impl HasCompoundCursor for KVoteRecord {
     fn get_timestamp(&self) -> u64 {
         self.block_time
     }
-    
+
     fn get_id(&self) -> i64 {
         self.id
     }
@@ -141,7 +149,7 @@ impl HasCompoundCursor for ContentRecord {
             ContentRecord::Reply(reply) => reply.block_time,
         }
     }
-    
+
     fn get_id(&self) -> i64 {
         match self {
             ContentRecord::Post(post) => post.id,
@@ -153,16 +161,6 @@ impl HasCompoundCursor for ContentRecord {
 #[async_trait]
 #[allow(unused_variables)]
 impl DatabaseInterface for PostgresDbManager {
-    // Post operations
-
-
-
-
-    // Reply operations
-
-
-
-
     // Broadcast operations
     async fn get_all_broadcasts(
         &self,
@@ -177,17 +175,19 @@ impl DatabaseInterface for PostgresDbManager {
                    base64_encoded_nickname, base64_encoded_profile_image, base64_encoded_message
             FROM k_broadcasts 
             WHERE 1=1
-            "#
+            "#,
         );
 
         let mut bind_count = 0;
-        
+
         if let Some(before_cursor) = &options.before {
             if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
                 bind_count += 2;
                 query.push_str(&format!(
                     " AND (block_time < ${} OR (block_time = ${} AND id < ${}))",
-                    bind_count - 1, bind_count - 1, bind_count
+                    bind_count - 1,
+                    bind_count - 1,
+                    bind_count
                 ));
             }
         }
@@ -197,7 +197,9 @@ impl DatabaseInterface for PostgresDbManager {
                 bind_count += 2;
                 query.push_str(&format!(
                     " AND (block_time > ${} OR (block_time = ${} AND id > ${}))",
-                    bind_count - 1, bind_count - 1, bind_count
+                    bind_count - 1,
+                    bind_count - 1,
+                    bind_count
                 ));
             }
         }
@@ -215,26 +217,21 @@ impl DatabaseInterface for PostgresDbManager {
 
         if let Some(before_cursor) = &options.before {
             if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
-                query_builder = query_builder
-                    .bind(before_timestamp as i64)
-                    .bind(before_id);
+                query_builder = query_builder.bind(before_timestamp as i64).bind(before_id);
             }
         }
 
         if let Some(after_cursor) = &options.after {
             if let Ok((after_timestamp, after_id)) = Self::parse_compound_cursor(after_cursor) {
-                query_builder = query_builder
-                    .bind(after_timestamp as i64)
-                    .bind(after_id);
+                query_builder = query_builder.bind(after_timestamp as i64).bind(after_id);
             }
         }
 
         query_builder = query_builder.bind(offset_limit);
 
-        let rows = query_builder
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|e| DatabaseError::QueryError(format!("Failed to fetch all broadcasts: {}", e)))?;
+        let rows = query_builder.fetch_all(&self.pool).await.map_err(|e| {
+            DatabaseError::QueryError(format!("Failed to fetch all broadcasts: {}", e))
+        })?;
 
         let mut broadcasts = Vec::new();
         for row in &rows {
@@ -259,7 +256,8 @@ impl DatabaseInterface for PostgresDbManager {
             broadcasts.pop();
         }
 
-        let pagination = self.create_compound_pagination_metadata(&broadcasts, limit as u32, has_more);
+        let pagination =
+            self.create_compound_pagination_metadata(&broadcasts, limit as u32, has_more);
 
         Ok(PaginatedResult {
             items: broadcasts,
@@ -279,14 +277,16 @@ impl DatabaseInterface for PostgresDbManager {
 
         let mut bind_count = 1;
         let mut cursor_conditions = String::new();
-        
+
         // Add cursor logic to the all_posts CTE
         if let Some(before_cursor) = &options.before {
             if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
                 bind_count += 2;
                 cursor_conditions.push_str(&format!(
                     " AND (p.block_time < ${} OR (p.block_time = ${} AND p.id < ${}))",
-                    bind_count - 1, bind_count - 1, bind_count
+                    bind_count - 1,
+                    bind_count - 1,
+                    bind_count
                 ));
             }
         }
@@ -296,7 +296,9 @@ impl DatabaseInterface for PostgresDbManager {
                 bind_count += 2;
                 cursor_conditions.push_str(&format!(
                     " AND (p.block_time > ${} OR (p.block_time = ${} AND p.id > ${}))",
-                    bind_count - 1, bind_count - 1, bind_count
+                    bind_count - 1,
+                    bind_count - 1,
+                    bind_count
                 ));
             }
         }
@@ -374,8 +376,7 @@ impl DatabaseInterface for PostgresDbManager {
         );
 
         // Build query with parameter binding following get-mentions pattern
-        let mut query_builder = sqlx::query(&query)
-            .bind(&requester_pubkey_bytes);
+        let mut query_builder = sqlx::query(&query).bind(&requester_pubkey_bytes);
 
         // Add cursor parameters if present
         if let Some(before_cursor) = &options.before {
@@ -450,14 +451,16 @@ impl DatabaseInterface for PostgresDbManager {
 
         let mut bind_count = 1;
         let mut cursor_conditions = String::new();
-        
+
         // Add cursor logic to the all_posts CTE (same as get_all_posts_with_metadata)
         if let Some(before_cursor) = &options.before {
             if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
                 bind_count += 2;
                 cursor_conditions.push_str(&format!(
                     " AND (p.block_time < ${} OR (p.block_time = ${} AND p.id < ${}))",
-                    bind_count - 1, bind_count - 1, bind_count
+                    bind_count - 1,
+                    bind_count - 1,
+                    bind_count
                 ));
             }
         }
@@ -467,7 +470,9 @@ impl DatabaseInterface for PostgresDbManager {
                 bind_count += 2;
                 cursor_conditions.push_str(&format!(
                     " AND (p.block_time > ${} OR (p.block_time = ${} AND p.id > ${}))",
-                    bind_count - 1, bind_count - 1, bind_count
+                    bind_count - 1,
+                    bind_count - 1,
+                    bind_count
                 ));
             }
         }
@@ -576,8 +581,7 @@ impl DatabaseInterface for PostgresDbManager {
         );
 
         // Build query with parameter binding following get-mentions pattern
-        let mut query_builder = sqlx::query(&query)
-            .bind(&user_pubkey_bytes);
+        let mut query_builder = sqlx::query(&query).bind(&user_pubkey_bytes);
 
         // Add cursor parameters if present
         if let Some(before_cursor) = &options.before {
@@ -592,7 +596,9 @@ impl DatabaseInterface for PostgresDbManager {
             }
         }
 
-        query_builder = query_builder.bind(offset_limit).bind(&requester_pubkey_bytes);
+        query_builder = query_builder
+            .bind(offset_limit)
+            .bind(&requester_pubkey_bytes);
 
         let rows = query_builder
             .fetch_all(&self.pool)
@@ -601,12 +607,12 @@ impl DatabaseInterface for PostgresDbManager {
 
         let has_more = rows.len() > limit as usize;
         let mut posts = Vec::new();
-        
+
         for (i, row) in rows.iter().enumerate() {
             if i >= limit as usize {
                 break;
             }
-            
+
             let transaction_id: Vec<u8> = row.get("transaction_id");
             let sender_pubkey: Vec<u8> = row.get("sender_pubkey");
             let sender_signature: Vec<u8> = row.get("sender_signature");
@@ -651,14 +657,16 @@ impl DatabaseInterface for PostgresDbManager {
 
         let mut bind_count = 1;
         let mut cursor_conditions = String::new();
-        
+
         // Add cursor logic to the limited_replies CTE (same as other optimized queries)
         if let Some(before_cursor) = &options.before {
             if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
                 bind_count += 2;
                 cursor_conditions.push_str(&format!(
                     " AND (r.block_time < ${} OR (r.block_time = ${} AND r.id < ${}))",
-                    bind_count - 1, bind_count - 1, bind_count
+                    bind_count - 1,
+                    bind_count - 1,
+                    bind_count
                 ));
             }
         }
@@ -668,7 +676,9 @@ impl DatabaseInterface for PostgresDbManager {
                 bind_count += 2;
                 cursor_conditions.push_str(&format!(
                     " AND (r.block_time > ${} OR (r.block_time = ${} AND r.id > ${}))",
-                    bind_count - 1, bind_count - 1, bind_count
+                    bind_count - 1,
+                    bind_count - 1,
+                    bind_count
                 ));
             }
         }
@@ -777,8 +787,7 @@ impl DatabaseInterface for PostgresDbManager {
         );
 
         // Build query with parameter binding following optimized pattern
-        let mut query_builder = sqlx::query(&query)
-            .bind(&post_id_bytes);
+        let mut query_builder = sqlx::query(&query).bind(&post_id_bytes);
 
         // Add cursor parameters if present
         if let Some(before_cursor) = &options.before {
@@ -793,7 +802,9 @@ impl DatabaseInterface for PostgresDbManager {
             }
         }
 
-        query_builder = query_builder.bind(offset_limit).bind(&requester_pubkey_bytes);
+        query_builder = query_builder
+            .bind(offset_limit)
+            .bind(&requester_pubkey_bytes);
 
         let rows = query_builder
             .fetch_all(&self.pool)
@@ -802,12 +813,12 @@ impl DatabaseInterface for PostgresDbManager {
 
         let has_more = rows.len() > limit as usize;
         let mut replies = Vec::new();
-        
+
         for (i, row) in rows.iter().enumerate() {
             if i >= limit as usize {
                 break;
             }
-            
+
             let transaction_id: Vec<u8> = row.get("transaction_id");
             let sender_pubkey: Vec<u8> = row.get("sender_pubkey");
             let sender_signature: Vec<u8> = row.get("sender_signature");
@@ -854,14 +865,16 @@ impl DatabaseInterface for PostgresDbManager {
 
         let mut bind_count = 1;
         let mut cursor_conditions = String::new();
-        
+
         // Add cursor logic to the limited_replies CTE (same as get_posts_by_user_with_metadata)
         if let Some(before_cursor) = &options.before {
             if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
                 bind_count += 2;
                 cursor_conditions.push_str(&format!(
                     " AND (r.block_time < ${} OR (r.block_time = ${} AND r.id < ${}))",
-                    bind_count - 1, bind_count - 1, bind_count
+                    bind_count - 1,
+                    bind_count - 1,
+                    bind_count
                 ));
             }
         }
@@ -871,7 +884,9 @@ impl DatabaseInterface for PostgresDbManager {
                 bind_count += 2;
                 cursor_conditions.push_str(&format!(
                     " AND (r.block_time > ${} OR (r.block_time = ${} AND r.id > ${}))",
-                    bind_count - 1, bind_count - 1, bind_count
+                    bind_count - 1,
+                    bind_count - 1,
+                    bind_count
                 ));
             }
         }
@@ -980,8 +995,7 @@ impl DatabaseInterface for PostgresDbManager {
         );
 
         // Build query with parameter binding following get-posts pattern
-        let mut query_builder = sqlx::query(&query)
-            .bind(&user_pubkey_bytes);
+        let mut query_builder = sqlx::query(&query).bind(&user_pubkey_bytes);
 
         // Add cursor parameters if present
         if let Some(before_cursor) = &options.before {
@@ -996,7 +1010,9 @@ impl DatabaseInterface for PostgresDbManager {
             }
         }
 
-        query_builder = query_builder.bind(offset_limit).bind(&requester_pubkey_bytes);
+        query_builder = query_builder
+            .bind(offset_limit)
+            .bind(&requester_pubkey_bytes);
 
         let rows = query_builder
             .fetch_all(&self.pool)
@@ -1005,12 +1021,12 @@ impl DatabaseInterface for PostgresDbManager {
 
         let has_more = rows.len() > limit as usize;
         let mut replies = Vec::new();
-        
+
         for (i, row) in rows.iter().enumerate() {
             if i >= limit as usize {
                 break;
             }
-            
+
             let transaction_id: Vec<u8> = row.get("transaction_id");
             let sender_pubkey: Vec<u8> = row.get("sender_pubkey");
             let sender_signature: Vec<u8> = row.get("sender_signature");
@@ -1058,18 +1074,22 @@ impl DatabaseInterface for PostgresDbManager {
         let mut bind_count = 1;
         let mut post_cursor_conditions = String::new();
         let mut reply_cursor_conditions = String::new();
-        
+
         // Add cursor logic for posts
         if let Some(before_cursor) = &options.before {
             if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
                 bind_count += 2;
                 post_cursor_conditions.push_str(&format!(
                     " AND (p.block_time < ${} OR (p.block_time = ${} AND p.id < ${}))",
-                    bind_count - 1, bind_count - 1, bind_count
+                    bind_count - 1,
+                    bind_count - 1,
+                    bind_count
                 ));
                 reply_cursor_conditions.push_str(&format!(
                     " AND (r.block_time < ${} OR (r.block_time = ${} AND r.id < ${}))",
-                    bind_count - 1, bind_count - 1, bind_count
+                    bind_count - 1,
+                    bind_count - 1,
+                    bind_count
                 ));
             }
         }
@@ -1079,11 +1099,15 @@ impl DatabaseInterface for PostgresDbManager {
                 bind_count += 2;
                 post_cursor_conditions.push_str(&format!(
                     " AND (p.block_time > ${} OR (p.block_time = ${} AND p.id > ${}))",
-                    bind_count - 1, bind_count - 1, bind_count
+                    bind_count - 1,
+                    bind_count - 1,
+                    bind_count
                 ));
                 reply_cursor_conditions.push_str(&format!(
                     " AND (r.block_time > ${} OR (r.block_time = ${} AND r.id > ${}))",
-                    bind_count - 1, bind_count - 1, bind_count
+                    bind_count - 1,
+                    bind_count - 1,
+                    bind_count
                 ));
             }
         }
@@ -1236,8 +1260,7 @@ impl DatabaseInterface for PostgresDbManager {
         );
 
         // Build query with parameter binding following optimized pattern
-        let mut query_builder = sqlx::query(&query)
-            .bind(&mentioned_user_pubkey_bytes);
+        let mut query_builder = sqlx::query(&query).bind(&mentioned_user_pubkey_bytes);
 
         // Add cursor parameters if present
         if let Some(before_cursor) = &options.before {
@@ -1252,7 +1275,9 @@ impl DatabaseInterface for PostgresDbManager {
             }
         }
 
-        query_builder = query_builder.bind(offset_limit).bind(&requester_pubkey_bytes);
+        query_builder = query_builder
+            .bind(offset_limit)
+            .bind(&requester_pubkey_bytes);
 
         let rows = query_builder
             .fetch_all(&self.pool)
@@ -1261,12 +1286,12 @@ impl DatabaseInterface for PostgresDbManager {
 
         let has_more = rows.len() > limit as usize;
         let mut content_records = Vec::new();
-        
+
         for (i, row) in rows.iter().enumerate() {
             if i >= limit as usize {
                 break;
             }
-            
+
             let content_type: String = row.get("content_type");
             let transaction_id: Vec<u8> = row.get("transaction_id");
             let sender_pubkey: Vec<u8> = row.get("sender_pubkey");
@@ -1297,9 +1322,13 @@ impl DatabaseInterface for PostgresDbManager {
                     let post_id: Option<Vec<u8>> = row.get("post_id");
                     let post_id_hex = match post_id {
                         Some(bytes) => Self::encode_bytes_to_hex(&bytes),
-                        None => return Err(DatabaseError::QueryError("Missing post_id for reply".to_string())),
+                        None => {
+                            return Err(DatabaseError::QueryError(
+                                "Missing post_id for reply".to_string(),
+                            ))
+                        }
                     };
-                    
+
                     let reply_record = KReplyRecord {
                         id: row.get::<i64, _>("id"),
                         transaction_id: Self::encode_bytes_to_hex(&transaction_id),
@@ -1319,23 +1348,25 @@ impl DatabaseInterface for PostgresDbManager {
                     };
                     ContentRecord::Reply(reply_record)
                 }
-                _ => return Err(DatabaseError::QueryError(
-                    format!("Unknown content type: {}", content_type)
-                )),
+                _ => {
+                    return Err(DatabaseError::QueryError(format!(
+                        "Unknown content type: {}",
+                        content_type
+                    )))
+                }
             };
-            
+
             content_records.push(content_record);
         }
 
-        let pagination = self.create_compound_pagination_metadata(&content_records, limit as u32, has_more);
+        let pagination =
+            self.create_compound_pagination_metadata(&content_records, limit as u32, has_more);
 
         Ok(PaginatedResult {
             items: content_records,
             pagination,
         })
     }
-
-
 
     async fn get_content_by_id_with_metadata(
         &self,
@@ -1572,9 +1603,11 @@ impl DatabaseInterface for PostgresDbManager {
                 let post_id: Option<Vec<u8>> = row.get("post_id");
                 let post_id_hex = match post_id {
                     Some(bytes) => Self::encode_bytes_to_hex(&bytes),
-                    None => return Err(DatabaseError::QueryError(
-                        "Reply record missing post_id".to_string()
-                    )),
+                    None => {
+                        return Err(DatabaseError::QueryError(
+                            "Reply record missing post_id".to_string(),
+                        ))
+                    }
                 };
 
                 let reply_record = KReplyRecord {
@@ -1596,9 +1629,12 @@ impl DatabaseInterface for PostgresDbManager {
                 };
                 ContentRecord::Reply(reply_record)
             }
-            _ => return Err(DatabaseError::QueryError(
-                format!("Unknown content type: {}", content_type)
-            )),
+            _ => {
+                return Err(DatabaseError::QueryError(format!(
+                    "Unknown content type: {}",
+                    content_type
+                )))
+            }
         };
 
         Ok(Some(content_record))

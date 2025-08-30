@@ -1,4 +1,6 @@
-use crate::models::{KBroadcastRecord, KPostRecord, KReplyRecord, PaginationMetadata, ContentRecord};
+use crate::models::{
+    ContentRecord, KBroadcastRecord, KPostRecord, KReplyRecord, PaginationMetadata,
+};
 use async_trait::async_trait;
 use std::result::Result as StdResult;
 
@@ -31,8 +33,8 @@ impl std::error::Error for DatabaseError {}
 #[derive(Debug, Clone)]
 pub struct QueryOptions {
     pub limit: Option<u64>,
-    pub before: Option<String>,  // Compound cursors like "timestamp_id"
-    pub after: Option<String>,   // Compound cursors like "timestamp_id"
+    pub before: Option<String>, // Compound cursors like "timestamp_id"
+    pub after: Option<String>,  // Compound cursors like "timestamp_id"
     pub sort_descending: bool,
 }
 
@@ -63,7 +65,6 @@ pub trait DatabaseInterface: Send + Sync {
         &self,
         options: QueryOptions,
     ) -> DatabaseResult<PaginatedResult<KBroadcastRecord>>;
-
 
     // Optimized single-query method for get-posts-watching API
     async fn get_all_posts_with_metadata(
@@ -103,7 +104,6 @@ pub trait DatabaseInterface: Send + Sync {
         requester_pubkey: &str,
         options: QueryOptions,
     ) -> DatabaseResult<PaginatedResult<ContentRecord>>;
-
 
     // Merged optimized single-query method for get-post-details API (posts and replies)
     async fn get_content_by_id_with_metadata(

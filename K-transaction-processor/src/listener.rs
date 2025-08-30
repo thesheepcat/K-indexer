@@ -1,8 +1,8 @@
-use tokio::sync::mpsc;
-use sqlx::{postgres::PgListener, Error as SqlxError};
-use anyhow::Result;
-use tracing::{info, error, warn};
 use crate::config::AppConfig;
+use anyhow::Result;
+use sqlx::{postgres::PgListener, Error as SqlxError};
+use tokio::sync::mpsc;
+use tracing::{error, info, warn};
 
 pub struct NotificationListener {
     config: AppConfig,
@@ -26,10 +26,14 @@ impl NotificationListener {
                 }
                 Err(e) => {
                     error!("Notification listener error: {}", e);
-                    warn!("Reconnecting in {} ms", self.config.processing.retry_delay_ms);
+                    warn!(
+                        "Reconnecting in {} ms",
+                        self.config.processing.retry_delay_ms
+                    );
                     tokio::time::sleep(tokio::time::Duration::from_millis(
                         self.config.processing.retry_delay_ms,
-                    )).await;
+                    ))
+                    .await;
                 }
             }
         }
@@ -42,24 +46,29 @@ impl NotificationListener {
 
         // Create a PostgreSQL listener
         let mut listener = PgListener::connect(&connection_string).await?;
-        
+
         info!("Connected to database for notifications");
-        
+
         // Subscribe to the channel
-        listener.listen(&self.config.processing.channel_name).await?;
-        info!("Listening on channel: {}", self.config.processing.channel_name);
-        
+        listener
+            .listen(&self.config.processing.channel_name)
+            .await?;
+        info!(
+            "Listening on channel: {}",
+            self.config.processing.channel_name
+        );
+
         let notification_sender = self.notification_sender.clone();
-        
+
         info!("Notification listener is now active and waiting for database triggers");
-        
+
         // Process notifications
         loop {
             // Wait for a notification
             match listener.recv().await {
                 Ok(notification) => {
                     //info!("Listener received notification on channel '{}' with payload: '{}'", notification.channel(), notification.payload());
-                    
+
                     // Send the transaction ID to the processing queue
                     let payload = notification.payload().to_string();
                     if let Err(e) = notification_sender.send(payload) {
@@ -73,7 +82,7 @@ impl NotificationListener {
                 }
             }
         }
-        
+
         Ok(())
     }
 }

@@ -9,7 +9,7 @@ mod worker;
 use anyhow::Result;
 use clap::Parser;
 use tokio::sync::mpsc;
-use tracing::{info, error};
+use tracing::{error, info};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use config::AppConfig;
@@ -50,7 +50,6 @@ struct Args {
 
     #[arg(short = 'D', long, help = "Retry delay in milliseconds")]
     retry_delay: Option<u64>,
-
 }
 
 #[tokio::main]
@@ -58,27 +57,36 @@ async fn main() -> Result<()> {
     // Initialize tracing with default INFO level
     tracing_subscriber::registry()
         .with(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    info!("Starting Transaction Processor v{}", env!("CARGO_PKG_VERSION"));
+    info!(
+        "Starting Transaction Processor v{}",
+        env!("CARGO_PKG_VERSION")
+    );
 
     // Parse CLI arguments
     let args = Args::parse();
-    
+
     // Load configuration from CLI arguments only
     let config = AppConfig::from_args(&args);
-    info!("Configuration loaded: {} workers, channel: {}", 
-          config.workers.count, config.processing.channel_name);
-    info!("Database connection: {}:{}/{}", config.database.host, config.database.port, config.database.database);
+    info!(
+        "Configuration loaded: {} workers, channel: {}",
+        config.workers.count, config.processing.channel_name
+    );
+    info!(
+        "Database connection: {}:{}/{}",
+        config.database.host, config.database.port, config.database.database
+    );
 
     let db_pool = create_pool(&config).await?;
-    info!("Database connection pool created with {} max connections", 
-          config.database.max_connections);
-    
+    info!(
+        "Database connection pool created with {} max connections",
+        config.database.max_connections
+    );
+
     // Test the pool connection
     match sqlx::query("SELECT 1").fetch_one(&db_pool).await {
         Ok(_) => info!("Database pool connection test successful"),
@@ -96,10 +104,8 @@ async fn main() -> Result<()> {
 
     let (notification_sender, notification_receiver) = mpsc::unbounded_channel();
 
-    let (mut notification_queue, worker_receivers) = NotificationQueue::new(
-        notification_receiver,
-        config.workers.count,
-    );
+    let (mut notification_queue, worker_receivers) =
+        NotificationQueue::new(notification_receiver, config.workers.count);
 
     let notification_listener = NotificationListener::new(config.clone(), notification_sender);
 
@@ -122,7 +128,10 @@ async fn main() -> Result<()> {
     });
 
     info!("Transaction Processor started successfully");
-    info!("Listening for notifications on channel: {}", config.processing.channel_name);
+    info!(
+        "Listening for notifications on channel: {}",
+        config.processing.channel_name
+    );
 
     tokio::select! {
         _ = listener_handle => {
