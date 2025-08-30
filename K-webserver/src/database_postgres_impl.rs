@@ -153,7 +153,7 @@ impl DatabaseInterface for PostgresDbManager {
                    p.base64_encoded_message, 
                    COALESCE(
                        array_agg(encode(m.mentioned_pubkey, 'hex')) FILTER (WHERE m.mentioned_pubkey IS NOT NULL),
-                       '{}'::text[]
+                       '{{}}'::text[]
                    ) as mentioned_pubkeys
             FROM k_posts p
             LEFT JOIN k_mentions m ON p.transaction_id = m.content_id AND m.content_type = 'post'
@@ -234,6 +234,13 @@ impl DatabaseInterface for PostgresDbManager {
                 sender_signature: Self::encode_bytes_to_hex(&sender_signature),
                 base64_encoded_message: row.get("base64_encoded_message"),
                 mentioned_pubkeys: mentioned_pubkeys_array,
+                replies_count: None,
+                up_votes_count: None,
+                down_votes_count: None,
+                is_upvoted: None,
+                is_downvoted: None,
+                user_nickname: None,
+                user_profile_image: None,
             });
         }
 
@@ -263,7 +270,7 @@ impl DatabaseInterface for PostgresDbManager {
                    p.base64_encoded_message,
                    COALESCE(
                        array_agg(encode(m.mentioned_pubkey, 'hex')) FILTER (WHERE m.mentioned_pubkey IS NOT NULL),
-                       '{}'::text[]
+                       '{{}}'::text[]
                    ) as mentioned_pubkeys
             FROM k_posts p
             LEFT JOIN k_mentions m ON p.transaction_id = m.content_id AND m.content_type = 'post'
@@ -344,6 +351,13 @@ impl DatabaseInterface for PostgresDbManager {
                 sender_signature: Self::encode_bytes_to_hex(&sender_signature),
                 base64_encoded_message: row.get("base64_encoded_message"),
                 mentioned_pubkeys: mentioned_pubkeys_array,
+                replies_count: None,
+                up_votes_count: None,
+                down_votes_count: None,
+                is_upvoted: None,
+                is_downvoted: None,
+                user_nickname: None,
+                user_profile_image: None,
             });
         }
 
@@ -369,7 +383,7 @@ impl DatabaseInterface for PostgresDbManager {
                    p.base64_encoded_message,
                    COALESCE(
                        array_agg(encode(m.mentioned_pubkey, 'hex')) FILTER (WHERE m.mentioned_pubkey IS NOT NULL),
-                       '{}'::text[]
+                       '{{}}'::text[]
                    ) as mentioned_pubkeys
             FROM k_posts p
             LEFT JOIN k_mentions m ON p.transaction_id = m.content_id AND m.content_type = 'post'
@@ -396,6 +410,13 @@ impl DatabaseInterface for PostgresDbManager {
                 sender_signature: Self::encode_bytes_to_hex(&sender_signature),
                 base64_encoded_message: row.get("base64_encoded_message"),
                 mentioned_pubkeys: mentioned_pubkeys_array,
+                replies_count: None,
+                up_votes_count: None,
+                down_votes_count: None,
+                is_upvoted: None,
+                is_downvoted: None,
+                user_nickname: None,
+                user_profile_image: None,
             }))
         } else {
             Ok(None)
@@ -426,7 +447,7 @@ impl DatabaseInterface for PostgresDbManager {
                     p.base64_encoded_message,
                     COALESCE(
                         array_agg(encode(m2.mentioned_pubkey, 'hex')) FILTER (WHERE m2.mentioned_pubkey IS NOT NULL),
-                        '{}'::text[]
+                        '{{}}'::text[]
                     ) as mentioned_pubkeys,
                     NULL as post_id,
                     'post' as content_type
@@ -446,7 +467,7 @@ impl DatabaseInterface for PostgresDbManager {
                     r.base64_encoded_message,
                     COALESCE(
                         array_agg(encode(m2.mentioned_pubkey, 'hex')) FILTER (WHERE m2.mentioned_pubkey IS NOT NULL),
-                        '{}'::text[]
+                        '{{}}'::text[]
                     ) as mentioned_pubkeys,
                     r.post_id,
                     'reply' as content_type
@@ -540,6 +561,13 @@ impl DatabaseInterface for PostgresDbManager {
                 sender_signature: Self::encode_bytes_to_hex(&sender_signature),
                 base64_encoded_message: row.get("base64_encoded_message"),
                 mentioned_pubkeys: mentioned_pubkeys_array,
+                replies_count: None,
+                up_votes_count: None,
+                down_votes_count: None,
+                is_upvoted: None,
+                is_downvoted: None,
+                user_nickname: None,
+                user_profile_image: None,
             });
         }
 
@@ -572,7 +600,7 @@ impl DatabaseInterface for PostgresDbManager {
                    r.post_id, r.base64_encoded_message,
                    COALESCE(
                        array_agg(encode(m.mentioned_pubkey, 'hex')) FILTER (WHERE m.mentioned_pubkey IS NOT NULL),
-                       '{}'::text[]
+                       '{{}}'::text[]
                    ) as mentioned_pubkeys
             FROM k_replies r
             LEFT JOIN k_mentions m ON r.transaction_id = m.content_id AND m.content_type = 'reply'
@@ -655,6 +683,13 @@ impl DatabaseInterface for PostgresDbManager {
                 post_id: Self::encode_bytes_to_hex(&post_id),
                 base64_encoded_message: row.get("base64_encoded_message"),
                 mentioned_pubkeys: mentioned_pubkeys_array,
+                replies_count: None,
+                up_votes_count: None,
+                down_votes_count: None,
+                is_upvoted: None,
+                is_downvoted: None,
+                user_nickname: None,
+                user_profile_image: None,
             });
         }
 
@@ -686,7 +721,7 @@ impl DatabaseInterface for PostgresDbManager {
                    r.post_id, r.base64_encoded_message,
                    COALESCE(
                        array_agg(encode(m.mentioned_pubkey, 'hex')) FILTER (WHERE m.mentioned_pubkey IS NOT NULL),
-                       '{}'::text[]
+                       '{{}}'::text[]
                    ) as mentioned_pubkeys
             FROM k_replies r
             LEFT JOIN k_mentions m ON r.transaction_id = m.content_id AND m.content_type = 'reply'
@@ -769,6 +804,13 @@ impl DatabaseInterface for PostgresDbManager {
                 post_id: Self::encode_bytes_to_hex(&post_id),
                 base64_encoded_message: row.get("base64_encoded_message"),
                 mentioned_pubkeys: mentioned_pubkeys_array,
+                replies_count: None,
+                up_votes_count: None,
+                down_votes_count: None,
+                is_upvoted: None,
+                is_downvoted: None,
+                user_nickname: None,
+                user_profile_image: None,
             });
         }
 
@@ -794,7 +836,7 @@ impl DatabaseInterface for PostgresDbManager {
                    r.post_id, r.base64_encoded_message,
                    COALESCE(
                        array_agg(encode(m.mentioned_pubkey, 'hex')) FILTER (WHERE m.mentioned_pubkey IS NOT NULL),
-                       '{}'::text[]
+                       '{{}}'::text[]
                    ) as mentioned_pubkeys
             FROM k_replies r
             LEFT JOIN k_mentions m ON r.transaction_id = m.content_id AND m.content_type = 'reply'
@@ -823,6 +865,13 @@ impl DatabaseInterface for PostgresDbManager {
                 post_id: Self::encode_bytes_to_hex(&post_id),
                 base64_encoded_message: row.get("base64_encoded_message"),
                 mentioned_pubkeys: mentioned_pubkeys_array,
+                replies_count: None,
+                up_votes_count: None,
+                down_votes_count: None,
+                is_upvoted: None,
+                is_downvoted: None,
+                user_nickname: None,
+                user_profile_image: None,
             }))
         } else {
             Ok(None)
@@ -1024,7 +1073,7 @@ impl DatabaseInterface for PostgresDbManager {
             SELECT id, transaction_id, block_time, sender_pubkey, sender_signature, 
                    post_id, vote
             FROM k_votes 
-            WHERE post_id = $1 AND sender_pubkey = $2 
+            WHERE post_id = $1 AND sender_pubkey = $1 
             ORDER BY block_time DESC 
             LIMIT 1
             "#
@@ -1079,5 +1128,1177 @@ impl DatabaseInterface for PostgresDbManager {
         let user_downvoted = self.has_user_downvoted(post_id, requester_pubkey).await?;
 
         Ok((upvotes, downvotes, user_upvoted, user_downvoted))
+    }
+
+    // Optimized single-query method for get-posts-watching API
+    async fn get_all_posts_with_metadata(
+        &self,
+        requester_pubkey: &str,
+        options: QueryOptions,
+    ) -> DatabaseResult<PaginatedResult<KPostRecord>> {
+        let requester_pubkey_bytes = Self::decode_hex_to_bytes(requester_pubkey)?;
+        let limit = options.limit.unwrap_or(20) as i64;
+        let offset_limit = limit + 1; // Get one extra to check if there are more
+
+        let mut bind_count = 1;
+        let mut cursor_conditions = String::new();
+        
+        // Add cursor logic to the all_posts CTE
+        if let Some(before_cursor) = &options.before {
+            if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
+                bind_count += 2;
+                cursor_conditions.push_str(&format!(
+                    " AND (p.block_time < ${} OR (p.block_time = ${} AND p.id < ${}))",
+                    bind_count - 1, bind_count - 1, bind_count
+                ));
+            }
+        }
+
+        if let Some(after_cursor) = &options.after {
+            if let Ok((after_timestamp, after_id)) = Self::parse_compound_cursor(after_cursor) {
+                bind_count += 2;
+                cursor_conditions.push_str(&format!(
+                    " AND (p.block_time > ${} OR (p.block_time = ${} AND p.id > ${}))",
+                    bind_count - 1, bind_count - 1, bind_count
+                ));
+            }
+        }
+
+        let order_clause = if options.sort_descending {
+            " ORDER BY p.block_time DESC, p.id DESC"
+        } else {
+            " ORDER BY p.block_time ASC, p.id ASC"
+        };
+
+        let query = format!(
+            r#"
+            WITH all_posts AS (
+                SELECT p.id, p.transaction_id, p.block_time, p.sender_pubkey,
+                       p.sender_signature, p.base64_encoded_message
+                FROM k_posts p 
+                WHERE 1=1{cursor_conditions}
+                {order_clause}
+                LIMIT ${limit_param}
+            ), post_stats AS (
+                SELECT lp.id, lp.transaction_id, lp.block_time, lp.sender_pubkey,
+                       lp.sender_signature, lp.base64_encoded_message,
+                       COALESCE(r.replies_count, 0) as replies_count,
+                       COALESCE(v.up_votes_count, 0) as up_votes_count,
+                       COALESCE(v.down_votes_count, 0) as down_votes_count,
+                       COALESCE(v.user_upvoted, false) as is_upvoted,
+                       COALESCE(v.user_downvoted, false) as is_downvoted
+                FROM all_posts lp
+                LEFT JOIN (
+                    SELECT post_id, COUNT(*) as replies_count 
+                    FROM k_replies r
+                    WHERE EXISTS (SELECT 1 FROM all_posts lp WHERE lp.transaction_id = r.post_id)
+                    GROUP BY post_id
+                ) r ON lp.transaction_id = r.post_id
+                LEFT JOIN (
+                    SELECT post_id,
+                           COUNT(*) FILTER (WHERE vote = 'upvote') as up_votes_count,
+                           COUNT(*) FILTER (WHERE vote = 'downvote') as down_votes_count,
+                           bool_or(vote = 'upvote' AND sender_pubkey = $1) as user_upvoted,
+                           bool_or(vote = 'downvote' AND sender_pubkey = $1) as user_downvoted
+                    FROM k_votes v 
+                    WHERE EXISTS (SELECT 1 FROM all_posts lp WHERE lp.transaction_id = v.post_id)
+                    GROUP BY post_id
+                ) v ON lp.transaction_id = v.post_id
+            )
+            SELECT ps.id, ps.transaction_id, ps.block_time, ps.sender_pubkey,
+                   ps.sender_signature, ps.base64_encoded_message,
+                   COALESCE(ARRAY(SELECT encode(m.mentioned_pubkey, 'hex') FROM k_mentions m
+                                  WHERE m.content_id = ps.transaction_id AND m.content_type = 'post'), '{{}}') as mentioned_pubkeys,
+                   ps.replies_count, ps.up_votes_count, ps.down_votes_count,
+                   ps.is_upvoted, ps.is_downvoted,
+                   COALESCE(b.base64_encoded_nickname, '') as user_nickname,
+                   b.base64_encoded_profile_image as user_profile_image
+            FROM post_stats ps
+            LEFT JOIN LATERAL (
+                SELECT base64_encoded_nickname, base64_encoded_profile_image
+                FROM k_broadcasts b 
+                WHERE b.sender_pubkey = ps.sender_pubkey
+                ORDER BY b.block_time DESC 
+                LIMIT 1
+            ) b ON true 
+            WHERE 1=1
+            "#,
+            cursor_conditions = cursor_conditions,
+            order_clause = order_clause,
+            limit_param = bind_count + 1
+        );
+
+        // Build query with parameter binding following get-mentions pattern
+        let mut query_builder = sqlx::query(&query)
+            .bind(&requester_pubkey_bytes);
+
+        // Add cursor parameters if present
+        if let Some(before_cursor) = &options.before {
+            if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
+                query_builder = query_builder.bind(before_timestamp as i64).bind(before_id);
+            }
+        }
+
+        if let Some(after_cursor) = &options.after {
+            if let Ok((after_timestamp, after_id)) = Self::parse_compound_cursor(after_cursor) {
+                query_builder = query_builder.bind(after_timestamp as i64).bind(after_id);
+            }
+        }
+
+        query_builder = query_builder.bind(offset_limit);
+
+        let rows = query_builder
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
+
+        let has_more = rows.len() > limit as usize;
+        let actual_items = if has_more {
+            rows.into_iter().take(limit as usize).collect::<Vec<_>>()
+        } else {
+            rows.into_iter().collect::<Vec<_>>()
+        };
+
+        let mut posts = Vec::new();
+        for row in actual_items {
+            let transaction_id: Vec<u8> = row.get("transaction_id");
+            let sender_pubkey: Vec<u8> = row.get("sender_pubkey");
+            let sender_signature: Vec<u8> = row.get("sender_signature");
+            let mentioned_pubkeys_array: Vec<String> = row.get("mentioned_pubkeys");
+
+            posts.push(KPostRecord {
+                id: row.get::<i64, _>("id"),
+                transaction_id: Self::encode_bytes_to_hex(&transaction_id),
+                block_time: row.get::<i64, _>("block_time") as u64,
+                sender_pubkey: Self::encode_bytes_to_hex(&sender_pubkey),
+                sender_signature: Self::encode_bytes_to_hex(&sender_signature),
+                base64_encoded_message: row.get("base64_encoded_message"),
+                mentioned_pubkeys: mentioned_pubkeys_array,
+                replies_count: Some(row.get::<i64, _>("replies_count") as u64),
+                up_votes_count: Some(row.get::<i64, _>("up_votes_count") as u64),
+                down_votes_count: Some(row.get::<i64, _>("down_votes_count") as u64),
+                is_upvoted: Some(row.get("is_upvoted")),
+                is_downvoted: Some(row.get("is_downvoted")),
+                user_nickname: Some(row.get("user_nickname")),
+                user_profile_image: row.get("user_profile_image"),
+            });
+        }
+
+        let pagination = self.create_compound_pagination_metadata(&posts, limit as u32, has_more);
+
+        Ok(PaginatedResult {
+            items: posts,
+            pagination,
+        })
+    }
+
+    async fn get_posts_by_user_with_metadata(
+        &self,
+        user_public_key: &str,
+        requester_pubkey: &str,
+        options: QueryOptions,
+    ) -> DatabaseResult<PaginatedResult<KPostRecord>> {
+        let user_pubkey_bytes = Self::decode_hex_to_bytes(user_public_key)?;
+        let requester_pubkey_bytes = Self::decode_hex_to_bytes(requester_pubkey)?;
+        let limit = options.limit.unwrap_or(20) as i64;
+        let offset_limit = limit + 1; // Get one extra to check if there are more
+
+        let mut query = String::from(
+            r#"
+            WITH all_posts AS (
+                -- Get limited posts for specific user first to reduce data volume
+                SELECT p.id, p.transaction_id, p.block_time, p.sender_pubkey, 
+                       p.sender_signature, p.base64_encoded_message
+                FROM k_posts p
+                WHERE p.sender_pubkey = $1
+                ORDER BY p.block_time DESC, p.id DESC
+                LIMIT $2
+            ),
+            post_stats AS (
+                -- Pre-aggregate metadata only for limited posts
+                SELECT 
+                    lp.id, lp.transaction_id, lp.block_time, lp.sender_pubkey,
+                    lp.sender_signature, lp.base64_encoded_message,
+                    
+                    -- Replies count (optimized with EXISTS)
+                    COALESCE(r.replies_count, 0) as replies_count,
+                    
+                    -- Vote statistics (optimized with EXISTS)
+                    COALESCE(v.up_votes_count, 0) as up_votes_count,
+                    COALESCE(v.down_votes_count, 0) as down_votes_count,
+                    COALESCE(v.user_upvoted, false) as is_upvoted,
+                    COALESCE(v.user_downvoted, false) as is_downvoted
+                    
+                FROM all_posts lp
+                
+                -- Optimized replies aggregation with EXISTS filter
+                LEFT JOIN (
+                    SELECT post_id, COUNT(*) as replies_count
+                    FROM k_replies r
+                    WHERE EXISTS (SELECT 1 FROM all_posts lp WHERE lp.transaction_id = r.post_id)
+                    GROUP BY post_id
+                ) r ON lp.transaction_id = r.post_id
+                
+                -- Optimized vote aggregation with EXISTS filter and combined user vote
+                LEFT JOIN (
+                    SELECT 
+                        post_id,
+                        COUNT(*) FILTER (WHERE vote = 'upvote') as up_votes_count,
+                        COUNT(*) FILTER (WHERE vote = 'downvote') as down_votes_count,
+                        bool_or(vote = 'upvote' AND sender_pubkey = $3) as user_upvoted,
+                        bool_or(vote = 'downvote' AND sender_pubkey = $3) as user_downvoted
+                    FROM k_votes v
+                    WHERE EXISTS (SELECT 1 FROM all_posts lp WHERE lp.transaction_id = v.post_id)
+                    GROUP BY post_id
+                ) v ON lp.transaction_id = v.post_id
+            )
+            SELECT 
+                ps.id, ps.transaction_id, ps.block_time, ps.sender_pubkey,
+                ps.sender_signature, ps.base64_encoded_message,
+                
+                -- Get mentioned pubkeys efficiently with subquery
+                COALESCE(
+                    ARRAY(
+                        SELECT encode(m.mentioned_pubkey, 'hex') 
+                        FROM k_mentions m 
+                        WHERE m.content_id = ps.transaction_id AND m.content_type = 'post'
+                    ),
+                    '{{}}'::text[]
+                ) as mentioned_pubkeys,
+                
+                ps.replies_count,
+                ps.up_votes_count,
+                ps.down_votes_count,
+                ps.is_upvoted,
+                ps.is_downvoted,
+                
+                -- User profile lookup with LATERAL join
+                COALESCE(b.base64_encoded_nickname, '') as user_nickname,
+                b.base64_encoded_profile_image as user_profile_image
+                
+            FROM post_stats ps
+            LEFT JOIN LATERAL (
+                SELECT base64_encoded_nickname, base64_encoded_profile_image
+                FROM k_broadcasts b
+                WHERE b.sender_pubkey = ps.sender_pubkey
+                ORDER BY b.block_time DESC
+                LIMIT 1
+            ) b ON true
+            WHERE 1=1
+            "#
+        );
+
+        let mut bind_count = 3;
+        
+        if let Some(before_cursor) = &options.before {
+            if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
+                bind_count += 2;
+                query.push_str(&format!(
+                    " AND (ps.block_time < ${} OR (ps.block_time = ${} AND ps.id < ${}))",
+                    bind_count - 1, bind_count - 1, bind_count
+                ));
+            }
+        }
+
+        if let Some(after_cursor) = &options.after {
+            if let Ok((after_timestamp, after_id)) = Self::parse_compound_cursor(after_cursor) {
+                bind_count += 2;
+                query.push_str(&format!(
+                    " AND (ps.block_time > ${} OR (ps.block_time = ${} AND ps.id > ${}))",
+                    bind_count - 1, bind_count - 1, bind_count
+                ));
+            }
+        }
+
+        if options.sort_descending {
+            query.push_str(" ORDER BY ps.block_time DESC, ps.id DESC");
+        } else {
+            query.push_str(" ORDER BY ps.block_time ASC, ps.id ASC");
+        }
+
+        query.push_str(&format!(" LIMIT ${}", bind_count + 1));
+
+        // Build query
+        let mut query_builder = sqlx::query(&query)
+            .bind(&user_pubkey_bytes)
+            .bind(offset_limit)
+            .bind(&requester_pubkey_bytes);
+
+        // Add cursor parameters if present
+        if let Some(before_cursor) = &options.before {
+            if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
+                query_builder = query_builder.bind(before_timestamp as i64).bind(before_id);
+            }
+        }
+
+        if let Some(after_cursor) = &options.after {
+            if let Ok((after_timestamp, after_id)) = Self::parse_compound_cursor(after_cursor) {
+                query_builder = query_builder.bind(after_timestamp as i64).bind(after_id);
+            }
+        }
+
+        query_builder = query_builder.bind(offset_limit);
+
+        let rows = query_builder
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
+
+        let has_more = rows.len() > limit as usize;
+        let mut posts = Vec::new();
+        
+        for (i, row) in rows.iter().enumerate() {
+            if i >= limit as usize {
+                break;
+            }
+            
+            let transaction_id: Vec<u8> = row.get("transaction_id");
+            let sender_pubkey: Vec<u8> = row.get("sender_pubkey");
+            let sender_signature: Vec<u8> = row.get("sender_signature");
+            let mentioned_pubkeys_array: Vec<String> = row.get("mentioned_pubkeys");
+
+            posts.push(KPostRecord {
+                id: row.get::<i64, _>("id"),
+                transaction_id: Self::encode_bytes_to_hex(&transaction_id),
+                block_time: row.get::<i64, _>("block_time") as u64,
+                sender_pubkey: Self::encode_bytes_to_hex(&sender_pubkey),
+                sender_signature: Self::encode_bytes_to_hex(&sender_signature),
+                base64_encoded_message: row.get("base64_encoded_message"),
+                mentioned_pubkeys: mentioned_pubkeys_array,
+                replies_count: Some(row.get::<i64, _>("replies_count") as u64),
+                up_votes_count: Some(row.get::<i64, _>("up_votes_count") as u64),
+                down_votes_count: Some(row.get::<i64, _>("down_votes_count") as u64),
+                is_upvoted: Some(row.get("is_upvoted")),
+                is_downvoted: Some(row.get("is_downvoted")),
+                user_nickname: Some(row.get("user_nickname")),
+                user_profile_image: row.get("user_profile_image"),
+            });
+        }
+
+        let pagination = self.create_compound_pagination_metadata(&posts, limit as u32, has_more);
+
+        Ok(PaginatedResult {
+            items: posts,
+            pagination,
+        })
+    }
+
+    async fn get_replies_by_post_id_with_metadata(
+        &self,
+        post_id: &str,
+        requester_pubkey: &str,
+        options: QueryOptions,
+    ) -> DatabaseResult<PaginatedResult<KReplyRecord>> {
+        let post_id_bytes = Self::decode_hex_to_bytes(post_id)?;
+        let requester_pubkey_bytes = Self::decode_hex_to_bytes(requester_pubkey)?;
+        let limit = options.limit.unwrap_or(20) as i64;
+        let offset_limit = limit + 1; // Get one extra to check if there are more
+
+        let mut query = String::from(
+            r#"
+            SELECT 
+                r.id, 
+                r.transaction_id, 
+                r.block_time, 
+                r.sender_pubkey, 
+                r.sender_signature, 
+                r.post_id,
+                r.base64_encoded_message,
+                COALESCE(
+                    array_agg(DISTINCT encode(m.mentioned_pubkey, 'hex')) FILTER (WHERE m.mentioned_pubkey IS NOT NULL),
+                    '{{}}'::text[]
+                ) as mentioned_pubkeys,
+                
+                -- Replies count using subquery (nested replies to this reply)
+                COALESCE(reply_counts.replies_count, 0) as replies_count,
+                
+                -- Vote counts using subqueries
+                COALESCE(vote_counts.up_votes_count, 0) as up_votes_count,
+                COALESCE(vote_counts.down_votes_count, 0) as down_votes_count,
+                
+                -- User's vote status
+                COALESCE(user_vote.is_upvoted, false) as is_upvoted,
+                COALESCE(user_vote.is_downvoted, false) as is_downvoted,
+                
+                -- User profile data from latest broadcast
+                COALESCE(user_profile.base64_encoded_nickname, '') as user_nickname,
+                user_profile.base64_encoded_profile_image as user_profile_image
+                
+            FROM k_replies r
+            
+            -- LEFT JOIN for mentions
+            LEFT JOIN k_mentions m ON r.transaction_id = m.content_id AND m.content_type = 'reply'
+            
+            -- LEFT JOIN for replies count (nested replies to this reply)
+            LEFT JOIN (
+                SELECT post_id, COUNT(*) as replies_count
+                FROM k_replies
+                GROUP BY post_id
+            ) reply_counts ON r.transaction_id = reply_counts.post_id
+            
+            -- LEFT JOIN for vote counts
+            LEFT JOIN (
+                SELECT 
+                    post_id,
+                    COUNT(*) FILTER (WHERE vote = 'upvote') as up_votes_count,
+                    COUNT(*) FILTER (WHERE vote = 'downvote') as down_votes_count
+                FROM k_votes
+                GROUP BY post_id
+            ) vote_counts ON r.transaction_id = vote_counts.post_id
+            
+            -- LEFT JOIN for user's vote status
+            LEFT JOIN (
+                SELECT 
+                    post_id,
+                    sender_pubkey,
+                    bool_or(vote = 'upvote') as is_upvoted,
+                    bool_or(vote = 'downvote') as is_downvoted
+                FROM k_votes 
+                WHERE sender_pubkey = $1
+                GROUP BY post_id, sender_pubkey
+            ) user_vote ON r.transaction_id = user_vote.post_id
+            
+            -- LEFT JOIN for user profile data (latest broadcast)
+            LEFT JOIN (
+                SELECT DISTINCT ON (sender_pubkey) 
+                    sender_pubkey,
+                    base64_encoded_nickname,
+                    base64_encoded_profile_image
+                FROM k_broadcasts 
+                ORDER BY sender_pubkey, block_time DESC
+            ) user_profile ON r.sender_pubkey = user_profile.sender_pubkey
+            
+            WHERE r.post_id = $1
+            "#
+        );
+
+        let mut bind_count = 2;
+        
+        if let Some(before_cursor) = &options.before {
+            if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
+                bind_count += 2;
+                query.push_str(&format!(
+                    " AND (r.block_time < ${} OR (r.block_time = ${} AND r.id < ${}))",
+                    bind_count - 1, bind_count - 1, bind_count
+                ));
+            }
+        }
+
+        if let Some(after_cursor) = &options.after {
+            if let Ok((after_timestamp, after_id)) = Self::parse_compound_cursor(after_cursor) {
+                bind_count += 2;
+                query.push_str(&format!(
+                    " AND (r.block_time > ${} OR (r.block_time = ${} AND r.id > ${}))",
+                    bind_count - 1, bind_count - 1, bind_count
+                ));
+            }
+        }
+
+        query.push_str(" GROUP BY r.id, r.transaction_id, r.block_time, r.sender_pubkey, r.sender_signature, r.post_id, r.base64_encoded_message, reply_counts.replies_count, vote_counts.up_votes_count, vote_counts.down_votes_count, user_vote.is_upvoted, user_vote.is_downvoted, user_profile.base64_encoded_nickname, user_profile.base64_encoded_profile_image");
+
+        if options.sort_descending {
+            query.push_str(" ORDER BY r.block_time DESC, r.id DESC");
+        } else {
+            query.push_str(" ORDER BY r.block_time ASC, r.id ASC");
+        }
+
+        query.push_str(&format!(" LIMIT ${}", bind_count + 1));
+
+        // Build query
+        let mut query_builder = sqlx::query(&query)
+            .bind(&post_id_bytes)
+            .bind(&requester_pubkey_bytes);
+
+        // Add cursor parameters if present
+        if let Some(before_cursor) = &options.before {
+            if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
+                query_builder = query_builder.bind(before_timestamp as i64).bind(before_id);
+            }
+        }
+
+        if let Some(after_cursor) = &options.after {
+            if let Ok((after_timestamp, after_id)) = Self::parse_compound_cursor(after_cursor) {
+                query_builder = query_builder.bind(after_timestamp as i64).bind(after_id);
+            }
+        }
+
+        query_builder = query_builder.bind(offset_limit);
+
+        let rows = query_builder
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
+
+        let has_more = rows.len() > limit as usize;
+        let mut replies = Vec::new();
+        
+        for (i, row) in rows.iter().enumerate() {
+            if i >= limit as usize {
+                break;
+            }
+            
+            let transaction_id: Vec<u8> = row.get("transaction_id");
+            let sender_pubkey: Vec<u8> = row.get("sender_pubkey");
+            let sender_signature: Vec<u8> = row.get("sender_signature");
+            let post_id: Vec<u8> = row.get("post_id");
+            let mentioned_pubkeys_array: Vec<String> = row.get("mentioned_pubkeys");
+
+            replies.push(KReplyRecord {
+                id: row.get::<i64, _>("id"),
+                transaction_id: Self::encode_bytes_to_hex(&transaction_id),
+                block_time: row.get::<i64, _>("block_time") as u64,
+                sender_pubkey: Self::encode_bytes_to_hex(&sender_pubkey),
+                sender_signature: Self::encode_bytes_to_hex(&sender_signature),
+                post_id: Self::encode_bytes_to_hex(&post_id),
+                base64_encoded_message: row.get("base64_encoded_message"),
+                mentioned_pubkeys: mentioned_pubkeys_array,
+                replies_count: Some(row.get::<i64, _>("replies_count") as u64),
+                up_votes_count: Some(row.get::<i64, _>("up_votes_count") as u64),
+                down_votes_count: Some(row.get::<i64, _>("down_votes_count") as u64),
+                is_upvoted: Some(row.get("is_upvoted")),
+                is_downvoted: Some(row.get("is_downvoted")),
+                user_nickname: Some(row.get("user_nickname")),
+                user_profile_image: row.get("user_profile_image"),
+            });
+        }
+
+        let pagination = self.create_compound_pagination_metadata(&replies, limit as u32, has_more);
+
+        Ok(PaginatedResult {
+            items: replies,
+            pagination,
+        })
+    }
+
+    async fn get_replies_by_user_with_metadata(
+        &self,
+        user_public_key: &str,
+        requester_pubkey: &str,
+        options: QueryOptions,
+    ) -> DatabaseResult<PaginatedResult<KReplyRecord>> {
+        let user_pubkey_bytes = Self::decode_hex_to_bytes(user_public_key)?;
+        let requester_pubkey_bytes = Self::decode_hex_to_bytes(requester_pubkey)?;
+        let limit = options.limit.unwrap_or(20) as i64;
+        let offset_limit = limit + 1; // Get one extra to check if there are more
+
+        let mut query = String::from(
+            r#"
+            WITH limited_replies AS (
+                -- Get limited replies for specific user first to reduce data volume
+                SELECT r.id, r.transaction_id, r.block_time, r.sender_pubkey, 
+                       r.sender_signature, r.post_id, r.base64_encoded_message
+                FROM k_replies r
+                WHERE r.sender_pubkey = $1
+                ORDER BY r.block_time DESC, r.id DESC
+                LIMIT $2
+            ),
+            reply_stats AS (
+                -- Pre-aggregate metadata only for limited replies
+                SELECT 
+                    lr.id, lr.transaction_id, lr.block_time, lr.sender_pubkey,
+                    lr.sender_signature, lr.post_id, lr.base64_encoded_message,
+                    
+                    -- Replies count (optimized with EXISTS) - nested replies to this reply
+                    COALESCE(r.replies_count, 0) as replies_count,
+                    
+                    -- Vote statistics (optimized with EXISTS)
+                    COALESCE(v.up_votes_count, 0) as up_votes_count,
+                    COALESCE(v.down_votes_count, 0) as down_votes_count,
+                    COALESCE(v.user_upvoted, false) as is_upvoted,
+                    COALESCE(v.user_downvoted, false) as is_downvoted
+                    
+                FROM limited_replies lr
+                
+                -- Optimized replies aggregation with EXISTS filter (nested replies)
+                LEFT JOIN (
+                    SELECT post_id, COUNT(*) as replies_count
+                    FROM k_replies r
+                    WHERE EXISTS (SELECT 1 FROM limited_replies lr WHERE lr.transaction_id = r.post_id)
+                    GROUP BY post_id
+                ) r ON lr.transaction_id = r.post_id
+                
+                -- Optimized vote aggregation with EXISTS filter and combined user vote
+                LEFT JOIN (
+                    SELECT 
+                        post_id,
+                        COUNT(*) FILTER (WHERE vote = 'upvote') as up_votes_count,
+                        COUNT(*) FILTER (WHERE vote = 'downvote') as down_votes_count,
+                        bool_or(vote = 'upvote' AND sender_pubkey = $3) as user_upvoted,
+                        bool_or(vote = 'downvote' AND sender_pubkey = $3) as user_downvoted
+                    FROM k_votes v
+                    WHERE EXISTS (SELECT 1 FROM limited_replies lr WHERE lr.transaction_id = v.post_id)
+                    GROUP BY post_id
+                ) v ON lr.transaction_id = v.post_id
+            )
+            SELECT 
+                rs.id, rs.transaction_id, rs.block_time, rs.sender_pubkey,
+                rs.sender_signature, rs.post_id, rs.base64_encoded_message,
+                
+                -- Get mentioned pubkeys efficiently with subquery
+                COALESCE(
+                    ARRAY(
+                        SELECT encode(m.mentioned_pubkey, 'hex') 
+                        FROM k_mentions m 
+                        WHERE m.content_id = rs.transaction_id AND m.content_type = 'reply'
+                    ),
+                    '{{}}'::text[]
+                ) as mentioned_pubkeys,
+                
+                rs.replies_count,
+                rs.up_votes_count,
+                rs.down_votes_count,
+                rs.is_upvoted,
+                rs.is_downvoted,
+                
+                -- User profile lookup with LATERAL join
+                COALESCE(b.base64_encoded_nickname, '') as user_nickname,
+                b.base64_encoded_profile_image as user_profile_image
+                
+            FROM reply_stats rs
+            LEFT JOIN LATERAL (
+                SELECT base64_encoded_nickname, base64_encoded_profile_image
+                FROM k_broadcasts b
+                WHERE b.sender_pubkey = rs.sender_pubkey
+                ORDER BY b.block_time DESC
+                LIMIT 1
+            ) b ON true
+            WHERE 1=1
+            "#
+        );
+
+        let mut bind_count = 3;
+        
+        if let Some(before_cursor) = &options.before {
+            if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
+                bind_count += 2;
+                query.push_str(&format!(
+                    " AND (rs.block_time < ${} OR (rs.block_time = ${} AND rs.id < ${}))",
+                    bind_count - 1, bind_count - 1, bind_count
+                ));
+            }
+        }
+
+        if let Some(after_cursor) = &options.after {
+            if let Ok((after_timestamp, after_id)) = Self::parse_compound_cursor(after_cursor) {
+                bind_count += 2;
+                query.push_str(&format!(
+                    " AND (rs.block_time > ${} OR (rs.block_time = ${} AND rs.id > ${}))",
+                    bind_count - 1, bind_count - 1, bind_count
+                ));
+            }
+        }
+
+        if options.sort_descending {
+            query.push_str(" ORDER BY rs.block_time DESC, rs.id DESC");
+        } else {
+            query.push_str(" ORDER BY rs.block_time ASC, rs.id ASC");
+        }
+
+        query.push_str(&format!(" LIMIT ${}", bind_count + 1));
+
+        // Build query
+        let mut query_builder = sqlx::query(&query)
+            .bind(&user_pubkey_bytes)
+            .bind(offset_limit)
+            .bind(&requester_pubkey_bytes);
+
+        // Add cursor parameters if present
+        if let Some(before_cursor) = &options.before {
+            if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
+                query_builder = query_builder.bind(before_timestamp as i64).bind(before_id);
+            }
+        }
+
+        if let Some(after_cursor) = &options.after {
+            if let Ok((after_timestamp, after_id)) = Self::parse_compound_cursor(after_cursor) {
+                query_builder = query_builder.bind(after_timestamp as i64).bind(after_id);
+            }
+        }
+
+        query_builder = query_builder.bind(offset_limit);
+
+        let rows = query_builder
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
+
+        let has_more = rows.len() > limit as usize;
+        let mut replies = Vec::new();
+        
+        for (i, row) in rows.iter().enumerate() {
+            if i >= limit as usize {
+                break;
+            }
+            
+            let transaction_id: Vec<u8> = row.get("transaction_id");
+            let sender_pubkey: Vec<u8> = row.get("sender_pubkey");
+            let sender_signature: Vec<u8> = row.get("sender_signature");
+            let post_id: Vec<u8> = row.get("post_id");
+            let mentioned_pubkeys_array: Vec<String> = row.get("mentioned_pubkeys");
+
+            replies.push(KReplyRecord {
+                id: row.get::<i64, _>("id"),
+                transaction_id: Self::encode_bytes_to_hex(&transaction_id),
+                block_time: row.get::<i64, _>("block_time") as u64,
+                sender_pubkey: Self::encode_bytes_to_hex(&sender_pubkey),
+                sender_signature: Self::encode_bytes_to_hex(&sender_signature),
+                post_id: Self::encode_bytes_to_hex(&post_id),
+                base64_encoded_message: row.get("base64_encoded_message"),
+                mentioned_pubkeys: mentioned_pubkeys_array,
+                replies_count: Some(row.get::<i64, _>("replies_count") as u64),
+                up_votes_count: Some(row.get::<i64, _>("up_votes_count") as u64),
+                down_votes_count: Some(row.get::<i64, _>("down_votes_count") as u64),
+                is_upvoted: Some(row.get("is_upvoted")),
+                is_downvoted: Some(row.get("is_downvoted")),
+                user_nickname: Some(row.get("user_nickname")),
+                user_profile_image: row.get("user_profile_image"),
+            });
+        }
+
+        let pagination = self.create_compound_pagination_metadata(&replies, limit as u32, has_more);
+
+        Ok(PaginatedResult {
+            items: replies,
+            pagination,
+        })
+    }
+
+    async fn get_posts_mentioning_user_with_metadata(
+        &self,
+        user_public_key: &str,
+        requester_pubkey: &str,
+        options: QueryOptions,
+    ) -> DatabaseResult<PaginatedResult<KPostRecord>> {
+        let mentioned_user_pubkey_bytes = Self::decode_hex_to_bytes(user_public_key)?;
+        let requester_pubkey_bytes = Self::decode_hex_to_bytes(requester_pubkey)?;
+        let limit = options.limit.unwrap_or(20) as i64;
+        let offset_limit = limit + 1; // Get one extra to check if there are more
+
+        let mut query = String::from(
+            r#"
+            WITH mentioned_posts AS (
+                -- Get posts that mention the specific user with efficient filtering
+                SELECT p.id, p.transaction_id, p.block_time, p.sender_pubkey, 
+                       p.sender_signature, p.base64_encoded_message
+                FROM k_posts p
+                WHERE p.transaction_id IN (
+                    SELECT m.content_id 
+                    FROM k_mentions m 
+                    WHERE m.content_type = 'post' 
+                      AND m.mentioned_pubkey = $1
+                )
+            ),
+            post_stats AS (
+                -- Pre-aggregate all metadata in one pass
+                SELECT 
+                    mp.id, mp.transaction_id, mp.block_time, mp.sender_pubkey,
+                    mp.sender_signature, mp.base64_encoded_message,
+                    
+                    -- Replies count
+                    COALESCE(r.replies_count, 0) as replies_count,
+                    
+                    -- Vote statistics
+                    COALESCE(v.up_votes_count, 0) as up_votes_count,
+                    COALESCE(v.down_votes_count, 0) as down_votes_count,
+                    COALESCE(v.user_upvoted, false) as is_upvoted,
+                    COALESCE(v.user_downvoted, false) as is_downvoted
+                    
+                FROM mentioned_posts mp
+                
+                -- Optimized replies aggregation
+                LEFT JOIN (
+                    SELECT post_id, COUNT(*) as replies_count
+                    FROM k_replies r
+                    WHERE EXISTS (SELECT 1 FROM mentioned_posts mp WHERE mp.transaction_id = r.post_id)
+                    GROUP BY post_id
+                ) r ON mp.transaction_id = r.post_id
+                
+                -- Optimized vote aggregation with user vote in single query
+                LEFT JOIN (
+                    SELECT 
+                        post_id,
+                        COUNT(*) FILTER (WHERE vote = 'upvote') as up_votes_count,
+                        COUNT(*) FILTER (WHERE vote = 'downvote') as down_votes_count,
+                        bool_or(vote = 'upvote' AND sender_pubkey = $1) as user_upvoted,
+                        bool_or(vote = 'downvote' AND sender_pubkey = $1) as user_downvoted
+                    FROM k_votes v
+                    WHERE EXISTS (SELECT 1 FROM mentioned_posts mp WHERE mp.transaction_id = v.post_id)
+                    GROUP BY post_id
+                ) v ON mp.transaction_id = v.post_id
+            )
+            SELECT 
+                ps.id, ps.transaction_id, ps.block_time, ps.sender_pubkey,
+                ps.sender_signature, ps.base64_encoded_message,
+                
+                -- Get mentioned pubkeys efficiently
+                COALESCE(
+                    ARRAY(
+                        SELECT encode(m.mentioned_pubkey, 'hex') 
+                        FROM k_mentions m 
+                        WHERE m.content_id = ps.transaction_id AND m.content_type = 'post'
+                    ),
+                    '{{}}'::text[]
+                ) as mentioned_pubkeys,
+                
+                ps.replies_count,
+                ps.up_votes_count,
+                ps.down_votes_count,
+                ps.is_upvoted,
+                ps.is_downvoted,
+                
+                -- User profile lookup with efficient filtering
+                COALESCE(b.base64_encoded_nickname, '') as user_nickname,
+                b.base64_encoded_profile_image as user_profile_image
+                
+            FROM post_stats ps
+            LEFT JOIN LATERAL (
+                SELECT base64_encoded_nickname, base64_encoded_profile_image
+                FROM k_broadcasts b
+                WHERE b.sender_pubkey = ps.sender_pubkey
+                ORDER BY b.block_time DESC
+                LIMIT 1
+            ) b ON true
+            WHERE 1=1
+            "#
+        );
+
+        let mut bind_count = 2;
+        
+        if let Some(before_cursor) = &options.before {
+            if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
+                bind_count += 2;
+                query.push_str(&format!(
+                    " AND (ps.block_time < ${} OR (ps.block_time = ${} AND ps.id < ${}))",
+                    bind_count - 1, bind_count - 1, bind_count
+                ));
+            }
+        }
+
+        if let Some(after_cursor) = &options.after {
+            if let Ok((after_timestamp, after_id)) = Self::parse_compound_cursor(after_cursor) {
+                bind_count += 2;
+                query.push_str(&format!(
+                    " AND (ps.block_time > ${} OR (ps.block_time = ${} AND ps.id > ${}))",
+                    bind_count - 1, bind_count - 1, bind_count
+                ));
+            }
+        }
+
+        if options.sort_descending {
+            query.push_str(" ORDER BY ps.block_time DESC, ps.id DESC");
+        } else {
+            query.push_str(" ORDER BY ps.block_time ASC, ps.id ASC");
+        }
+
+        query.push_str(&format!(" LIMIT ${}", bind_count + 1));
+
+        // Build query
+        let mut query_builder = sqlx::query(&query)
+            .bind(&mentioned_user_pubkey_bytes)
+            .bind(&requester_pubkey_bytes);
+
+        // Add cursor parameters if present
+        if let Some(before_cursor) = &options.before {
+            if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
+                query_builder = query_builder.bind(before_timestamp as i64).bind(before_id);
+            }
+        }
+
+        if let Some(after_cursor) = &options.after {
+            if let Ok((after_timestamp, after_id)) = Self::parse_compound_cursor(after_cursor) {
+                query_builder = query_builder.bind(after_timestamp as i64).bind(after_id);
+            }
+        }
+
+        query_builder = query_builder.bind(offset_limit);
+
+        let rows = query_builder
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
+
+        let has_more = rows.len() > limit as usize;
+        let mut posts = Vec::new();
+        
+        for (i, row) in rows.iter().enumerate() {
+            if i >= limit as usize {
+                break;
+            }
+            
+            let transaction_id: Vec<u8> = row.get("transaction_id");
+            let sender_pubkey: Vec<u8> = row.get("sender_pubkey");
+            let sender_signature: Vec<u8> = row.get("sender_signature");
+            let mentioned_pubkeys_array: Vec<String> = row.get("mentioned_pubkeys");
+
+            posts.push(KPostRecord {
+                id: row.get::<i64, _>("id"),
+                transaction_id: Self::encode_bytes_to_hex(&transaction_id),
+                block_time: row.get::<i64, _>("block_time") as u64,
+                sender_pubkey: Self::encode_bytes_to_hex(&sender_pubkey),
+                sender_signature: Self::encode_bytes_to_hex(&sender_signature),
+                base64_encoded_message: row.get("base64_encoded_message"),
+                mentioned_pubkeys: mentioned_pubkeys_array,
+                replies_count: Some(row.get::<i64, _>("replies_count") as u64),
+                up_votes_count: Some(row.get::<i64, _>("up_votes_count") as u64),
+                down_votes_count: Some(row.get::<i64, _>("down_votes_count") as u64),
+                is_upvoted: Some(row.get("is_upvoted")),
+                is_downvoted: Some(row.get("is_downvoted")),
+                user_nickname: Some(row.get("user_nickname")),
+                user_profile_image: row.get("user_profile_image"),
+            });
+        }
+
+        let pagination = self.create_compound_pagination_metadata(&posts, limit as u32, has_more);
+
+        Ok(PaginatedResult {
+            items: posts,
+            pagination,
+        })
+    }
+
+    async fn get_post_by_id_with_metadata(
+        &self,
+        post_id: &str,
+        requester_pubkey: &str,
+    ) -> DatabaseResult<Option<KPostRecord>> {
+        let post_id_bytes = Self::decode_hex_to_bytes(post_id)?;
+        let requester_pubkey_bytes = Self::decode_hex_to_bytes(requester_pubkey)?;
+
+        let query = r#"
+            SELECT 
+                p.id, 
+                p.transaction_id, 
+                p.block_time, 
+                p.sender_pubkey, 
+                p.sender_signature, 
+                p.base64_encoded_message,
+                COALESCE(
+                    array_agg(DISTINCT encode(m.mentioned_pubkey, 'hex')) FILTER (WHERE m.mentioned_pubkey IS NOT NULL),
+                    '{{}}'::text[]
+                ) as mentioned_pubkeys,
+                
+                -- Replies count using subquery
+                COALESCE(reply_counts.replies_count, 0) as replies_count,
+                
+                -- Vote counts using subqueries
+                COALESCE(vote_counts.up_votes_count, 0) as up_votes_count,
+                COALESCE(vote_counts.down_votes_count, 0) as down_votes_count,
+                
+                -- User's vote status
+                COALESCE(user_vote.is_upvoted, false) as is_upvoted,
+                COALESCE(user_vote.is_downvoted, false) as is_downvoted,
+                
+                -- User profile data from latest broadcast
+                COALESCE(user_profile.base64_encoded_nickname, '') as user_nickname,
+                user_profile.base64_encoded_profile_image as user_profile_image
+                
+            FROM k_posts p
+            
+            -- LEFT JOIN for mentions
+            LEFT JOIN k_mentions m ON p.transaction_id = m.content_id AND m.content_type = 'post'
+            
+            -- LEFT JOIN for replies count
+            LEFT JOIN (
+                SELECT post_id, COUNT(*) as replies_count
+                FROM k_replies
+                GROUP BY post_id
+            ) reply_counts ON p.transaction_id = reply_counts.post_id
+            
+            -- LEFT JOIN for vote counts
+            LEFT JOIN (
+                SELECT 
+                    post_id,
+                    COUNT(*) FILTER (WHERE vote = 'upvote') as up_votes_count,
+                    COUNT(*) FILTER (WHERE vote = 'downvote') as down_votes_count
+                FROM k_votes
+                GROUP BY post_id
+            ) vote_counts ON p.transaction_id = vote_counts.post_id
+            
+            -- LEFT JOIN for user's vote status
+            LEFT JOIN (
+                SELECT 
+                    post_id,
+                    sender_pubkey,
+                    bool_or(vote = 'upvote') as is_upvoted,
+                    bool_or(vote = 'downvote') as is_downvoted
+                FROM k_votes 
+                WHERE sender_pubkey = $1
+                GROUP BY post_id, sender_pubkey
+            ) user_vote ON p.transaction_id = user_vote.post_id
+            
+            -- LEFT JOIN for user profile data (latest broadcast)
+            LEFT JOIN (
+                SELECT DISTINCT ON (sender_pubkey) 
+                    sender_pubkey,
+                    base64_encoded_nickname,
+                    base64_encoded_profile_image
+                FROM k_broadcasts 
+                ORDER BY sender_pubkey, block_time DESC
+            ) user_profile ON p.sender_pubkey = user_profile.sender_pubkey
+            
+            WHERE p.transaction_id = $1
+            GROUP BY p.id, p.transaction_id, p.block_time, p.sender_pubkey, p.sender_signature, 
+                     p.base64_encoded_message, reply_counts.replies_count, vote_counts.up_votes_count, 
+                     vote_counts.down_votes_count, user_vote.is_upvoted, user_vote.is_downvoted, 
+                     user_profile.base64_encoded_nickname, user_profile.base64_encoded_profile_image
+        "#;
+
+        let row = match sqlx::query(query)
+            .bind(&post_id_bytes)
+            .bind(&requester_pubkey_bytes)
+            .fetch_optional(&self.pool)
+            .await
+        {
+            Ok(Some(row)) => row,
+            Ok(None) => return Ok(None),
+            Err(e) => return Err(DatabaseError::QueryError(e.to_string())),
+        };
+
+        let transaction_id: Vec<u8> = row.get("transaction_id");
+        let sender_pubkey: Vec<u8> = row.get("sender_pubkey");
+        let sender_signature: Vec<u8> = row.get("sender_signature");
+        let mentioned_pubkeys_array: Vec<String> = row.get("mentioned_pubkeys");
+
+        Ok(Some(KPostRecord {
+            id: row.get::<i64, _>("id"),
+            transaction_id: Self::encode_bytes_to_hex(&transaction_id),
+            block_time: row.get::<i64, _>("block_time") as u64,
+            sender_pubkey: Self::encode_bytes_to_hex(&sender_pubkey),
+            sender_signature: Self::encode_bytes_to_hex(&sender_signature),
+            base64_encoded_message: row.get("base64_encoded_message"),
+            mentioned_pubkeys: mentioned_pubkeys_array,
+            replies_count: Some(row.get::<i64, _>("replies_count") as u64),
+            up_votes_count: Some(row.get::<i64, _>("up_votes_count") as u64),
+            down_votes_count: Some(row.get::<i64, _>("down_votes_count") as u64),
+            is_upvoted: Some(row.get("is_upvoted")),
+            is_downvoted: Some(row.get("is_downvoted")),
+            user_nickname: Some(row.get("user_nickname")),
+            user_profile_image: row.get("user_profile_image"),
+        }))
+    }
+
+    async fn get_reply_by_id_with_metadata(
+        &self,
+        reply_id: &str,
+        requester_pubkey: &str,
+    ) -> DatabaseResult<Option<KReplyRecord>> {
+        let reply_id_bytes = Self::decode_hex_to_bytes(reply_id)?;
+        let requester_pubkey_bytes = Self::decode_hex_to_bytes(requester_pubkey)?;
+
+        let query = r#"
+            SELECT 
+                r.id, 
+                r.transaction_id, 
+                r.block_time, 
+                r.sender_pubkey, 
+                r.sender_signature, 
+                r.post_id,
+                r.base64_encoded_message,
+                COALESCE(
+                    array_agg(DISTINCT encode(m.mentioned_pubkey, 'hex')) FILTER (WHERE m.mentioned_pubkey IS NOT NULL),
+                    '{{}}'::text[]
+                ) as mentioned_pubkeys,
+                
+                -- Replies count using subquery (nested replies to this reply)
+                COALESCE(reply_counts.replies_count, 0) as replies_count,
+                
+                -- Vote counts using subqueries
+                COALESCE(vote_counts.up_votes_count, 0) as up_votes_count,
+                COALESCE(vote_counts.down_votes_count, 0) as down_votes_count,
+                
+                -- User's vote status
+                COALESCE(user_vote.is_upvoted, false) as is_upvoted,
+                COALESCE(user_vote.is_downvoted, false) as is_downvoted,
+                
+                -- User profile data from latest broadcast
+                COALESCE(user_profile.base64_encoded_nickname, '') as user_nickname,
+                user_profile.base64_encoded_profile_image as user_profile_image
+                
+            FROM k_replies r
+            
+            -- LEFT JOIN for mentions
+            LEFT JOIN k_mentions m ON r.transaction_id = m.content_id AND m.content_type = 'reply'
+            
+            -- LEFT JOIN for replies count (nested replies to this reply)
+            LEFT JOIN (
+                SELECT post_id, COUNT(*) as replies_count
+                FROM k_replies
+                GROUP BY post_id
+            ) reply_counts ON r.transaction_id = reply_counts.post_id
+            
+            -- LEFT JOIN for vote counts
+            LEFT JOIN (
+                SELECT 
+                    post_id,
+                    COUNT(*) FILTER (WHERE vote = 'upvote') as up_votes_count,
+                    COUNT(*) FILTER (WHERE vote = 'downvote') as down_votes_count
+                FROM k_votes
+                GROUP BY post_id
+            ) vote_counts ON r.transaction_id = vote_counts.post_id
+            
+            -- LEFT JOIN for user's vote status
+            LEFT JOIN (
+                SELECT 
+                    post_id,
+                    sender_pubkey,
+                    bool_or(vote = 'upvote') as is_upvoted,
+                    bool_or(vote = 'downvote') as is_downvoted
+                FROM k_votes 
+                WHERE sender_pubkey = $1
+                GROUP BY post_id, sender_pubkey
+            ) user_vote ON r.transaction_id = user_vote.post_id
+            
+            -- LEFT JOIN for user profile data (latest broadcast)
+            LEFT JOIN (
+                SELECT DISTINCT ON (sender_pubkey) 
+                    sender_pubkey,
+                    base64_encoded_nickname,
+                    base64_encoded_profile_image
+                FROM k_broadcasts 
+                ORDER BY sender_pubkey, block_time DESC
+            ) user_profile ON r.sender_pubkey = user_profile.sender_pubkey
+            
+            WHERE r.transaction_id = $1
+            GROUP BY r.id, r.transaction_id, r.block_time, r.sender_pubkey, r.sender_signature, 
+                     r.post_id, r.base64_encoded_message, reply_counts.replies_count, 
+                     vote_counts.up_votes_count, vote_counts.down_votes_count, 
+                     user_vote.is_upvoted, user_vote.is_downvoted, 
+                     user_profile.base64_encoded_nickname, user_profile.base64_encoded_profile_image
+        "#;
+
+        let row = match sqlx::query(query)
+            .bind(&reply_id_bytes)
+            .bind(&requester_pubkey_bytes)
+            .fetch_optional(&self.pool)
+            .await
+        {
+            Ok(Some(row)) => row,
+            Ok(None) => return Ok(None),
+            Err(e) => return Err(DatabaseError::QueryError(e.to_string())),
+        };
+
+        let transaction_id: Vec<u8> = row.get("transaction_id");
+        let sender_pubkey: Vec<u8> = row.get("sender_pubkey");
+        let sender_signature: Vec<u8> = row.get("sender_signature");
+        let post_id: Vec<u8> = row.get("post_id");
+        let mentioned_pubkeys_array: Vec<String> = row.get("mentioned_pubkeys");
+
+        Ok(Some(KReplyRecord {
+            id: row.get::<i64, _>("id"),
+            transaction_id: Self::encode_bytes_to_hex(&transaction_id),
+            block_time: row.get::<i64, _>("block_time") as u64,
+            sender_pubkey: Self::encode_bytes_to_hex(&sender_pubkey),
+            sender_signature: Self::encode_bytes_to_hex(&sender_signature),
+            post_id: Self::encode_bytes_to_hex(&post_id),
+            base64_encoded_message: row.get("base64_encoded_message"),
+            mentioned_pubkeys: mentioned_pubkeys_array,
+            replies_count: Some(row.get::<i64, _>("replies_count") as u64),
+            up_votes_count: Some(row.get::<i64, _>("up_votes_count") as u64),
+            down_votes_count: Some(row.get::<i64, _>("down_votes_count") as u64),
+            is_upvoted: Some(row.get("is_upvoted")),
+            is_downvoted: Some(row.get("is_downvoted")),
+            user_nickname: Some(row.get("user_nickname")),
+            user_profile_image: row.get("user_profile_image"),
+        }))
     }
 }

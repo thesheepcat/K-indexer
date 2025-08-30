@@ -127,4 +127,57 @@ pub trait DatabaseInterface: Send + Sync {
         post_id: &str,
         requester_pubkey: &str,
     ) -> DatabaseResult<(u64, u64, bool, bool)>;
+
+    // Optimized single-query method for get-posts-watching API
+    async fn get_all_posts_with_metadata(
+        &self,
+        requester_pubkey: &str,
+        options: QueryOptions,
+    ) -> DatabaseResult<PaginatedResult<KPostRecord>>;
+
+    // Optimized single-query method for get-posts API
+    async fn get_posts_by_user_with_metadata(
+        &self,
+        user_public_key: &str,
+        requester_pubkey: &str,
+        options: QueryOptions,
+    ) -> DatabaseResult<PaginatedResult<KPostRecord>>;
+
+    // Optimized single-query method for get-replies API (by post)
+    async fn get_replies_by_post_id_with_metadata(
+        &self,
+        post_id: &str,
+        requester_pubkey: &str,
+        options: QueryOptions,
+    ) -> DatabaseResult<PaginatedResult<KReplyRecord>>;
+
+    // Optimized single-query method for get-replies API (by user)
+    async fn get_replies_by_user_with_metadata(
+        &self,
+        user_public_key: &str,
+        requester_pubkey: &str,
+        options: QueryOptions,
+    ) -> DatabaseResult<PaginatedResult<KReplyRecord>>;
+
+    // Optimized single-query method for get-mentions API
+    async fn get_posts_mentioning_user_with_metadata(
+        &self,
+        user_public_key: &str,
+        requester_pubkey: &str,
+        options: QueryOptions,
+    ) -> DatabaseResult<PaginatedResult<KPostRecord>>;
+
+    // Optimized single-query method for get-post-details API (posts)
+    async fn get_post_by_id_with_metadata(
+        &self,
+        post_id: &str,
+        requester_pubkey: &str,
+    ) -> DatabaseResult<Option<KPostRecord>>;
+
+    // Optimized single-query method for get-post-details API (replies)
+    async fn get_reply_by_id_with_metadata(
+        &self,
+        reply_id: &str,
+        requester_pubkey: &str,
+    ) -> DatabaseResult<Option<KReplyRecord>>;
 }
