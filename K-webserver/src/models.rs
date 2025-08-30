@@ -124,6 +124,28 @@ pub struct KVoteRecord {
     pub vote: String,
 }
 
+// Merged content record for unified content retrieval
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub enum ContentRecord {
+    Post(KPostRecord),
+    Reply(KReplyRecord),
+}
+
+impl ContentRecord {
+    pub fn transaction_id(&self) -> &str {
+        match self {
+            ContentRecord::Post(post) => &post.transaction_id,
+            ContentRecord::Reply(reply) => &reply.transaction_id,
+        }
+    }
+
+    pub fn content_type(&self) -> &'static str {
+        match self {
+            ContentRecord::Post(_) => "post",
+            ContentRecord::Reply(_) => "reply",
+        }
+    }
+}
 
 // API Response models
 #[derive(Debug, Serialize, Deserialize)]

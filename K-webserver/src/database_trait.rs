@@ -1,4 +1,4 @@
-use crate::models::{KBroadcastRecord, KPostRecord, KReplyRecord, KVoteRecord, PaginationMetadata};
+use crate::models::{KBroadcastRecord, KPostRecord, KReplyRecord, KVoteRecord, PaginationMetadata, ContentRecord};
 use async_trait::async_trait;
 use std::result::Result as StdResult;
 
@@ -180,4 +180,11 @@ pub trait DatabaseInterface: Send + Sync {
         reply_id: &str,
         requester_pubkey: &str,
     ) -> DatabaseResult<Option<KReplyRecord>>;
+
+    // Merged optimized single-query method for get-post-details API (posts and replies)
+    async fn get_content_by_id_with_metadata(
+        &self,
+        content_id: &str,
+        requester_pubkey: &str,
+    ) -> DatabaseResult<Option<ContentRecord>>;
 }
