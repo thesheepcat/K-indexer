@@ -519,7 +519,7 @@ impl ApiHandlers {
         // Use the new optimized single-query method
         let mentions_result = match self
             .db
-            .get_posts_mentioning_user_with_metadata(user_public_key, requester_pubkey, options)
+            .get_contents_mentioning_user_with_metadata(user_public_key, requester_pubkey, options)
             .await
         {
             Ok(result) => result,
@@ -532,10 +532,15 @@ impl ApiHandlers {
             }
         };
 
-        // Convert enriched KPostRecords to ServerPosts using the new method
+        // Convert enriched ContentRecords (posts and replies) to ServerPosts
         let all_mentions: Vec<ServerPost> = mentions_result.items
             .iter()
-            .map(ServerPost::from_enriched_k_post_record)
+            .map(|content_record| {
+                match content_record {
+                    ContentRecord::Post(post_record) => ServerPost::from_enriched_k_post_record(post_record),
+                    ContentRecord::Reply(reply_record) => ServerReply::from_enriched_k_reply_record(reply_record),
+                }
+            })
             .collect();
 
         let pagination = mentions_result.pagination;

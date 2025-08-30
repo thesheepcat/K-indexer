@@ -97,12 +97,12 @@ pub trait DatabaseInterface: Send + Sync {
     ) -> DatabaseResult<PaginatedResult<KReplyRecord>>;
 
     // Optimized single-query method for get-mentions API
-    async fn get_posts_mentioning_user_with_metadata(
+    async fn get_contents_mentioning_user_with_metadata(
         &self,
         user_public_key: &str,
         requester_pubkey: &str,
         options: QueryOptions,
-    ) -> DatabaseResult<PaginatedResult<KPostRecord>>;
+    ) -> DatabaseResult<PaginatedResult<ContentRecord>>;
 
 
     // Merged optimized single-query method for get-post-details API (posts and replies)

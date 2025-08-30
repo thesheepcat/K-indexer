@@ -134,6 +134,22 @@ impl HasCompoundCursor for KVoteRecord {
     }
 }
 
+impl HasCompoundCursor for ContentRecord {
+    fn get_timestamp(&self) -> u64 {
+        match self {
+            ContentRecord::Post(post) => post.block_time,
+            ContentRecord::Reply(reply) => reply.block_time,
+        }
+    }
+    
+    fn get_id(&self) -> i64 {
+        match self {
+            ContentRecord::Post(post) => post.id,
+            ContentRecord::Reply(reply) => reply.id,
+        }
+    }
+}
+
 #[async_trait]
 #[allow(unused_variables)]
 impl DatabaseInterface for PostgresDbManager {
@@ -1028,26 +1044,31 @@ impl DatabaseInterface for PostgresDbManager {
         })
     }
 
-    async fn get_posts_mentioning_user_with_metadata(
+    async fn get_contents_mentioning_user_with_metadata(
         &self,
         user_public_key: &str,
         requester_pubkey: &str,
         options: QueryOptions,
-    ) -> DatabaseResult<PaginatedResult<KPostRecord>> {
+    ) -> DatabaseResult<PaginatedResult<ContentRecord>> {
         let mentioned_user_pubkey_bytes = Self::decode_hex_to_bytes(user_public_key)?;
         let requester_pubkey_bytes = Self::decode_hex_to_bytes(requester_pubkey)?;
         let limit = options.limit.unwrap_or(20) as i64;
         let offset_limit = limit + 1; // Get one extra to check if there are more
 
         let mut bind_count = 1;
-        let mut cursor_conditions = String::new();
+        let mut post_cursor_conditions = String::new();
+        let mut reply_cursor_conditions = String::new();
         
-        // Add cursor logic to the mentioned_posts CTE (same as other optimized queries)
+        // Add cursor logic for posts
         if let Some(before_cursor) = &options.before {
             if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
                 bind_count += 2;
-                cursor_conditions.push_str(&format!(
+                post_cursor_conditions.push_str(&format!(
                     " AND (p.block_time < ${} OR (p.block_time = ${} AND p.id < ${}))",
+                    bind_count - 1, bind_count - 1, bind_count
+                ));
+                reply_cursor_conditions.push_str(&format!(
+                    " AND (r.block_time < ${} OR (r.block_time = ${} AND r.id < ${}))",
                     bind_count - 1, bind_count - 1, bind_count
                 ));
             }
@@ -1056,49 +1077,89 @@ impl DatabaseInterface for PostgresDbManager {
         if let Some(after_cursor) = &options.after {
             if let Ok((after_timestamp, after_id)) = Self::parse_compound_cursor(after_cursor) {
                 bind_count += 2;
-                cursor_conditions.push_str(&format!(
+                post_cursor_conditions.push_str(&format!(
                     " AND (p.block_time > ${} OR (p.block_time = ${} AND p.id > ${}))",
+                    bind_count - 1, bind_count - 1, bind_count
+                ));
+                reply_cursor_conditions.push_str(&format!(
+                    " AND (r.block_time > ${} OR (r.block_time = ${} AND r.id > ${}))",
                     bind_count - 1, bind_count - 1, bind_count
                 ));
             }
         }
 
-        let order_clause = if options.sort_descending {
+        let post_order_clause = if options.sort_descending {
             " ORDER BY p.block_time DESC, p.id DESC"
         } else {
             " ORDER BY p.block_time ASC, p.id ASC"
         };
 
-        let final_order_clause = if options.sort_descending {
-            " ORDER BY ps.block_time DESC, ps.id DESC"
+        let reply_order_clause = if options.sort_descending {
+            " ORDER BY r.block_time DESC, r.id DESC"
         } else {
-            " ORDER BY ps.block_time ASC, ps.id ASC"
+            " ORDER BY r.block_time ASC, r.id ASC"
+        };
+
+        let final_order_clause = if options.sort_descending {
+            " ORDER BY block_time DESC, id DESC"
+        } else {
+            " ORDER BY block_time ASC, id ASC"
+        };
+
+        let cs_final_order_clause = if options.sort_descending {
+            " ORDER BY cs.block_time DESC, cs.id DESC"
+        } else {
+            " ORDER BY cs.block_time ASC, cs.id ASC"
         };
 
         let query = format!(
             r#"
             WITH mentioned_posts AS (
                 -- Get posts that mention the specific user with efficient filtering and LIMIT
-                SELECT p.id, p.transaction_id, p.block_time, p.sender_pubkey, 
-                       p.sender_signature, p.base64_encoded_message
+                SELECT 'post' as content_type, p.id, p.transaction_id, p.block_time, p.sender_pubkey, 
+                       p.sender_signature, p.base64_encoded_message, NULL::bytea as post_id
                 FROM k_posts p
-                WHERE p.transaction_id IN (
-                    SELECT m.content_id 
+                WHERE EXISTS (
+                    SELECT 1 
                     FROM k_mentions m 
                     WHERE m.content_type = 'post' 
                       AND m.mentioned_pubkey = $1
-                ){cursor_conditions}
-                {order_clause}
+                      AND m.content_id = p.transaction_id
+                ){post_cursor_conditions}
+                {post_order_clause}
                 LIMIT ${limit_param}
             ),
-            post_stats AS (
+            mentioned_replies AS (
+                -- Get replies that mention the specific user with efficient filtering and LIMIT
+                SELECT 'reply' as content_type, r.id, r.transaction_id, r.block_time, r.sender_pubkey,
+                       r.sender_signature, r.base64_encoded_message, r.post_id
+                FROM k_replies r
+                WHERE EXISTS (
+                    SELECT 1 
+                    FROM k_mentions m 
+                    WHERE m.content_type = 'reply' 
+                      AND m.mentioned_pubkey = $1
+                      AND m.content_id = r.transaction_id
+                ){reply_cursor_conditions}
+                {reply_order_clause}
+                LIMIT ${limit_param}
+            ),
+            mentioned_content AS (
+                -- Combine limited posts and replies
+                SELECT * FROM mentioned_posts
+                UNION ALL
+                SELECT * FROM mentioned_replies
+                {final_order_clause}
+                LIMIT ${limit_param}
+            ),
+            content_stats AS (
                 -- Pre-aggregate all metadata in one pass
                 SELECT 
-                    mp.id, mp.transaction_id, mp.block_time, mp.sender_pubkey,
-                    mp.sender_signature, mp.base64_encoded_message,
+                    mc.content_type, mc.id, mc.transaction_id, mc.block_time, mc.sender_pubkey,
+                    mc.sender_signature, mc.base64_encoded_message, mc.post_id,
                     
-                    -- Replies count
-                    COALESCE(r.replies_count, 0) as replies_count,
+                    -- Replies count (only applicable for posts, not replies)
+                    CASE WHEN mc.content_type = 'post' THEN COALESCE(r.replies_count, 0) ELSE 0 END as replies_count,
                     
                     -- Vote statistics
                     COALESCE(v.up_votes_count, 0) as up_votes_count,
@@ -1106,15 +1167,15 @@ impl DatabaseInterface for PostgresDbManager {
                     COALESCE(v.user_upvoted, false) as is_upvoted,
                     COALESCE(v.user_downvoted, false) as is_downvoted
                     
-                FROM mentioned_posts mp
+                FROM mentioned_content mc
                 
-                -- Optimized replies aggregation
+                -- Optimized replies aggregation (only for posts)
                 LEFT JOIN (
                     SELECT post_id, COUNT(*) as replies_count
                     FROM k_replies r
-                    WHERE EXISTS (SELECT 1 FROM mentioned_posts mp WHERE mp.transaction_id = r.post_id)
+                    WHERE EXISTS (SELECT 1 FROM mentioned_content mc WHERE mc.content_type = 'post' AND mc.transaction_id = r.post_id)
                     GROUP BY post_id
-                ) r ON mp.transaction_id = r.post_id
+                ) r ON mc.content_type = 'post' AND mc.transaction_id = r.post_id
                 
                 -- Optimized vote aggregation with user vote in single query
                 LEFT JOIN (
@@ -1125,48 +1186,51 @@ impl DatabaseInterface for PostgresDbManager {
                         bool_or(vote = 'upvote' AND sender_pubkey = ${requester_param}) as user_upvoted,
                         bool_or(vote = 'downvote' AND sender_pubkey = ${requester_param}) as user_downvoted
                     FROM k_votes v
-                    WHERE EXISTS (SELECT 1 FROM mentioned_posts mp WHERE mp.transaction_id = v.post_id)
+                    WHERE EXISTS (SELECT 1 FROM mentioned_content mc WHERE mc.transaction_id = v.post_id)
                     GROUP BY post_id
-                ) v ON mp.transaction_id = v.post_id
+                ) v ON mc.transaction_id = v.post_id
             )
             SELECT 
-                ps.id, ps.transaction_id, ps.block_time, ps.sender_pubkey,
-                ps.sender_signature, ps.base64_encoded_message,
+                cs.content_type, cs.id, cs.transaction_id, cs.block_time, cs.sender_pubkey,
+                cs.sender_signature, cs.base64_encoded_message, cs.post_id,
                 
-                -- Get mentioned pubkeys efficiently
+                -- Get mentioned pubkeys efficiently (use appropriate content_type)
                 COALESCE(
                     ARRAY(
                         SELECT encode(m.mentioned_pubkey, 'hex') 
                         FROM k_mentions m 
-                        WHERE m.content_id = ps.transaction_id AND m.content_type = 'post'
+                        WHERE m.content_id = cs.transaction_id AND m.content_type = cs.content_type
                     ),
                     '{{}}'::text[]
                 ) as mentioned_pubkeys,
                 
-                ps.replies_count,
-                ps.up_votes_count,
-                ps.down_votes_count,
-                ps.is_upvoted,
-                ps.is_downvoted,
+                cs.replies_count,
+                cs.up_votes_count,
+                cs.down_votes_count,
+                cs.is_upvoted,
+                cs.is_downvoted,
                 
                 -- User profile lookup with efficient filtering
                 COALESCE(b.base64_encoded_nickname, '') as user_nickname,
                 b.base64_encoded_profile_image as user_profile_image
                 
-            FROM post_stats ps
+            FROM content_stats cs
             LEFT JOIN LATERAL (
                 SELECT base64_encoded_nickname, base64_encoded_profile_image
                 FROM k_broadcasts b
-                WHERE b.sender_pubkey = ps.sender_pubkey
+                WHERE b.sender_pubkey = cs.sender_pubkey
                 ORDER BY b.block_time DESC
                 LIMIT 1
             ) b ON true
             WHERE 1=1
-            {final_order_clause}
+            {cs_final_order_clause}
             "#,
-            cursor_conditions = cursor_conditions,
-            order_clause = order_clause,
+            post_cursor_conditions = post_cursor_conditions,
+            reply_cursor_conditions = reply_cursor_conditions,
+            post_order_clause = post_order_clause,
+            reply_order_clause = reply_order_clause,
             final_order_clause = final_order_clause,
+            cs_final_order_clause = cs_final_order_clause,
             limit_param = bind_count + 1,
             requester_param = bind_count + 2
         );
@@ -1196,40 +1260,77 @@ impl DatabaseInterface for PostgresDbManager {
             .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
 
         let has_more = rows.len() > limit as usize;
-        let mut posts = Vec::new();
+        let mut content_records = Vec::new();
         
         for (i, row) in rows.iter().enumerate() {
             if i >= limit as usize {
                 break;
             }
             
+            let content_type: String = row.get("content_type");
             let transaction_id: Vec<u8> = row.get("transaction_id");
             let sender_pubkey: Vec<u8> = row.get("sender_pubkey");
             let sender_signature: Vec<u8> = row.get("sender_signature");
             let mentioned_pubkeys_array: Vec<String> = row.get("mentioned_pubkeys");
 
-            posts.push(KPostRecord {
-                id: row.get::<i64, _>("id"),
-                transaction_id: Self::encode_bytes_to_hex(&transaction_id),
-                block_time: row.get::<i64, _>("block_time") as u64,
-                sender_pubkey: Self::encode_bytes_to_hex(&sender_pubkey),
-                sender_signature: Self::encode_bytes_to_hex(&sender_signature),
-                base64_encoded_message: row.get("base64_encoded_message"),
-                mentioned_pubkeys: mentioned_pubkeys_array,
-                replies_count: Some(row.get::<i64, _>("replies_count") as u64),
-                up_votes_count: Some(row.get::<i64, _>("up_votes_count") as u64),
-                down_votes_count: Some(row.get::<i64, _>("down_votes_count") as u64),
-                is_upvoted: Some(row.get("is_upvoted")),
-                is_downvoted: Some(row.get("is_downvoted")),
-                user_nickname: Some(row.get("user_nickname")),
-                user_profile_image: row.get("user_profile_image"),
-            });
+            let content_record = match content_type.as_str() {
+                "post" => {
+                    let post_record = KPostRecord {
+                        id: row.get::<i64, _>("id"),
+                        transaction_id: Self::encode_bytes_to_hex(&transaction_id),
+                        block_time: row.get::<i64, _>("block_time") as u64,
+                        sender_pubkey: Self::encode_bytes_to_hex(&sender_pubkey),
+                        sender_signature: Self::encode_bytes_to_hex(&sender_signature),
+                        base64_encoded_message: row.get("base64_encoded_message"),
+                        mentioned_pubkeys: mentioned_pubkeys_array,
+                        replies_count: Some(row.get::<i64, _>("replies_count") as u64),
+                        up_votes_count: Some(row.get::<i64, _>("up_votes_count") as u64),
+                        down_votes_count: Some(row.get::<i64, _>("down_votes_count") as u64),
+                        is_upvoted: Some(row.get("is_upvoted")),
+                        is_downvoted: Some(row.get("is_downvoted")),
+                        user_nickname: Some(row.get("user_nickname")),
+                        user_profile_image: row.get("user_profile_image"),
+                    };
+                    ContentRecord::Post(post_record)
+                }
+                "reply" => {
+                    let post_id: Option<Vec<u8>> = row.get("post_id");
+                    let post_id_hex = match post_id {
+                        Some(bytes) => Self::encode_bytes_to_hex(&bytes),
+                        None => return Err(DatabaseError::QueryError("Missing post_id for reply".to_string())),
+                    };
+                    
+                    let reply_record = KReplyRecord {
+                        id: row.get::<i64, _>("id"),
+                        transaction_id: Self::encode_bytes_to_hex(&transaction_id),
+                        block_time: row.get::<i64, _>("block_time") as u64,
+                        sender_pubkey: Self::encode_bytes_to_hex(&sender_pubkey),
+                        sender_signature: Self::encode_bytes_to_hex(&sender_signature),
+                        post_id: post_id_hex,
+                        base64_encoded_message: row.get("base64_encoded_message"),
+                        mentioned_pubkeys: mentioned_pubkeys_array,
+                        replies_count: Some(0), // Replies don't have replies
+                        up_votes_count: Some(row.get::<i64, _>("up_votes_count") as u64),
+                        down_votes_count: Some(row.get::<i64, _>("down_votes_count") as u64),
+                        is_upvoted: Some(row.get("is_upvoted")),
+                        is_downvoted: Some(row.get("is_downvoted")),
+                        user_nickname: Some(row.get("user_nickname")),
+                        user_profile_image: row.get("user_profile_image"),
+                    };
+                    ContentRecord::Reply(reply_record)
+                }
+                _ => return Err(DatabaseError::QueryError(
+                    format!("Unknown content type: {}", content_type)
+                )),
+            };
+            
+            content_records.push(content_record);
         }
 
-        let pagination = self.create_compound_pagination_metadata(&posts, limit as u32, has_more);
+        let pagination = self.create_compound_pagination_metadata(&content_records, limit as u32, has_more);
 
         Ok(PaginatedResult {
-            items: posts,
+            items: content_records,
             pagination,
         })
     }
