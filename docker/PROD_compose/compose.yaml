@@ -3,7 +3,7 @@ services:
     container_name: k-indexer-db
     image: postgres:17-alpine
     restart: unless-stopped
-    shm_size: 4G  # Increased for better performance
+    shm_size: 4G
     environment:
       POSTGRES_USER: username
       POSTGRES_PASSWORD: password
