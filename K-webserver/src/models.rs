@@ -43,7 +43,6 @@ pub struct KBroadcastRecord {
     pub base64_encoded_message: String,
 }
 
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct KPost {
     pub sender_pubkey: String,
@@ -62,8 +61,15 @@ pub struct KPostRecord {
     pub sender_signature: String,
     pub base64_encoded_message: String,
     pub mentioned_pubkeys: Vec<String>,
+    // Optional enriched metadata fields for optimized queries
+    pub replies_count: Option<u64>,
+    pub up_votes_count: Option<u64>,
+    pub down_votes_count: Option<u64>,
+    pub is_upvoted: Option<bool>,
+    pub is_downvoted: Option<bool>,
+    pub user_nickname: Option<String>,
+    pub user_profile_image: Option<String>,
 }
-
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct KReply {
@@ -85,8 +91,15 @@ pub struct KReplyRecord {
     pub post_id: String,
     pub base64_encoded_message: String,
     pub mentioned_pubkeys: Vec<String>,
+    // Optional enriched metadata fields for optimized queries
+    pub replies_count: Option<u64>,
+    pub up_votes_count: Option<u64>,
+    pub down_votes_count: Option<u64>,
+    pub is_upvoted: Option<bool>,
+    pub is_downvoted: Option<bool>,
+    pub user_nickname: Option<String>,
+    pub user_profile_image: Option<String>,
 }
-
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct KVote {
@@ -108,6 +121,12 @@ pub struct KVoteRecord {
     pub vote: String,
 }
 
+// Merged content record for unified content retrieval
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub enum ContentRecord {
+    Post(KPostRecord),
+    Reply(KReplyRecord),
+}
 
 // API Response models
 #[derive(Debug, Serialize, Deserialize)]
@@ -214,30 +233,24 @@ pub struct ApiError {
 }
 
 impl ServerPost {
-    pub fn from_k_post_record_with_replies_count_and_votes(
-        record: &KPostRecord,
-        replies_count: u64,
-        up_votes_count: u64,
-        down_votes_count: u64,
-        is_upvoted: bool,
-        is_downvoted: bool,
-    ) -> Self {
+    // New method to construct from enriched KPostRecord with all metadata
+    pub fn from_enriched_k_post_record(record: &KPostRecord) -> Self {
         Self {
             id: record.transaction_id.clone(),
             user_public_key: record.sender_pubkey.clone(),
             post_content: record.base64_encoded_message.clone(),
             signature: record.sender_signature.clone(),
             timestamp: record.block_time,
-            replies_count,
-            up_votes_count,
-            down_votes_count,
+            replies_count: record.replies_count.unwrap_or(0),
+            up_votes_count: record.up_votes_count.unwrap_or(0),
+            down_votes_count: record.down_votes_count.unwrap_or(0),
             reposts_count: 0,
             parent_post_id: None,
             mentioned_pubkeys: record.mentioned_pubkeys.clone(),
-            is_upvoted: Some(is_upvoted),
-            is_downvoted: Some(is_downvoted),
-            user_nickname: None,
-            user_profile_image: None,
+            is_upvoted: record.is_upvoted,
+            is_downvoted: record.is_downvoted,
+            user_nickname: record.user_nickname.clone(),
+            user_profile_image: record.user_profile_image.clone(),
         }
     }
 }
@@ -256,30 +269,24 @@ pub struct PaginatedRepliesResponse {
 }
 
 impl ServerReply {
-    pub fn from_k_reply_record_with_replies_count_and_votes(
-        record: &KReplyRecord,
-        replies_count: u64,
-        up_votes_count: u64,
-        down_votes_count: u64,
-        is_upvoted: bool,
-        is_downvoted: bool,
-    ) -> Self {
+    // New method to construct from enriched KReplyRecord with all metadata
+    pub fn from_enriched_k_reply_record(record: &KReplyRecord) -> Self {
         Self {
             id: record.transaction_id.clone(),
             user_public_key: record.sender_pubkey.clone(),
             post_content: record.base64_encoded_message.clone(),
             signature: record.sender_signature.clone(),
             timestamp: record.block_time,
-            replies_count,
-            up_votes_count,
-            down_votes_count,
+            replies_count: record.replies_count.unwrap_or(0),
+            up_votes_count: record.up_votes_count.unwrap_or(0),
+            down_votes_count: record.down_votes_count.unwrap_or(0),
             reposts_count: 0,
             parent_post_id: Some(record.post_id.clone()),
             mentioned_pubkeys: record.mentioned_pubkeys.clone(),
-            is_upvoted: Some(is_upvoted),
-            is_downvoted: Some(is_downvoted),
-            user_nickname: None,
-            user_profile_image: None,
+            is_upvoted: record.is_upvoted,
+            is_downvoted: record.is_downvoted,
+            user_nickname: record.user_nickname.clone(),
+            user_profile_image: record.user_profile_image.clone(),
         }
     }
 }

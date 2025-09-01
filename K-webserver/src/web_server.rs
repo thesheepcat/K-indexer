@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Query, State, ConnectInfo},
+    extract::{ConnectInfo, Query, State},
     http::StatusCode,
     response::Json,
     routing::get,
@@ -7,18 +7,18 @@ use axum::{
 };
 use axum_prometheus::PrometheusMetricLayer;
 use serde::Deserialize;
-use std::{sync::Arc, time::Duration, net::SocketAddr, collections::HashMap};
+use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::Duration};
 use tokio::{net::TcpListener, sync::RwLock, time::Instant};
 use tower_http::{
     cors::{Any, CorsLayer},
-    timeout::TimeoutLayer,
     limit::RequestBodyLimitLayer,
+    timeout::TimeoutLayer,
 };
 use tracing::{error as log_error, info as log_info};
 
 use crate::api_handlers::ApiHandlers;
-use crate::database_trait::DatabaseInterface;
 use crate::config::ServerConfig;
+use crate::database_trait::DatabaseInterface;
 use crate::models::{
     ApiError, PaginatedPostsResponse, PaginatedRepliesResponse, PaginatedUsersResponse,
     PostDetailsResponse,
@@ -59,8 +59,8 @@ struct GetRepliesQuery {
     #[serde(rename = "requesterPubkey")]
     requester_pubkey: Option<String>,
     limit: Option<u32>,
-    before: Option<String>,  // Changed to String to support compound cursors
-    after: Option<String>,   // Changed to String to support compound cursors
+    before: Option<String>, // Changed to String to support compound cursors
+    after: Option<String>,  // Changed to String to support compound cursors
 }
 
 #[derive(Debug, Deserialize)]
@@ -100,8 +100,8 @@ impl WebServer {
     pub fn new(db: Arc<dyn DatabaseInterface>, server_config: ServerConfig) -> Self {
         let api_handlers = ApiHandlers::new(db.clone());
         let rate_limit_map = Arc::new(RwLock::new(HashMap::new()));
-        let app_state = Arc::new(AppState { 
-            api_handlers, 
+        let app_state = Arc::new(AppState {
+            api_handlers,
             rate_limit_map,
             server_config,
         });
@@ -112,11 +112,14 @@ impl WebServer {
     pub fn create_router(&self) -> Router {
         let timeout_duration = Duration::from_secs(self.app_state.server_config.request_timeout);
         let (prometheus_layer, metric_handle) = PrometheusMetricLayer::pair();
-        
+
         Router::new()
             .route("/", get(handle_root))
             .route("/health", get(handle_health))
-            .route("/metrics", get(move || async move { metric_handle.render() }))
+            .route(
+                "/metrics",
+                get(move || async move { metric_handle.render() }),
+            )
             .route("/get-posts", get(handle_get_posts))
             .route("/get-posts-watching", get(handle_get_posts_watching))
             .route("/get-users", get(handle_get_users))
@@ -140,7 +143,11 @@ impl WebServer {
         let listener = TcpListener::bind(bind_address).await?;
 
         log_info!("Web server starting on {}", bind_address);
-        axum::serve(listener, router.into_make_service_with_connect_info::<SocketAddr>()).await?;
+        axum::serve(
+            listener,
+            router.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await?;
 
         Ok(())
     }
@@ -153,20 +160,20 @@ async fn check_rate_limit(
 ) -> Result<(), (StatusCode, Json<ApiError>)> {
     let now = Instant::now();
     let mut rate_limits = state.rate_limit_map.write().await;
-    
+
     let entry = rate_limits.entry(client_addr).or_insert(RateLimitEntry {
         count: 0,
         window_start: now,
     });
-    
+
     // Reset window if 1 minute has passed
     if now.duration_since(entry.window_start) >= Duration::from_secs(60) {
         entry.count = 0;
         entry.window_start = now;
     }
-    
+
     entry.count += 1;
-    
+
     if entry.count > state.server_config.rate_limit {
         let error = ApiError {
             error: "Rate limit exceeded. Too many requests per minute.".to_string(),
@@ -174,10 +181,9 @@ async fn check_rate_limit(
         };
         return Err((StatusCode::TOO_MANY_REQUESTS, Json(error)));
     }
-    
+
     Ok(())
 }
-
 
 // API Handler Functions
 

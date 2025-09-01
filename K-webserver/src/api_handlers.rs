@@ -1,12 +1,11 @@
 use crate::database_trait::{DatabaseInterface, QueryOptions};
 use crate::models::{
-    ApiError, KPostRecord, KReplyRecord, PaginatedPostsResponse,
-    PaginatedRepliesResponse, PaginatedUsersResponse, PostDetailsResponse,
-    ServerPost, ServerReply, ServerUserPost,
+    ApiError, ContentRecord, PaginatedPostsResponse, PaginatedRepliesResponse,
+    PaginatedUsersResponse, PostDetailsResponse, ServerPost, ServerReply, ServerUserPost,
 };
 use serde_json;
 use std::sync::Arc;
-use tracing::{error as log_error};
+use tracing::error as log_error;
 
 pub struct ApiHandlers {
     db: Arc<dyn DatabaseInterface>,
@@ -80,11 +79,16 @@ impl ApiHandlers {
             sort_descending: true,
         };
 
-        let posts_result = match self.db.get_posts_by_user(user_public_key, options).await {
+        // Use the new optimized single-query method
+        let posts_result = match self
+            .db
+            .get_posts_by_user_with_metadata(user_public_key, requester_pubkey, options)
+            .await
+        {
             Ok(result) => result,
             Err(err) => {
                 log_error!(
-                    "Database error while querying paginated posts for user {}: {}",
+                    "Database error while querying paginated posts with metadata for user {}: {}",
                     user_public_key,
                     err
                 );
@@ -95,9 +99,12 @@ impl ApiHandlers {
             }
         };
 
-        let all_posts = self
-            .enrich_posts_with_metadata(posts_result.items, requester_pubkey)
-            .await;
+        // Convert enriched KPostRecords to ServerPosts using the new method
+        let all_posts: Vec<ServerPost> = posts_result
+            .items
+            .iter()
+            .map(ServerPost::from_enriched_k_post_record)
+            .collect();
 
         let response = PaginatedPostsResponse {
             posts: all_posts,
@@ -116,8 +123,9 @@ impl ApiHandlers {
         }
     }
 
-    /// GET /get-posts-watching with pagination
+    /// GET /get-posts-watching with pagination (OPTIMIZED VERSION)
     /// Fetch paginated posts for watching with cursor-based pagination and voting status
+    /// Uses a single optimized database query to avoid N+1 query problem
     pub async fn get_posts_watching_paginated(
         &self,
         requester_pubkey: &str,
@@ -155,10 +163,18 @@ impl ApiHandlers {
             sort_descending: true,
         };
 
-        let posts_result = match self.db.get_all_posts(options).await {
+        // Use the new optimized single-query method
+        let posts_result = match self
+            .db
+            .get_all_posts_with_metadata(requester_pubkey, options)
+            .await
+        {
             Ok(result) => result,
             Err(err) => {
-                log_error!("Database error while querying paginated posts: {}", err);
+                log_error!(
+                    "Database error while querying paginated posts with metadata: {}",
+                    err
+                );
                 return Err(self.create_error_response(
                     "Internal server error during database query",
                     "DATABASE_ERROR",
@@ -166,9 +182,12 @@ impl ApiHandlers {
             }
         };
 
-        let all_posts = self
-            .enrich_posts_with_metadata(posts_result.items, requester_pubkey)
-            .await;
+        // Convert enriched KPostRecords to ServerPosts using the new method
+        let all_posts: Vec<ServerPost> = posts_result
+            .items
+            .iter()
+            .map(ServerPost::from_enriched_k_post_record)
+            .collect();
 
         let response = PaginatedPostsResponse {
             posts: all_posts,
@@ -300,11 +319,16 @@ impl ApiHandlers {
             sort_descending: true,
         };
 
-        let replies_result = match self.db.get_replies_by_post_id(post_id, options).await {
+        // Use the new optimized single-query method
+        let replies_result = match self
+            .db
+            .get_replies_by_post_id_with_metadata(post_id, requester_pubkey, options)
+            .await
+        {
             Ok(result) => result,
             Err(err) => {
                 log_error!(
-                    "Database error while querying paginated replies for post {}: {}",
+                    "Database error while querying paginated replies with metadata for post {}: {}",
                     post_id,
                     err
                 );
@@ -315,9 +339,12 @@ impl ApiHandlers {
             }
         };
 
-        let all_replies = self
-            .enrich_replies_with_metadata(replies_result.items, requester_pubkey)
-            .await;
+        // Convert enriched KReplyRecords to ServerReplies using the new method
+        let all_replies: Vec<ServerReply> = replies_result
+            .items
+            .iter()
+            .map(ServerReply::from_enriched_k_reply_record)
+            .collect();
 
         let response = PaginatedRepliesResponse {
             replies: all_replies,
@@ -399,11 +426,16 @@ impl ApiHandlers {
             sort_descending: true,
         };
 
-        let replies_result = match self.db.get_replies_by_user(user_public_key, options).await {
+        // Use the new optimized single-query method
+        let replies_result = match self
+            .db
+            .get_replies_by_user_with_metadata(user_public_key, requester_pubkey, options)
+            .await
+        {
             Ok(result) => result,
             Err(err) => {
                 log_error!(
-                    "Database error while querying paginated user replies for user {}: {}",
+                    "Database error while querying paginated user replies with metadata for user {}: {}",
                     user_public_key,
                     err
                 );
@@ -414,9 +446,12 @@ impl ApiHandlers {
             }
         };
 
-        let all_replies = self
-            .enrich_replies_with_metadata(replies_result.items, requester_pubkey)
-            .await;
+        // Convert enriched KReplyRecords to ServerReplies using the new method
+        let all_replies: Vec<ServerReply> = replies_result
+            .items
+            .iter()
+            .map(ServerReply::from_enriched_k_reply_record)
+            .collect();
 
         let response = PaginatedRepliesResponse {
             replies: all_replies,
@@ -503,15 +538,15 @@ impl ApiHandlers {
             sort_descending: true,
         };
 
-        // Get posts and replies mentioning user (combined query with proper ordering)
+        // Use the new optimized single-query method
         let mentions_result = match self
             .db
-            .get_posts_mentioning_user(user_public_key, options)
+            .get_contents_mentioning_user_with_metadata(user_public_key, requester_pubkey, options)
             .await
         {
             Ok(result) => result,
             Err(err) => {
-                log_error!("Error getting mentions for user: {}", err);
+                log_error!("Error getting mentions with metadata for user: {}", err);
                 return Err(self.create_error_response(
                     "Internal server error during database query",
                     "DATABASE_ERROR",
@@ -519,10 +554,19 @@ impl ApiHandlers {
             }
         };
 
-        // Convert posts to ServerPost with voting information
-        let all_mentions = self
-            .enrich_posts_with_metadata(mentions_result.items, requester_pubkey)
-            .await;
+        // Convert enriched ContentRecords (posts and replies) to ServerPosts
+        let all_mentions: Vec<ServerPost> = mentions_result
+            .items
+            .iter()
+            .map(|content_record| match content_record {
+                ContentRecord::Post(post_record) => {
+                    ServerPost::from_enriched_k_post_record(post_record)
+                }
+                ContentRecord::Reply(reply_record) => {
+                    ServerReply::from_enriched_k_reply_record(reply_record)
+                }
+            })
+            .collect();
 
         let pagination = mentions_result.pagination;
 
@@ -547,20 +591,20 @@ impl ApiHandlers {
     /// Fetch details for a specific post or reply by its ID with voting information for the requesting user
     pub async fn get_post_details_with_votes(
         &self,
-        post_id: &str,
+        content_id: &str,
         requester_pubkey: &str,
     ) -> Result<String, String> {
-        // Validate post ID format (64 hex characters for transaction hash)
-        if post_id.len() != 64 {
+        // Validate content ID format (64 hex characters for transaction hash)
+        if content_id.len() != 64 {
             return Err(self.create_error_response(
-                "Invalid post ID format. Must be 64 hex characters.",
+                "Invalid content ID format. Must be 64 hex characters.",
                 "INVALID_POST_ID",
             ));
         }
 
-        if !post_id.chars().all(|c| c.is_ascii_hexdigit()) {
+        if !content_id.chars().all(|c| c.is_ascii_hexdigit()) {
             return Err(self.create_error_response(
-                "Invalid post ID format. Must contain only hex characters.",
+                "Invalid content ID format. Must contain only hex characters.",
                 "INVALID_POST_ID",
             ));
         }
@@ -588,214 +632,52 @@ impl ApiHandlers {
             ));
         }
 
-        // First, try to find the post in the k-posts collection
-        if let Ok(Some(k_post_record)) = self.db.get_post_by_id(post_id).await {
-            let posts_with_metadata = self
-                .enrich_posts_with_metadata(vec![k_post_record], requester_pubkey)
-                .await;
-            if let Some(server_post) = posts_with_metadata.into_iter().next() {
-                let response = PostDetailsResponse { post: server_post };
-                return match serde_json::to_string(&response) {
+        // Use the new merged function to get content with metadata in a single query
+        match self
+            .db
+            .get_content_by_id_with_metadata(content_id, requester_pubkey)
+            .await
+        {
+            Ok(Some(content_record)) => {
+                let response = match content_record {
+                    ContentRecord::Post(k_post_record) => {
+                        let server_post = ServerPost::from_enriched_k_post_record(&k_post_record);
+                        PostDetailsResponse { post: server_post }
+                    }
+                    ContentRecord::Reply(k_reply_record) => {
+                        let server_reply =
+                            ServerReply::from_enriched_k_reply_record(&k_reply_record);
+                        PostDetailsResponse { post: server_reply }
+                    }
+                };
+
+                match serde_json::to_string(&response) {
                     Ok(json) => Ok(json),
                     Err(err) => {
-                        log_error!("Failed to serialize post details response: {}", err);
+                        log_error!("Failed to serialize content details response: {}", err);
                         Err(self.create_error_response(
                             "Internal server error during serialization",
                             "SERIALIZATION_ERROR",
                         ))
                     }
-                };
-            }
-        }
-
-        // If not found in posts collection, try the k-replies collection
-        if let Ok(Some(k_reply_record)) = self.db.get_reply_by_id(post_id).await {
-            let replies_with_metadata = self
-                .enrich_replies_with_metadata(vec![k_reply_record], requester_pubkey)
-                .await;
-            if let Some(server_reply) = replies_with_metadata.into_iter().next() {
-                let response = PostDetailsResponse { post: server_reply };
-                return match serde_json::to_string(&response) {
-                    Ok(json) => Ok(json),
-                    Err(err) => {
-                        log_error!("Failed to serialize reply details response: {}", err);
-                        Err(self.create_error_response(
-                            "Internal server error during serialization",
-                            "SERIALIZATION_ERROR",
-                        ))
-                    }
-                };
-            }
-        }
-
-        // Post/reply not found in either collection
-        Err(self.create_error_response("Post not found", "NOT_FOUND"))
-    }
-
-    // Helper method to enrich posts with metadata (replies count, votes, user profiles)
-    async fn enrich_posts_with_metadata(
-        &self,
-        posts: Vec<KPostRecord>,
-        requester_pubkey: &str,
-    ) -> Vec<ServerPost> {
-        let mut result = Vec::new();
-
-        for k_post_record in posts {
-            // Calculate replies count for this post
-            let replies_count = match self
-                .db
-                .count_replies_for_post(&k_post_record.transaction_id)
-                .await
-            {
-                Ok(count) => count,
-                Err(err) => {
-                    log_error!(
-                        "Error counting replies for post {}: {}",
-                        k_post_record.transaction_id,
-                        err
-                    );
-                    0
-                }
-            };
-
-            // Calculate vote counts and user's vote status
-            let (up_votes_count, down_votes_count, is_upvoted, is_downvoted) = match self
-                .db
-                .get_vote_data(&k_post_record.transaction_id, requester_pubkey)
-                .await
-            {
-                Ok(data) => data,
-                Err(err) => {
-                    log_error!(
-                        "Error getting vote data for post {}: {}",
-                        k_post_record.transaction_id,
-                        err
-                    );
-                    (0, 0, false, false)
-                }
-            };
-
-            let mut server_post = ServerPost::from_k_post_record_with_replies_count_and_votes(
-                &k_post_record,
-                replies_count,
-                up_votes_count,
-                down_votes_count,
-                is_upvoted,
-                is_downvoted,
-            );
-
-            // Enrich with user profile data from broadcasts
-            match self
-                .db
-                .get_latest_broadcast_by_user(&k_post_record.sender_pubkey)
-                .await
-            {
-                Ok(Some(broadcast)) => {
-                    server_post.user_nickname = Some(broadcast.base64_encoded_nickname);
-                    server_post.user_profile_image = broadcast.base64_encoded_profile_image;
-                }
-                Ok(None) => {
-                    server_post.user_nickname = Some(String::new());
-                    server_post.user_profile_image = Some(String::new());
-                }
-                Err(err) => {
-                    log_error!(
-                        "Error querying broadcasts for user {}: {}",
-                        k_post_record.sender_pubkey,
-                        err
-                    );
-                    server_post.user_nickname = Some(String::new());
-                    server_post.user_profile_image = Some(String::new());
                 }
             }
-
-            result.push(server_post);
-        }
-
-        result
-    }
-
-    // Helper method to enrich replies with metadata (replies count, votes, user profiles)
-    async fn enrich_replies_with_metadata(
-        &self,
-        replies: Vec<KReplyRecord>,
-        requester_pubkey: &str,
-    ) -> Vec<ServerReply> {
-        let mut result = Vec::new();
-
-        for k_reply_record in replies {
-            // Calculate replies count for this reply (nested replies)
-            let replies_count = match self
-                .db
-                .count_replies_for_post(&k_reply_record.transaction_id)
-                .await
-            {
-                Ok(count) => count,
-                Err(err) => {
-                    log_error!(
-                        "Error counting replies for reply {}: {}",
-                        k_reply_record.transaction_id,
-                        err
-                    );
-                    0
-                }
-            };
-
-            // Calculate vote counts and user's vote status
-            let (up_votes_count, down_votes_count, is_upvoted, is_downvoted) = match self
-                .db
-                .get_vote_data(&k_reply_record.transaction_id, requester_pubkey)
-                .await
-            {
-                Ok(data) => data,
-                Err(err) => {
-                    log_error!(
-                        "Error getting vote data for reply {}: {}",
-                        k_reply_record.transaction_id,
-                        err
-                    );
-                    (0, 0, false, false)
-                }
-            };
-
-            let mut server_reply = ServerReply::from_k_reply_record_with_replies_count_and_votes(
-                &k_reply_record,
-                replies_count,
-                up_votes_count,
-                down_votes_count,
-                is_upvoted,
-                is_downvoted,
-            );
-
-            // Enrich with user profile data from broadcasts
-            match self
-                .db
-                .get_latest_broadcast_by_user(&k_reply_record.sender_pubkey)
-                .await
-            {
-                Ok(Some(broadcast)) => {
-                    server_reply.user_nickname = Some(broadcast.base64_encoded_nickname);
-                    server_reply.user_profile_image = broadcast.base64_encoded_profile_image;
-                }
-                Ok(None) => {
-                    server_reply.user_nickname = Some(String::new());
-                    server_reply.user_profile_image = Some(String::new());
-                }
-                Err(err) => {
-                    log_error!(
-                        "Error querying broadcasts for user {}: {}",
-                        k_reply_record.sender_pubkey,
-                        err
-                    );
-                    server_reply.user_nickname = Some(String::new());
-                    server_reply.user_profile_image = Some(String::new());
-                }
+            Ok(None) => {
+                // Content not found
+                Err(self.create_error_response("Content not found", "NOT_FOUND"))
             }
-
-            result.push(server_reply);
+            Err(err) => {
+                log_error!(
+                    "Database error while querying content by ID {}: {}",
+                    content_id,
+                    err
+                );
+                Err(self.create_error_response(
+                    "Internal server error during database query",
+                    "DATABASE_ERROR",
+                ))
+            }
         }
-
-        result
     }
 
     /// Create a standardized error response

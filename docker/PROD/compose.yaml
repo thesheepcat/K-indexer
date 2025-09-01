@@ -3,11 +3,12 @@ services:
     container_name: k-indexer-db
     image: postgres:17-alpine
     restart: unless-stopped
-    shm_size: 2G
+    shm_size: 4G
     environment:
       POSTGRES_USER: username
       POSTGRES_PASSWORD: password
       POSTGRES_DB: k-db
+      PGPORT: 5432
     network_mode: "host"
     volumes:
       - /var/k-db/:/var/lib/postgresql/data/

@@ -88,6 +88,17 @@ CREATE INDEX IF NOT EXISTS idx_k_mentions_content_type ON k_mentions(content_typ
 CREATE INDEX IF NOT EXISTS idx_k_votes_post_id_sender ON k_votes(post_id, sender_pubkey);
 CREATE INDEX IF NOT EXISTS idx_k_replies_post_id_block_time ON k_replies(post_id, block_time DESC);
 
+-- Performance optimization indexes for get-posts-watching query (write-safe)
+-- These indexes improve read performance without impacting write throughput
+-- NOTE: Vote-related indexes were removed as they hurt performance for full table aggregations
+
+-- Beneficial: Covering index for main k_posts query with ordering (small table)
+CREATE INDEX IF NOT EXISTS idx_k_posts_block_time_id_covering ON k_posts(block_time DESC, id DESC) 
+INCLUDE (transaction_id, sender_pubkey, sender_signature, base64_encoded_message);
+
+-- Beneficial: Optimizes mentions JOIN condition without affecting full table operations
+CREATE INDEX IF NOT EXISTS idx_k_mentions_content_type_id ON k_mentions(content_type, content_id);
+
 COMMENT ON TABLE k_posts IS 'K protocol posts data parsed from Kaspa blockchain transactions';
 COMMENT ON TABLE k_replies IS 'K protocol replies data parsed from Kaspa blockchain transactions';
 COMMENT ON TABLE k_broadcasts IS 'K protocol broadcasts (user profile updates) parsed from Kaspa blockchain transactions';

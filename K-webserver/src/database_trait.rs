@@ -1,4 +1,6 @@
-use crate::models::{KBroadcastRecord, KPostRecord, KReplyRecord, KVoteRecord, PaginationMetadata};
+use crate::models::{
+    ContentRecord, KBroadcastRecord, KPostRecord, KReplyRecord, PaginationMetadata,
+};
 use async_trait::async_trait;
 use std::result::Result as StdResult;
 
@@ -31,8 +33,8 @@ impl std::error::Error for DatabaseError {}
 #[derive(Debug, Clone)]
 pub struct QueryOptions {
     pub limit: Option<u64>,
-    pub before: Option<String>,  // Compound cursors like "timestamp_id"
-    pub after: Option<String>,   // Compound cursors like "timestamp_id"
+    pub before: Option<String>, // Compound cursors like "timestamp_id"
+    pub after: Option<String>,  // Compound cursors like "timestamp_id"
     pub sort_descending: bool,
 }
 
@@ -56,42 +58,7 @@ pub struct PaginatedResult<T> {
 #[async_trait]
 #[allow(dead_code)]
 pub trait DatabaseInterface: Send + Sync {
-    // Post operations
-    async fn get_posts_by_user(
-        &self,
-        user_public_key: &str,
-        options: QueryOptions,
-    ) -> DatabaseResult<PaginatedResult<KPostRecord>>;
-
-    async fn get_all_posts(
-        &self,
-        options: QueryOptions,
-    ) -> DatabaseResult<PaginatedResult<KPostRecord>>;
-
-    async fn get_post_by_id(&self, post_id: &str) -> DatabaseResult<Option<KPostRecord>>;
-
-    async fn get_posts_mentioning_user(
-        &self,
-        user_public_key: &str,
-        options: QueryOptions,
-    ) -> DatabaseResult<PaginatedResult<KPostRecord>>;
-
-    // Reply operations
-    async fn get_replies_by_post_id(
-        &self,
-        post_id: &str,
-        options: QueryOptions,
-    ) -> DatabaseResult<PaginatedResult<KReplyRecord>>;
-
-    async fn get_replies_by_user(
-        &self,
-        user_public_key: &str,
-        options: QueryOptions,
-    ) -> DatabaseResult<PaginatedResult<KReplyRecord>>;
-
-    async fn get_reply_by_id(&self, reply_id: &str) -> DatabaseResult<Option<KReplyRecord>>;
-
-    async fn count_replies_for_post(&self, post_id: &str) -> DatabaseResult<u64>;
+    // Post operations (optimized versions with metadata)
 
     // Broadcast operations
     async fn get_all_broadcasts(
@@ -99,32 +66,49 @@ pub trait DatabaseInterface: Send + Sync {
         options: QueryOptions,
     ) -> DatabaseResult<PaginatedResult<KBroadcastRecord>>;
 
-    async fn get_latest_broadcast_by_user(
+    // Optimized single-query method for get-posts-watching API
+    async fn get_all_posts_with_metadata(
+        &self,
+        requester_pubkey: &str,
+        options: QueryOptions,
+    ) -> DatabaseResult<PaginatedResult<KPostRecord>>;
+
+    // Optimized single-query method for get-posts API
+    async fn get_posts_by_user_with_metadata(
         &self,
         user_public_key: &str,
-    ) -> DatabaseResult<Option<KBroadcastRecord>>;
+        requester_pubkey: &str,
+        options: QueryOptions,
+    ) -> DatabaseResult<PaginatedResult<KPostRecord>>;
 
-    // Vote operations
-    async fn get_vote_counts(&self, post_id: &str) -> DatabaseResult<(u64, u64)>; // (upvotes, downvotes)
-
-    async fn get_user_vote_for_post(
-        &self,
-        post_id: &str,
-        user_public_key: &str,
-    ) -> DatabaseResult<Option<KVoteRecord>>;
-
-    async fn has_user_upvoted(&self, post_id: &str, user_public_key: &str) -> DatabaseResult<bool>;
-
-    async fn has_user_downvoted(
-        &self,
-        post_id: &str,
-        user_public_key: &str,
-    ) -> DatabaseResult<bool>;
-
-    // Combined vote data (upvotes, downvotes, user_upvoted, user_downvoted)
-    async fn get_vote_data(
+    // Optimized single-query method for get-replies API (by post)
+    async fn get_replies_by_post_id_with_metadata(
         &self,
         post_id: &str,
         requester_pubkey: &str,
-    ) -> DatabaseResult<(u64, u64, bool, bool)>;
+        options: QueryOptions,
+    ) -> DatabaseResult<PaginatedResult<KReplyRecord>>;
+
+    // Optimized single-query method for get-replies API (by user)
+    async fn get_replies_by_user_with_metadata(
+        &self,
+        user_public_key: &str,
+        requester_pubkey: &str,
+        options: QueryOptions,
+    ) -> DatabaseResult<PaginatedResult<KReplyRecord>>;
+
+    // Optimized single-query method for get-mentions API
+    async fn get_contents_mentioning_user_with_metadata(
+        &self,
+        user_public_key: &str,
+        requester_pubkey: &str,
+        options: QueryOptions,
+    ) -> DatabaseResult<PaginatedResult<ContentRecord>>;
+
+    // Merged optimized single-query method for get-post-details API (posts and replies)
+    async fn get_content_by_id_with_metadata(
+        &self,
+        content_id: &str,
+        requester_pubkey: &str,
+    ) -> DatabaseResult<Option<ContentRecord>>;
 }
