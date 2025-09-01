@@ -10,8 +10,10 @@ RUN apk add --no-cache \
 # Set working directory
 WORKDIR /app
 
-# Copy workspace files
-COPY Cargo.toml ./
+# Create a temporary workspace with only K-webserver
+RUN echo '[workspace]\nmembers = ["K-webserver"]\nresolver = "2"' > Cargo.toml
+
+# Copy package files
 COPY K-webserver/Cargo.toml ./K-webserver/
 
 # Copy source code
