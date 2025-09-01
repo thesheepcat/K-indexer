@@ -5,10 +5,10 @@ services:
     restart: unless-stopped
     shm_size: 4G
     environment:
-      POSTGRES_USER: username_DEV
-      POSTGRES_PASSWORD: password_DEV
-      POSTGRES_DB: k-db-DEV
-      PGPORT: 5433
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+      PGPORT: ${DB_PORT}
     network_mode: "host"
     volumes:
       - /var/k-db-DEV/:/var/lib/postgresql/data/
@@ -18,7 +18,7 @@ services:
     image: supertypo/simply-kaspa-indexer:latest
     restart: unless-stopped
     network_mode: "host"
-    command: -s ws://127.0.0.1:17120 -l localhost:8501 -n testnet-10 -d postgres://username_DEV:password_DEV@0.0.0.0:5433/k-db-DEV --prune-db="0 * * * *" --retention=1h --disable=virtual_chain_processing,transaction_acceptance,blocks_table,block_parent_table,blocks_transactions_table,transactions_inputs_table,transactions_outputs_table,addresses_transactions_table,initial_utxo_import,vcp_wait_for_sync --exclude-fields=block_accepted_id_merkle_root,block_merge_set_blues_hashes,block_merge_set_reds_hashes,block_selected_parent_hash,block_bits,block_blue_work,block_blue_score,block_daa_score,block_hash_merkle_root,block_nonce,block_pruning_point,block_timestamp,block_utxo_commitment,block_version,tx_subnetwork_id,tx_hash,tx_mass,tx_in_previous_outpoint,tx_in_signature_script,tx_in_sig_op_count,tx_in_block_time,tx_out_amount,tx_out_script_public_key,tx_out_script_public_key_address,tx_out_block_time
+    command: -s ws://127.0.0.1:17120 -l localhost:8501 -n testnet-10 -d postgres://${DB_USER}:${DB_PASSWORD}@0.0.0.0:${DB_PORT}/${DB_NAME} --prune-db="0 * * * *" --retention=1h --disable=virtual_chain_processing,transaction_acceptance,blocks_table,block_parent_table,blocks_transactions_table,transactions_inputs_table,transactions_outputs_table,addresses_transactions_table,initial_utxo_import,vcp_wait_for_sync --exclude-fields=block_accepted_id_merkle_root,block_merge_set_blues_hashes,block_merge_set_reds_hashes,block_selected_parent_hash,block_bits,block_blue_work,block_blue_score,block_daa_score,block_hash_merkle_root,block_nonce,block_pruning_point,block_timestamp,block_utxo_commitment,block_version,tx_subnetwork_id,tx_hash,tx_mass,tx_in_previous_outpoint,tx_in_signature_script,tx_in_sig_op_count,tx_in_block_time,tx_out_amount,tx_out_script_public_key,tx_out_script_public_key_address,tx_out_block_time
     depends_on:
       - k-indexer-db-DEV
 
@@ -27,7 +27,7 @@ services:
     image: thesheepcat/k-transaction-processor:dev
     restart: unless-stopped
     network_mode: "host"
-    command: --db-host localhost --db-port 5433 --db-name k-db-DEV --db-user username_DEV --db-password password_DEV --db-max-connections 10 --workers 4 --channel transaction_channel --retry-attempts 3 --retry-delay 1000
+    command: --db-host localhost --db-port ${DB_PORT} --db-name ${DB_NAME} --db-user ${DB_USER} --db-password ${DB_PASSWORD} --db-max-connections 10 --workers 4 --channel transaction_channel --retry-attempts 3 --retry-delay 1000
     depends_on:
       - k-indexer-db-DEV
       - simply-kaspa-indexer-DEV
@@ -37,7 +37,7 @@ services:
     image: thesheepcat/k-webserver:dev
     restart: unless-stopped
     network_mode: "host"
-    command: --db-host localhost --db-port 5433 --db-name k-db-DEV --db-user username_DEV --db-password password_DEV --bind-address 0.0.0.0:3001 --worker-threads 6 --db-max-connections 18 --request-timeout 30 --rate-limit 1000
+    command: --db-host localhost --db-port ${DB_PORT} --db-name ${DB_NAME} --db-user ${DB_USER} --db-password ${DB_PASSWORD} --bind-address 0.0.0.0:3001 --worker-threads 6 --db-max-connections 18 --request-timeout 30 --rate-limit 1000
     depends_on:
       - k-indexer-db-DEV
       - simply-kaspa-indexer-DEV
