@@ -12,7 +12,6 @@ WORKDIR /app
 
 # Copy workspace files
 COPY Cargo.toml ./
-COPY K-transaction-processor/Cargo.toml ./K-transaction-processor/
 COPY K-webserver/Cargo.toml ./K-webserver/
 
 # Copy source code
