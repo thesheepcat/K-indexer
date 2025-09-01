@@ -18,3 +18,4 @@ chrono = { version = "0.4", features = ["serde"] }
 # Kaspa signature verification dependencies (from main K-indexer)
 kaspa-wallet-core = { git = "https://github.com/kaspanet/rusty-kaspa.git", features = ["wasm32-sdk"] }
 secp256k1 = "0.29"
+base64ct = "=1.6.0"
