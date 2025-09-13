@@ -1,12 +1,124 @@
 use crate::config::AppConfig;
-use crate::migrations::{
-    MIGRATION_001_ADD_TRANSACTION_TRIGGER, MIGRATION_002_CREATE_K_PROTOCOL_TABLES,
-};
 use anyhow::Result;
 use sqlx::{postgres::PgPoolOptions, PgPool, Row};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 pub type DbPool = PgPool;
+
+// Schema version management
+const SCHEMA_VERSION: i32 = 1;
+
+/// K-transaction-processor Database Client
+/// Similar to KaspaDbClient in Simply Kaspa Indexer
+pub struct KDbClient {
+    pool: DbPool,
+}
+
+impl KDbClient {
+    pub fn new(pool: DbPool) -> Self {
+        Self { pool }
+    }
+
+    pub fn pool(&self) -> &DbPool {
+        &self.pool
+    }
+
+    /// Verify that transactions table exists (required for trigger)
+    /// Loops with warning and 10-second wait if not found
+    async fn verify_transactions_table_exists(&self) -> Result<()> {
+        loop {
+            let table_exists = sqlx::query(
+                "SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name = 'transactions')"
+            )
+            .fetch_one(&self.pool)
+            .await?
+            .get::<bool, _>(0);
+
+            if table_exists {
+                info!("✓ Transactions table found - proceeding with K-transaction-processor schema setup");
+                return Ok(());
+            } else {
+                warn!("⚠️  Transactions table not found - K-transaction-processor requires the main Kaspa indexer to be running first");
+                warn!("   Waiting 10 seconds before checking again...");
+                tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+            }
+        }
+    }
+
+    /// Drop existing schema (equivalent to KaspaDbClient::drop_schema)
+    pub async fn drop_schema(&self) -> Result<()> {
+        info!("Dropping existing schema");
+        execute_ddl(SCHEMA_DOWN_SQL, &self.pool).await?;
+        info!("Schema dropped successfully");
+        Ok(())
+    }
+
+
+    /// Create or upgrade schema (equivalent to KaspaDbClient::create_schema)
+    pub async fn create_schema(&self, upgrade_db: bool) -> Result<()> {
+        info!("Starting schema creation/upgrade process");
+
+        // Verify transactions table exists (required for trigger)
+        self.verify_transactions_table_exists().await?;
+
+        // Check current schema version
+        let current_version = get_schema_version(&self.pool).await?;
+
+        match current_version {
+            Some(version) => {
+                info!("Found existing schema version: {}", version);
+
+                if version < SCHEMA_VERSION {
+                    if upgrade_db {
+                        warn!("Upgrading schema from v{} to v{}", version, SCHEMA_VERSION);
+
+                        // Perform sequential upgrades
+                        let mut current_version = version;
+
+                        // v0 -> v1: Add all indexes
+                        if current_version == 0 {
+                            info!("Applying migration v0 -> v1 (adding indexes)");
+                            execute_ddl(MIGRATION_V0_TO_V1_SQL, &self.pool).await?;
+                            current_version = 1;
+                            info!("Migration v0 -> v1 completed successfully");
+                        }
+
+                        info!("Schema upgrade completed successfully (final version: {})", current_version);
+                    } else {
+                        return Err(anyhow::anyhow!(
+                            "Found outdated schema v{}. Set flag '--upgrade-db' to upgrade",
+                            version
+                        ));
+                    }
+                } else if version > SCHEMA_VERSION {
+                    return Err(anyhow::anyhow!(
+                        "Found newer & unsupported schema version {}. Current supported version is {}",
+                        version, SCHEMA_VERSION
+                    ));
+                } else {
+                    info!("Schema version {} is up to date", version);
+                }
+            }
+            None => {
+                info!("No existing schema found, creating fresh schema v{}", SCHEMA_VERSION);
+                execute_ddl(SCHEMA_UP_SQL, &self.pool).await?;
+                info!("Fresh schema creation completed successfully");
+            }
+        }
+
+        // Verify schema setup
+        verify_schema_setup(&self.pool).await?;
+
+        info!("Schema creation/upgrade process completed");
+        Ok(())
+    }
+}
+
+// Embedded SQL migration files
+const SCHEMA_UP_SQL: &str = include_str!("../migrations/schema/up.sql");
+const SCHEMA_DOWN_SQL: &str = include_str!("../migrations/schema/down.sql");
+const SCHEMA_V0_SQL: &str = include_str!("../migrations/schema/v0.sql");
+const MIGRATION_V0_TO_V1_SQL: &str = include_str!("../migrations/schema/v0_to_v1.sql");
 
 pub async fn create_pool(config: &AppConfig) -> Result<DbPool> {
     let connection_string = config.connection_string();
@@ -61,170 +173,87 @@ pub async fn fetch_transaction(
     }
 }
 
-pub async fn verify_and_setup_database(pool: &DbPool) -> Result<()> {
-    info!("Starting database verification and setup");
 
-    if !check_trigger_exists(pool).await? {
-        info!("Transaction trigger not found, running migration_001_add_transaction_trigger.sql");
-        run_migration_001(pool).await?;
-        verify_trigger_setup(pool).await?;
-    } else {
-        info!("Transaction trigger already exists, skipping migration 001");
-    }
-
-    if !check_k_tables_exist(pool).await? {
-        info!("K protocol tables not found, running migration_002_create_k_protocol_tables.sql");
-        run_migration_002(pool).await?;
-        verify_tables_setup(pool).await?;
-    } else {
-        info!("K protocol tables already exist, skipping migration 002");
-    }
-
-    info!("Database verification and setup completed");
-    Ok(())
-}
-
-async fn check_trigger_exists(pool: &DbPool) -> Result<bool> {
-    let row = sqlx::query(
-        "SELECT EXISTS(SELECT 1 FROM pg_trigger WHERE tgname = 'transaction_notify_trigger')",
-    )
-    .fetch_one(pool)
-    .await?;
-
-    let exists: bool = row.get(0);
-    Ok(exists)
-}
-
-async fn check_k_tables_exist(pool: &DbPool) -> Result<bool> {
-    let tables = vec!["k_posts", "k_replies", "k_broadcasts", "k_votes"];
-
-    for table in &tables {
-        let row = sqlx::query(
-            "SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name = $1)",
-        )
-        .bind(table)
-        .fetch_one(pool)
-        .await?;
-
-        let exists: bool = row.get(0);
-        if !exists {
-            return Ok(false);
-        }
-    }
-
-    Ok(true)
-}
-
-async fn run_migration_001(pool: &DbPool) -> Result<()> {
-    execute_migration(pool, MIGRATION_001_ADD_TRANSACTION_TRIGGER).await
-}
-
-async fn run_migration_002(pool: &DbPool) -> Result<()> {
-    execute_migration(pool, MIGRATION_002_CREATE_K_PROTOCOL_TABLES).await
-}
-
-async fn execute_migration(pool: &DbPool, migration_sql: &str) -> Result<()> {
-    let mut tx = pool.begin().await?;
-
-    // Parse SQL statements more carefully to handle multi-line statements
-    let mut statements = Vec::new();
-    let mut current_statement = String::new();
-
-    for line in migration_sql.lines() {
-        let trimmed = line.trim();
-
-        // Skip empty lines and comments
-        if trimmed.is_empty() || trimmed.starts_with("--") {
-            continue;
-        }
-
-        // Add line to current statement
-        if !current_statement.is_empty() {
-            current_statement.push(' ');
-        }
-        current_statement.push_str(trimmed);
-
-        // Check if statement ends with semicolon
-        if trimmed.ends_with(';') {
-            // Remove the semicolon and add to statements list
-            current_statement.pop();
-            let stmt = current_statement.trim();
-            if !stmt.is_empty() {
-                statements.push(stmt.to_string());
-            }
-            current_statement.clear();
-        }
-    }
-
-    // Handle any remaining statement without semicolon
-    if !current_statement.trim().is_empty() {
-        statements.push(current_statement.trim().to_string());
-    }
-
-    for (i, statement) in statements.iter().enumerate() {
-        if !statement.is_empty() {
-            tracing::debug!(
-                "Executing statement {}: {}",
-                i + 1,
-                &statement[..std::cmp::min(100, statement.len())]
-            );
-
-            match sqlx::query(statement).execute(&mut *tx).await {
-                Ok(_) => {
-                    tracing::debug!("Statement {} executed successfully", i + 1);
-                }
-                Err(e) => {
-                    tracing::error!("Failed to execute statement {}: {}", i + 1, e);
-                    tracing::error!("Statement was: {}", statement);
-                    return Err(e.into());
-                }
-            }
-        }
-    }
-
-    tx.commit().await?;
-    Ok(())
-}
-
-async fn verify_trigger_setup(pool: &DbPool) -> Result<()> {
-    let function_exists =
-        sqlx::query("SELECT EXISTS(SELECT 1 FROM pg_proc WHERE proname = 'notify_transaction')")
-            .fetch_one(pool)
-            .await?
-            .get::<bool, _>(0);
-
-    let trigger_exists = sqlx::query(
-        "SELECT EXISTS(SELECT 1 FROM pg_trigger WHERE tgname = 'transaction_notify_trigger')",
+async fn get_schema_version(pool: &DbPool) -> Result<Option<i32>> {
+    // Check if k_vars table exists
+    let table_exists = sqlx::query(
+        "SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name = 'k_vars')"
     )
     .fetch_one(pool)
     .await?
     .get::<bool, _>(0);
 
-    if function_exists && trigger_exists {
-        info!("✓ Transaction trigger setup verification PASSED");
-        info!("  - notify_transaction() function created successfully");
-        info!("  - transaction_notify_trigger trigger created successfully");
-    } else {
-        error!("✗ Transaction trigger setup verification FAILED");
-        if !function_exists {
-            error!("  - notify_transaction() function NOT found");
-        }
-        if !trigger_exists {
-            error!("  - transaction_notify_trigger trigger NOT found");
-        }
-        return Err(anyhow::anyhow!(
-            "Transaction trigger setup verification failed"
-        ));
+    if !table_exists {
+        return Ok(None);
     }
 
+    // Get schema version from k_vars table
+    let result = sqlx::query(
+        "SELECT value FROM k_vars WHERE key = 'schema_version'"
+    )
+    .fetch_optional(pool)
+    .await?;
+
+    match result {
+        Some(row) => {
+            let version_str: String = row.get("value");
+            let version = version_str.parse::<i32>()
+                .map_err(|_| anyhow::anyhow!("Invalid schema version format: {}", version_str))?;
+            Ok(Some(version))
+        }
+        None => Ok(None),
+    }
+}
+
+async fn execute_ddl(ddl: &str, pool: &DbPool) -> Result<()> {
+    // Split DDL into individual statements and execute each one
+    // This matches the Simply Kaspa Indexer implementation pattern
+    for statement in ddl.split(";").filter(|stmt| !stmt.trim().is_empty()) {
+        let trimmed_statement = statement.trim();
+
+        // Skip empty statements and comments
+        if trimmed_statement.is_empty() || trimmed_statement.starts_with("--") {
+            continue;
+        }
+
+        // Execute the statement
+        match sqlx::query(trimmed_statement).execute(pool).await {
+            Ok(_) => {
+                tracing::debug!("DDL statement executed successfully: {}",
+                    &trimmed_statement[..std::cmp::min(100, trimmed_statement.len())]);
+            }
+            Err(e) => {
+                tracing::error!("Failed to execute DDL statement: {}", e);
+                tracing::error!("Statement was: {}", trimmed_statement);
+                return Err(e.into());
+            }
+        }
+    }
     Ok(())
 }
 
-async fn verify_tables_setup(pool: &DbPool) -> Result<()> {
-    let tables = vec!["k_posts", "k_replies", "k_broadcasts", "k_votes"];
-    let mut all_verified = true;
+async fn verify_schema_setup(pool: &DbPool) -> Result<()> {
+    info!("Verifying schema setup");
 
-    info!("Verifying K protocol tables setup");
+    // Check k_vars table and schema version
+    let version = get_schema_version(pool).await?;
+    match version {
+        Some(v) if v == SCHEMA_VERSION => {
+            info!("  ✓ k_vars table and schema version {} verified", v);
+        }
+        Some(v) => {
+            error!("  ✗ Incorrect schema version: expected {}, found {}", SCHEMA_VERSION, v);
+            return Err(anyhow::anyhow!("Schema version mismatch"));
+        }
+        None => {
+            error!("  ✗ k_vars table or schema_version not found");
+            return Err(anyhow::anyhow!("Schema version not found"));
+        }
+    }
+
+    // Check K protocol tables
+    let tables = vec!["k_posts", "k_replies", "k_broadcasts", "k_votes", "k_mentions"];
+    let mut all_verified = true;
 
     for table in &tables {
         let table_exists = sqlx::query(
@@ -236,27 +265,46 @@ async fn verify_tables_setup(pool: &DbPool) -> Result<()> {
         .get::<bool, _>(0);
 
         if table_exists {
-            info!("  ✓ Table '{}' created successfully", table);
+            info!("  ✓ Table '{}' verified", table);
         } else {
             error!("  ✗ Table '{}' NOT found", table);
             all_verified = false;
         }
     }
 
+    // Check transaction trigger
+    let function_exists = sqlx::query("SELECT EXISTS(SELECT 1 FROM pg_proc WHERE proname = 'notify_transaction')")
+        .fetch_one(pool)
+        .await?
+        .get::<bool, _>(0);
+
+    let trigger_exists = sqlx::query(
+        "SELECT EXISTS(SELECT 1 FROM pg_trigger WHERE tgname = 'transaction_notify_trigger')",
+    )
+    .fetch_one(pool)
+    .await?
+    .get::<bool, _>(0);
+
+    if function_exists && trigger_exists {
+        info!("  ✓ Transaction notification system verified");
+    } else {
+        error!("  ✗ Transaction notification system verification failed");
+        all_verified = false;
+    }
+
+    // Check indexes
     let index_count = sqlx::query("SELECT COUNT(*) FROM pg_indexes WHERE indexname LIKE 'idx_k_%'")
         .fetch_one(pool)
         .await?
         .get::<i64, _>(0);
 
-    info!("  ✓ {} K protocol indexes created", index_count);
+    info!("  ✓ {} K protocol indexes verified", index_count);
 
     if all_verified {
-        info!("✓ K protocol tables setup verification PASSED");
+        info!("✓ Schema setup verification PASSED");
     } else {
-        error!("✗ K protocol tables setup verification FAILED");
-        return Err(anyhow::anyhow!(
-            "K protocol tables setup verification failed"
-        ));
+        error!("✗ Schema setup verification FAILED");
+        return Err(anyhow::anyhow!("Schema setup verification failed"));
     }
 
     Ok(())
