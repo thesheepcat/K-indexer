@@ -339,32 +339,6 @@ impl KProtocolProcessor {
         }
     }
 
-    /// Check if transaction already exists in any K protocol table
-    pub async fn transaction_exists(&self, transaction_id: &str) -> Result<bool> {
-        // Convert hex string to bytea for database query
-        let transaction_id_bytes = hex::decode(transaction_id)?;
-
-        // Single query using UNION ALL to check all K protocol tables
-        let result = sqlx::query(
-            r#"
-            SELECT 1 FROM (
-                SELECT transaction_id FROM k_posts WHERE transaction_id = $1
-                UNION ALL
-                SELECT transaction_id FROM k_replies WHERE transaction_id = $1
-                UNION ALL  
-                SELECT transaction_id FROM k_broadcasts WHERE transaction_id = $1
-                UNION ALL
-                SELECT transaction_id FROM k_votes WHERE transaction_id = $1
-            ) AS combined LIMIT 1
-            "#,
-        )
-        .bind(&transaction_id_bytes)
-        .fetch_optional(&self.db_pool)
-        .await?;
-
-        Ok(result.is_some())
-    }
-
     /// Process K protocol transaction
     pub async fn process_k_transaction(&self, transaction: &Transaction) -> Result<()> {
         let transaction_id = &transaction.transaction_id;
@@ -406,12 +380,6 @@ impl KProtocolProcessor {
             .chars()
             .filter(|c| !c.is_control() || *c == '\n' || *c == '\r' || *c == '\t')
             .collect::<String>();
-
-        // Check if this transaction already exists in the database to avoid duplicates
-        if self.transaction_exists(transaction_id).await? {
-            info!("Transaction {} already exists, skipping", transaction_id);
-            return Ok(());
-        }
 
         // Parse K protocol payload
         match self.parse_k_protocol_payload(&cleaned_payload) {
@@ -483,13 +451,14 @@ impl KProtocolProcessor {
 
         // Single query to insert post and all mentions using CTE
         if k_post.mentioned_pubkeys.is_empty() {
-            // If no mentions, just insert the post
-            sqlx::query(
+            // If no mentions, just insert the post (skip if already exists)
+            let result = sqlx::query(
                 r#"
                 INSERT INTO k_posts (
                     transaction_id, block_time, sender_pubkey, sender_signature, 
                     base64_encoded_message
                 ) VALUES ($1, $2, $3, $4, $5)
+                ON CONFLICT (transaction_id) DO NOTHING
                 "#,
             )
             .bind(&transaction_id_bytes)
@@ -499,6 +468,15 @@ impl KProtocolProcessor {
             .bind(k_post.base64_encoded_message)
             .execute(&self.db_pool)
             .await?;
+
+            if result.rows_affected() == 0 {
+                info!(
+                    "Post transaction {} already exists, skipping",
+                    transaction_id
+                );
+            } else {
+                info!("Saved K post: {}", transaction_id);
+            }
         } else {
             // Convert mentioned pubkeys to bytea
             let mentioned_pubkeys_bytes: Result<Vec<Vec<u8>>, _> = k_post
@@ -508,14 +486,15 @@ impl KProtocolProcessor {
                 .collect();
             let mentioned_pubkeys_bytes = mentioned_pubkeys_bytes?;
 
-            // Insert post and mentions in a single query using CTE
-            sqlx::query(
+            // Insert post and mentions in a single query using CTE (skip if already exists)
+            let result = sqlx::query(
                 r#"
                 WITH post_insert AS (
                     INSERT INTO k_posts (
                         transaction_id, block_time, sender_pubkey, sender_signature, 
                         base64_encoded_message
                     ) VALUES ($1, $2, $3, $4, $5)
+                    ON CONFLICT (transaction_id) DO NOTHING
                     RETURNING transaction_id, block_time
                 )
                 INSERT INTO k_mentions (content_id, content_type, mentioned_pubkey, block_time)
@@ -531,9 +510,16 @@ impl KProtocolProcessor {
             .bind(&mentioned_pubkeys_bytes)
             .execute(&self.db_pool)
             .await?;
-        }
 
-        info!("Saved K post: {}", transaction_id);
+            if result.rows_affected() == 0 {
+                info!(
+                    "Post transaction {} already exists, skipping",
+                    transaction_id
+                );
+            } else {
+                info!("Saved K post: {}", transaction_id);
+            }
+        }
         Ok(())
     }
 
@@ -577,13 +563,14 @@ impl KProtocolProcessor {
 
         // Single query to insert reply and all mentions using CTE
         if k_reply.mentioned_pubkeys.is_empty() {
-            // If no mentions, just insert the reply
-            sqlx::query(
+            // If no mentions, just insert the reply (skip if already exists)
+            let result = sqlx::query(
                 r#"
                 INSERT INTO k_replies (
                     transaction_id, block_time, sender_pubkey, sender_signature, 
                     post_id, base64_encoded_message
                 ) VALUES ($1, $2, $3, $4, $5, $6)
+                ON CONFLICT (transaction_id) DO NOTHING
                 "#,
             )
             .bind(&transaction_id_bytes)
@@ -594,6 +581,15 @@ impl KProtocolProcessor {
             .bind(k_reply.base64_encoded_message)
             .execute(&self.db_pool)
             .await?;
+
+            if result.rows_affected() == 0 {
+                info!(
+                    "Reply transaction {} already exists, skipping",
+                    transaction_id
+                );
+            } else {
+                info!("Saved K reply: {} -> {}", transaction_id, post_id_for_log);
+            }
         } else {
             // Convert mentioned pubkeys to bytea
             let mentioned_pubkeys_bytes: Result<Vec<Vec<u8>>, _> = k_reply
@@ -603,14 +599,15 @@ impl KProtocolProcessor {
                 .collect();
             let mentioned_pubkeys_bytes = mentioned_pubkeys_bytes?;
 
-            // Insert reply and mentions in a single query using CTE
-            sqlx::query(
+            // Insert reply and mentions in a single query using CTE (skip if already exists)
+            let result = sqlx::query(
                 r#"
                 WITH reply_insert AS (
                     INSERT INTO k_replies (
                         transaction_id, block_time, sender_pubkey, sender_signature, 
                         post_id, base64_encoded_message
                     ) VALUES ($1, $2, $3, $4, $5, $6)
+                    ON CONFLICT (transaction_id) DO NOTHING
                     RETURNING transaction_id, block_time
                 )
                 INSERT INTO k_mentions (content_id, content_type, mentioned_pubkey, block_time)
@@ -627,9 +624,16 @@ impl KProtocolProcessor {
             .bind(&mentioned_pubkeys_bytes)
             .execute(&self.db_pool)
             .await?;
-        }
 
-        info!("Saved K reply: {} -> {}", transaction_id, post_id_for_log);
+            if result.rows_affected() == 0 {
+                info!(
+                    "Reply transaction {} already exists, skipping",
+                    transaction_id
+                );
+            } else {
+                info!("Saved K reply: {} -> {}", transaction_id, post_id_for_log);
+            }
+        }
         Ok(())
     }
 
@@ -671,18 +675,19 @@ impl KProtocolProcessor {
         let sender_pubkey_bytes = hex::decode(&k_broadcast.sender_pubkey)?;
         let sender_signature_bytes = hex::decode(&k_broadcast.sender_signature)?;
 
-        // Use a single query to delete existing records and insert the new one atomically
-        sqlx::query(
+        // Use a single query to delete existing records and insert the new one atomically (skip if transaction already exists)
+        let result = sqlx::query(
             r#"
             WITH deleted AS (
                 DELETE FROM k_broadcasts 
-                WHERE sender_pubkey = $3
+                WHERE sender_pubkey = $3 AND transaction_id != $1
                 RETURNING transaction_id
             )
             INSERT INTO k_broadcasts (
                 transaction_id, block_time, sender_pubkey, sender_signature, 
                 base64_encoded_nickname, base64_encoded_profile_image, base64_encoded_message
             ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+            ON CONFLICT (transaction_id) DO NOTHING
             "#,
         )
         .bind(&transaction_id_bytes)
@@ -695,10 +700,17 @@ impl KProtocolProcessor {
         .execute(&self.db_pool)
         .await?;
 
-        info!(
-            "Saved K broadcast: {} (replaced any existing broadcasts for sender)",
-            transaction_id
-        );
+        if result.rows_affected() == 0 {
+            info!(
+                "Broadcast transaction {} already exists, skipping",
+                transaction_id
+            );
+        } else {
+            info!(
+                "Saved K broadcast: {} (replaced any existing broadcasts for sender)",
+                transaction_id
+            );
+        }
         Ok(())
     }
 
@@ -740,14 +752,15 @@ impl KProtocolProcessor {
         let post_id_bytes = hex::decode(&k_vote.post_id)?;
         let mentioned_pubkey_bytes = hex::decode(&k_vote.mentioned_pubkey)?;
 
-        // Single query to insert vote and mention using CTE
-        sqlx::query(
+        // Single query to insert vote and mention using CTE (skip if already exists)
+        let result = sqlx::query(
             r#"
             WITH vote_insert AS (
                 INSERT INTO k_votes (
                     transaction_id, block_time, sender_pubkey, sender_signature, 
                     post_id, vote
                 ) VALUES ($1, $2, $3, $4, $5, $6)
+                ON CONFLICT (transaction_id) DO NOTHING
                 RETURNING transaction_id, block_time
             )
             INSERT INTO k_mentions (content_id, content_type, mentioned_pubkey, block_time)
@@ -765,10 +778,17 @@ impl KProtocolProcessor {
         .execute(&self.db_pool)
         .await?;
 
-        info!(
-            "Saved K vote: {} -> {} ({})",
-            transaction_id, post_id_for_log, vote_for_log
-        );
+        if result.rows_affected() == 0 {
+            info!(
+                "Vote transaction {} already exists, skipping",
+                transaction_id
+            );
+        } else {
+            info!(
+                "Saved K vote: {} -> {} ({})",
+                transaction_id, post_id_for_log, vote_for_log
+            );
+        }
         Ok(())
     }
 }
