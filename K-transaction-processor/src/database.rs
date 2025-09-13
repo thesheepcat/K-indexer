@@ -53,7 +53,6 @@ impl KDbClient {
         Ok(())
     }
 
-
     /// Create or upgrade schema (equivalent to KaspaDbClient::create_schema)
     pub async fn create_schema(&self, upgrade_db: bool) -> Result<()> {
         info!("Starting schema creation/upgrade process");
@@ -83,7 +82,10 @@ impl KDbClient {
                             info!("Migration v0 -> v1 completed successfully");
                         }
 
-                        info!("Schema upgrade completed successfully (final version: {})", current_version);
+                        info!(
+                            "Schema upgrade completed successfully (final version: {})",
+                            current_version
+                        );
                     } else {
                         return Err(anyhow::anyhow!(
                             "Found outdated schema v{}. Set flag '--upgrade-db' to upgrade",
@@ -100,7 +102,10 @@ impl KDbClient {
                 }
             }
             None => {
-                info!("No existing schema found, creating fresh schema v{}", SCHEMA_VERSION);
+                info!(
+                    "No existing schema found, creating fresh schema v{}",
+                    SCHEMA_VERSION
+                );
                 execute_ddl(SCHEMA_UP_SQL, &self.pool).await?;
                 info!("Fresh schema creation completed successfully");
             }
@@ -117,7 +122,6 @@ impl KDbClient {
 // Embedded SQL migration files
 const SCHEMA_UP_SQL: &str = include_str!("../migrations/schema/up.sql");
 const SCHEMA_DOWN_SQL: &str = include_str!("../migrations/schema/down.sql");
-const SCHEMA_V0_SQL: &str = include_str!("../migrations/schema/v0.sql");
 const MIGRATION_V0_TO_V1_SQL: &str = include_str!("../migrations/schema/v0_to_v1.sql");
 
 pub async fn create_pool(config: &AppConfig) -> Result<DbPool> {
@@ -173,11 +177,10 @@ pub async fn fetch_transaction(
     }
 }
 
-
 async fn get_schema_version(pool: &DbPool) -> Result<Option<i32>> {
     // Check if k_vars table exists
     let table_exists = sqlx::query(
-        "SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name = 'k_vars')"
+        "SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name = 'k_vars')",
     )
     .fetch_one(pool)
     .await?
@@ -188,16 +191,15 @@ async fn get_schema_version(pool: &DbPool) -> Result<Option<i32>> {
     }
 
     // Get schema version from k_vars table
-    let result = sqlx::query(
-        "SELECT value FROM k_vars WHERE key = 'schema_version'"
-    )
-    .fetch_optional(pool)
-    .await?;
+    let result = sqlx::query("SELECT value FROM k_vars WHERE key = 'schema_version'")
+        .fetch_optional(pool)
+        .await?;
 
     match result {
         Some(row) => {
             let version_str: String = row.get("value");
-            let version = version_str.parse::<i32>()
+            let version = version_str
+                .parse::<i32>()
                 .map_err(|_| anyhow::anyhow!("Invalid schema version format: {}", version_str))?;
             Ok(Some(version))
         }
@@ -219,8 +221,10 @@ async fn execute_ddl(ddl: &str, pool: &DbPool) -> Result<()> {
         // Execute the statement
         match sqlx::query(trimmed_statement).execute(pool).await {
             Ok(_) => {
-                tracing::debug!("DDL statement executed successfully: {}",
-                    &trimmed_statement[..std::cmp::min(100, trimmed_statement.len())]);
+                tracing::debug!(
+                    "DDL statement executed successfully: {}",
+                    &trimmed_statement[..std::cmp::min(100, trimmed_statement.len())]
+                );
             }
             Err(e) => {
                 tracing::error!("Failed to execute DDL statement: {}", e);
@@ -242,7 +246,10 @@ async fn verify_schema_setup(pool: &DbPool) -> Result<()> {
             info!("  ✓ k_vars table and schema version {} verified", v);
         }
         Some(v) => {
-            error!("  ✗ Incorrect schema version: expected {}, found {}", SCHEMA_VERSION, v);
+            error!(
+                "  ✗ Incorrect schema version: expected {}, found {}",
+                SCHEMA_VERSION, v
+            );
             return Err(anyhow::anyhow!("Schema version mismatch"));
         }
         None => {
@@ -252,7 +259,13 @@ async fn verify_schema_setup(pool: &DbPool) -> Result<()> {
     }
 
     // Check K protocol tables
-    let tables = vec!["k_posts", "k_replies", "k_broadcasts", "k_votes", "k_mentions"];
+    let tables = vec![
+        "k_posts",
+        "k_replies",
+        "k_broadcasts",
+        "k_votes",
+        "k_mentions",
+    ];
     let mut all_verified = true;
 
     for table in &tables {
@@ -273,10 +286,11 @@ async fn verify_schema_setup(pool: &DbPool) -> Result<()> {
     }
 
     // Check transaction trigger
-    let function_exists = sqlx::query("SELECT EXISTS(SELECT 1 FROM pg_proc WHERE proname = 'notify_transaction')")
-        .fetch_one(pool)
-        .await?
-        .get::<bool, _>(0);
+    let function_exists =
+        sqlx::query("SELECT EXISTS(SELECT 1 FROM pg_proc WHERE proname = 'notify_transaction')")
+            .fetch_one(pool)
+            .await?
+            .get::<bool, _>(0);
 
     let trigger_exists = sqlx::query(
         "SELECT EXISTS(SELECT 1 FROM pg_trigger WHERE tgname = 'transaction_notify_trigger')",

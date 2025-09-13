@@ -108,7 +108,10 @@ async fn main() -> Result<()> {
         info!("Initializing database");
         database.drop_schema().await.expect("Unable to drop schema");
     }
-    database.create_schema(args.upgrade_db).await.expect("Unable to create schema");
+    database
+        .create_schema(args.upgrade_db)
+        .await
+        .expect("Unable to create schema");
 
     let (notification_sender, notification_receiver) = mpsc::unbounded_channel();
 
