@@ -120,9 +120,9 @@ impl KDbClient {
 }
 
 // Embedded SQL migration files
-const SCHEMA_UP_SQL: &str = include_str!("../migrations/schema/up.sql");
-const SCHEMA_DOWN_SQL: &str = include_str!("../migrations/schema/down.sql");
-const MIGRATION_V0_TO_V1_SQL: &str = include_str!("../migrations/schema/v0_to_v1.sql");
+const SCHEMA_UP_SQL: &str = include_str!("migrations/schema/up.sql");
+const SCHEMA_DOWN_SQL: &str = include_str!("migrations/schema/down.sql");
+const MIGRATION_V0_TO_V1_SQL: &str = include_str!("migrations/schema/v0_to_v1.sql");
 
 pub async fn create_pool(config: &AppConfig) -> Result<DbPool> {
     let connection_string = config.connection_string();
