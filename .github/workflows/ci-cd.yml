@@ -55,7 +55,6 @@ jobs:
         push: true
         tags: |
           thesheepcat/k-transaction-processor:dev
-          thesheepcat/k-transaction-processor:${{ github.sha }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
@@ -66,7 +65,6 @@ jobs:
         file: ./docker/DEV/Dockerfile.K-webserver
         push: true
         tags: |
-          thesheepcat/k-webserver:dev
-          thesheepcat/k-webserver:${{ github.sha }}
+          thesheepcat/k-webserver:dev          
         cache-from: type=gha
         cache-to: type=gha,mode=max
