@@ -27,7 +27,7 @@ services:
     image: thesheepcat/k-transaction-processor:dev
     restart: unless-stopped
     network_mode: "host"
-    command: --db-host localhost --db-port ${DB_PORT} --db-name ${DB_NAME} --db-user ${DB_USER} --db-password ${DB_PASSWORD} --db-max-connections 10 --workers 4 --channel transaction_channel --retry-attempts 3 --retry-delay 1000
+    command: --upgrade-db --db-host localhost --db-port ${DB_PORT} --db-name ${DB_NAME} --db-user ${DB_USER} --db-password ${DB_PASSWORD} --db-max-connections 10 --workers 4 --channel transaction_channel --retry-attempts 3 --retry-delay 1000
     depends_on:
       - k-indexer-db-DEV
       - simply-kaspa-indexer-DEV
