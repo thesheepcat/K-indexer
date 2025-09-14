@@ -127,7 +127,8 @@ impl KDbClient {
         info!("Creating notification function and trigger");
 
         // Create the function using dollar quoting
-        sqlx::query(r#"
+        sqlx::query(
+            r#"
             CREATE OR REPLACE FUNCTION notify_transaction() RETURNS TRIGGER AS $$
             BEGIN
                 IF substr(encode(NEW.payload, 'hex'), 1, 8) = '6b3a313a' THEN
@@ -136,14 +137,21 @@ impl KDbClient {
                 RETURN NEW;
             END;
             $$ LANGUAGE plpgsql
-        "#).execute(&self.pool).await?;
+        "#,
+        )
+        .execute(&self.pool)
+        .await?;
 
         // Create the trigger
-        sqlx::query(r#"
+        sqlx::query(
+            r#"
             CREATE TRIGGER transaction_notify_trigger
             AFTER INSERT ON transactions
             FOR EACH ROW EXECUTE FUNCTION notify_transaction()
-        "#).execute(&self.pool).await?;
+        "#,
+        )
+        .execute(&self.pool)
+        .await?;
 
         info!("Notification system created successfully");
         Ok(())
