@@ -92,15 +92,6 @@ async fn main() -> Result<()> {
         config.database.max_connections
     );
 
-    // Test the pool connection
-    match sqlx::query("SELECT 1").fetch_one(&db_pool).await {
-        Ok(_) => info!("Database pool connection test successful"),
-        Err(e) => {
-            error!("Database pool connection test failed: {}", e);
-            return Err(e.into());
-        }
-    }
-
     // Initialize database following Simply Kaspa Indexer pattern
     let database = KDbClient::new(db_pool);
 
