@@ -458,7 +458,7 @@ impl KProtocolProcessor {
                     transaction_id, block_time, sender_pubkey, sender_signature, 
                     base64_encoded_message
                 ) VALUES ($1, $2, $3, $4, $5)
-                ON CONFLICT (transaction_id) DO NOTHING
+                ON CONFLICT (sender_signature) DO NOTHING
                 "#,
             )
             .bind(&transaction_id_bytes)
@@ -494,7 +494,7 @@ impl KProtocolProcessor {
                         transaction_id, block_time, sender_pubkey, sender_signature, 
                         base64_encoded_message
                     ) VALUES ($1, $2, $3, $4, $5)
-                    ON CONFLICT (transaction_id) DO NOTHING
+                    ON CONFLICT (sender_signature) DO NOTHING
                     RETURNING transaction_id, block_time
                 )
                 INSERT INTO k_mentions (content_id, content_type, mentioned_pubkey, block_time)
@@ -570,7 +570,7 @@ impl KProtocolProcessor {
                     transaction_id, block_time, sender_pubkey, sender_signature, 
                     post_id, base64_encoded_message
                 ) VALUES ($1, $2, $3, $4, $5, $6)
-                ON CONFLICT (transaction_id) DO NOTHING
+                ON CONFLICT (sender_signature) DO NOTHING
                 "#,
             )
             .bind(&transaction_id_bytes)
@@ -607,7 +607,7 @@ impl KProtocolProcessor {
                         transaction_id, block_time, sender_pubkey, sender_signature, 
                         post_id, base64_encoded_message
                     ) VALUES ($1, $2, $3, $4, $5, $6)
-                    ON CONFLICT (transaction_id) DO NOTHING
+                    ON CONFLICT (sender_signature) DO NOTHING
                     RETURNING transaction_id, block_time
                 )
                 INSERT INTO k_mentions (content_id, content_type, mentioned_pubkey, block_time)
@@ -760,7 +760,7 @@ impl KProtocolProcessor {
                     transaction_id, block_time, sender_pubkey, sender_signature, 
                     post_id, vote
                 ) VALUES ($1, $2, $3, $4, $5, $6)
-                ON CONFLICT (transaction_id) DO NOTHING
+                ON CONFLICT (sender_signature) DO NOTHING
                 RETURNING transaction_id, block_time
             )
             INSERT INTO k_mentions (content_id, content_type, mentioned_pubkey, block_time)
