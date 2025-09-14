@@ -220,15 +220,16 @@ async fn execute_ddl(ddl: &str, pool: &DbPool) -> Result<()> {
 
         // Execute the statement
         match sqlx::query(trimmed_statement).execute(pool).await {
-            Ok(_) => {
-                tracing::debug!(
-                    "DDL statement executed successfully: {}",
+            Ok(result) => {
+                info!(
+                    "DDL statement executed successfully (rows affected: {}): {}",
+                    result.rows_affected(),
                     &trimmed_statement[..std::cmp::min(100, trimmed_statement.len())]
                 );
             }
             Err(e) => {
-                tracing::error!("Failed to execute DDL statement: {}", e);
-                tracing::error!("Statement was: {}", trimmed_statement);
+                error!("Failed to execute DDL statement: {}", e);
+                error!("Statement was: {}", trimmed_statement);
                 return Err(e.into());
             }
         }
