@@ -210,13 +210,18 @@ async fn get_schema_version(pool: &DbPool) -> Result<Option<i32>> {
 async fn execute_ddl(ddl: &str, pool: &DbPool) -> Result<()> {
     // Split DDL into individual statements and execute each one
     // This matches the Simply Kaspa Indexer implementation pattern
-    for statement in ddl.split(";").filter(|stmt| !stmt.trim().is_empty()) {
+    let statements: Vec<&str> = ddl.split(';').collect();
+
+    for (index, statement) in statements.iter().enumerate() {
         let trimmed_statement = statement.trim();
 
         // Skip empty statements and comments
         if trimmed_statement.is_empty() || trimmed_statement.starts_with("--") {
             continue;
         }
+
+        info!("Processing DDL statement {} of {}: {}", index + 1, statements.len(),
+              &trimmed_statement[..std::cmp::min(50, trimmed_statement.len())]);
 
         // Execute the statement
         match sqlx::query(trimmed_statement).execute(pool).await {
