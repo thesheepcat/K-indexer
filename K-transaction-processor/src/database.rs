@@ -220,8 +220,12 @@ async fn execute_ddl(ddl: &str, pool: &DbPool) -> Result<()> {
             continue;
         }
 
-        info!("Processing DDL statement {} of {}: {}", index + 1, statements.len(),
-              &trimmed_statement[..std::cmp::min(50, trimmed_statement.len())]);
+        info!(
+            "Processing DDL statement {} of {}: {}",
+            index + 1,
+            statements.len(),
+            &trimmed_statement[..std::cmp::min(50, trimmed_statement.len())]
+        );
 
         // Execute the statement
         match sqlx::query(trimmed_statement).execute(pool).await {
