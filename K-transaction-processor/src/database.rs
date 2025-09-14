@@ -107,6 +107,10 @@ impl KDbClient {
                     SCHEMA_VERSION
                 );
                 execute_ddl(SCHEMA_UP_SQL, &self.pool).await?;
+
+                // Create the notification function and trigger separately to avoid parsing issues
+                self.create_notification_system().await?;
+
                 info!("Fresh schema creation completed successfully");
             }
         }
@@ -115,6 +119,33 @@ impl KDbClient {
         verify_schema_setup(&self.pool).await?;
 
         info!("Schema creation/upgrade process completed");
+        Ok(())
+    }
+
+    /// Create the notification function and trigger separately to avoid DDL parsing issues
+    async fn create_notification_system(&self) -> Result<()> {
+        info!("Creating notification function and trigger");
+
+        // Create the function using dollar quoting
+        sqlx::query(r#"
+            CREATE OR REPLACE FUNCTION notify_transaction() RETURNS TRIGGER AS $$
+            BEGIN
+                IF substr(encode(NEW.payload, 'hex'), 1, 8) = '6b3a313a' THEN
+                    PERFORM pg_notify('transaction_channel', encode(NEW.transaction_id, 'hex'));
+                END IF;
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql
+        "#).execute(&self.pool).await?;
+
+        // Create the trigger
+        sqlx::query(r#"
+            CREATE TRIGGER transaction_notify_trigger
+            AFTER INSERT ON transactions
+            FOR EACH ROW EXECUTE FUNCTION notify_transaction()
+        "#).execute(&self.pool).await?;
+
+        info!("Notification system created successfully");
         Ok(())
     }
 }
