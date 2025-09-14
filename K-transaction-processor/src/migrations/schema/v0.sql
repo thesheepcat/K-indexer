@@ -58,9 +58,3 @@ CREATE TABLE IF NOT EXISTS k_mentions (
     mentioned_pubkey BYTEA NOT NULL,
     block_time BIGINT NOT NULL
 );
-
--- Create transaction notification function
-CREATE OR REPLACE FUNCTION notify_transaction() RETURNS TRIGGER AS 'BEGIN IF substr(encode(NEW.payload, ''hex''), 1, 8) = ''6b3a313a'' THEN PERFORM pg_notify(''transaction_channel'', encode(NEW.transaction_id, ''hex'')); END IF; RETURN NEW; END;' LANGUAGE plpgsql;
-
--- Create transaction notification trigger (transactions table existence is verified before this runs)
-CREATE TRIGGER transaction_notify_trigger AFTER INSERT ON transactions FOR EACH ROW EXECUTE FUNCTION notify_transaction();

@@ -82,9 +82,3 @@ CREATE INDEX IF NOT EXISTS idx_k_votes_post_id_sender ON k_votes(post_id, sender
 CREATE INDEX IF NOT EXISTS idx_k_replies_post_id_block_time ON k_replies(post_id, block_time DESC);
 CREATE INDEX IF NOT EXISTS idx_k_posts_block_time_id_covering ON k_posts(block_time DESC, id DESC) INCLUDE (transaction_id, sender_pubkey, sender_signature, base64_encoded_message);
 CREATE INDEX IF NOT EXISTS idx_k_mentions_content_type_id ON k_mentions(content_type, content_id);
-
--- Create transaction notification function
-CREATE OR REPLACE FUNCTION notify_transaction() RETURNS TRIGGER AS 'BEGIN IF substr(encode(NEW.payload, ''hex''), 1, 8) = ''6b3a313a'' THEN PERFORM pg_notify(''transaction_channel'', encode(NEW.transaction_id, ''hex'')); END IF; RETURN NEW; END;' LANGUAGE plpgsql;
-
--- Create transaction notification trigger (transactions table existence is verified before this runs)
-CREATE TRIGGER transaction_notify_trigger AFTER INSERT ON transactions FOR EACH ROW EXECUTE FUNCTION notify_transaction();
