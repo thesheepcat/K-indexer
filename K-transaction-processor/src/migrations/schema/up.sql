@@ -7,8 +7,8 @@ CREATE TABLE IF NOT EXISTS k_vars (
     value TEXT NOT NULL
 );
 
--- Insert initial schema version (v1 = complete schema with indexes)
-INSERT INTO k_vars (key, value) VALUES ('schema_version', '1') ON CONFLICT (key) DO NOTHING;
+-- Insert initial schema version (v2 = complete schema with indexes and signature deduplication)
+INSERT INTO k_vars (key, value) VALUES ('schema_version', '2') ON CONFLICT (key) DO NOTHING;
 
 -- Create K protocol tables
 CREATE TABLE IF NOT EXISTS k_posts (
@@ -82,3 +82,8 @@ CREATE INDEX IF NOT EXISTS idx_k_votes_post_id_sender ON k_votes(post_id, sender
 CREATE INDEX IF NOT EXISTS idx_k_replies_post_id_block_time ON k_replies(post_id, block_time DESC);
 CREATE INDEX IF NOT EXISTS idx_k_posts_block_time_id_covering ON k_posts(block_time DESC, id DESC) INCLUDE (transaction_id, sender_pubkey, sender_signature, base64_encoded_message);
 CREATE INDEX IF NOT EXISTS idx_k_mentions_content_type_id ON k_mentions(content_type, content_id);
+
+-- Signature-based deduplication indexes
+CREATE UNIQUE INDEX IF NOT EXISTS idx_k_posts_sender_signature_unique ON k_posts(sender_signature);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_k_replies_sender_signature_unique ON k_replies(sender_signature);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_k_votes_sender_signature_unique ON k_votes(sender_signature);
