@@ -446,7 +446,8 @@ impl KProtocolProcessor {
                     self.save_k_vote_to_database(transaction, k_vote).await?;
                 }
                 KActionType::Block(k_block) => {
-                    self.process_k_block_in_database(transaction, k_block).await?;
+                    self.process_k_block_in_database(transaction, k_block)
+                        .await?;
                 }
                 KActionType::Unknown(action) => {
                     warn!(
@@ -863,7 +864,10 @@ impl KProtocolProcessor {
             &k_block.sender_signature,
             &k_block.sender_pubkey,
         ) {
-            error!("Invalid signature for block action {}, skipping", transaction_id);
+            error!(
+                "Invalid signature for block action {}, skipping",
+                transaction_id
+            );
             return Ok(()); // Skip block actions with invalid signatures
         }
 

@@ -212,7 +212,10 @@ impl ServerUserPost {
         }
     }
 
-    pub fn from_k_broadcast_record_with_block_status(record: &KBroadcastRecord, is_blocked: bool) -> Self {
+    pub fn from_k_broadcast_record_with_block_status(
+        record: &KBroadcastRecord,
+        is_blocked: bool,
+    ) -> Self {
         Self {
             id: record.transaction_id.clone(),
             user_public_key: record.sender_pubkey.clone(),

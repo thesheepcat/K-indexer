@@ -734,7 +734,11 @@ impl ApiHandlers {
         }
 
         // Get the user's broadcast record from k_broadcast table with block status
-        let broadcast_result = match self.db.get_broadcast_by_user_with_block_status(user_public_key, requester_pubkey).await {
+        let broadcast_result = match self
+            .db
+            .get_broadcast_by_user_with_block_status(user_public_key, requester_pubkey)
+            .await
+        {
             Ok(result) => result,
             Err(err) => {
                 log_error!(
@@ -753,15 +757,15 @@ impl ApiHandlers {
         let (broadcast_record, is_blocked) = match broadcast_result {
             Some((record, blocked)) => (record, blocked),
             None => {
-                return Err(self.create_error_response(
-                    "User not found",
-                    "USER_NOT_FOUND",
-                ));
+                return Err(self.create_error_response("User not found", "USER_NOT_FOUND"));
             }
         };
 
         // Convert to ServerUserPost with user profile data and block status
-        let mut server_user_post = ServerUserPost::from_k_broadcast_record_with_block_status(&broadcast_record, is_blocked);
+        let mut server_user_post = ServerUserPost::from_k_broadcast_record_with_block_status(
+            &broadcast_record,
+            is_blocked,
+        );
         server_user_post.user_nickname = Some(broadcast_record.base64_encoded_nickname);
         server_user_post.user_profile_image = broadcast_record.base64_encoded_profile_image;
 
@@ -816,7 +820,11 @@ impl ApiHandlers {
             sort_descending: true,
         };
 
-        let broadcasts_result = match self.db.get_blocked_users_by_requester(requester_pubkey, options).await {
+        let broadcasts_result = match self
+            .db
+            .get_blocked_users_by_requester(requester_pubkey, options)
+            .await
+        {
             Ok(result) => result,
             Err(err) => {
                 log_error!(
@@ -854,7 +862,10 @@ impl ApiHandlers {
         match serde_json::to_string(&response) {
             Ok(json) => Ok(json),
             Err(err) => {
-                log_error!("Failed to serialize paginated blocked users response: {}", err);
+                log_error!(
+                    "Failed to serialize paginated blocked users response: {}",
+                    err
+                );
                 Err(self.create_error_response(
                     "Internal server error during serialization",
                     "SERIALIZATION_ERROR",
