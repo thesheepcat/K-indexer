@@ -680,6 +680,189 @@ impl ApiHandlers {
         }
     }
 
+    /// GET /get-user-details with user parameter
+    /// Fetch user details from k_broadcast table for a specific user public key
+    pub async fn get_user_details(
+        &self,
+        user_public_key: &str,
+        requester_pubkey: &str,
+    ) -> Result<String, String> {
+        // Validate user public key format (66 hex characters for compressed public key)
+        if user_public_key.len() != 66 {
+            return Err(self.create_error_response(
+                "Invalid user public key format. Must be 66 hex characters.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        if !user_public_key.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(self.create_error_response(
+                "Invalid user public key format. Must contain only hex characters.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        // Validate compressed public key prefix (should start with 02 or 03)
+        if !user_public_key.starts_with("02") && !user_public_key.starts_with("03") {
+            return Err(self.create_error_response(
+                "Invalid user public key format. Compressed public key must start with 02 or 03.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        // Validate requester public key format (66 hex characters for compressed public key)
+        if requester_pubkey.len() != 66 {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Must be 66 hex characters.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        if !requester_pubkey.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Must contain only hex characters.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        // Validate compressed public key prefix (should start with 02 or 03)
+        if !requester_pubkey.starts_with("02") && !requester_pubkey.starts_with("03") {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Compressed public key must start with 02 or 03.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        // Get the user's broadcast record from k_broadcast table with block status
+        let broadcast_result = match self.db.get_broadcast_by_user_with_block_status(user_public_key, requester_pubkey).await {
+            Ok(result) => result,
+            Err(err) => {
+                log_error!(
+                    "Database error while querying user details for user {}: {}",
+                    user_public_key,
+                    err
+                );
+                return Err(self.create_error_response(
+                    "Internal server error during database query",
+                    "DATABASE_ERROR",
+                ));
+            }
+        };
+
+        // Check if user was found
+        let (broadcast_record, is_blocked) = match broadcast_result {
+            Some((record, blocked)) => (record, blocked),
+            None => {
+                return Err(self.create_error_response(
+                    "User not found",
+                    "USER_NOT_FOUND",
+                ));
+            }
+        };
+
+        // Convert to ServerUserPost with user profile data and block status
+        let mut server_user_post = ServerUserPost::from_k_broadcast_record_with_block_status(&broadcast_record, is_blocked);
+        server_user_post.user_nickname = Some(broadcast_record.base64_encoded_nickname);
+        server_user_post.user_profile_image = broadcast_record.base64_encoded_profile_image;
+
+        match serde_json::to_string(&server_user_post) {
+            Ok(json) => Ok(json),
+            Err(err) => {
+                log_error!("Failed to serialize user details response: {}", err);
+                Err(self.create_error_response(
+                    "Internal server error during serialization",
+                    "SERIALIZATION_ERROR",
+                ))
+            }
+        }
+    }
+
+    /// GET /get-blocked-users with pagination
+    /// Fetch paginated list of users blocked by the requester
+    pub async fn get_blocked_users_paginated(
+        &self,
+        requester_pubkey: &str,
+        limit: u32,
+        before: Option<String>,
+        after: Option<String>,
+    ) -> Result<String, String> {
+        // Validate requester public key format (66 hex characters for compressed public key)
+        if requester_pubkey.len() != 66 {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Must be 66 hex characters.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        if !requester_pubkey.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Must contain only hex characters.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        // Validate compressed public key prefix (should start with 02 or 03)
+        if !requester_pubkey.starts_with("02") && !requester_pubkey.starts_with("03") {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Compressed public key must start with 02 or 03.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        let options = QueryOptions {
+            limit: Some(limit as u64),
+            before,
+            after,
+            sort_descending: true,
+        };
+
+        let broadcasts_result = match self.db.get_blocked_users_by_requester(requester_pubkey, options).await {
+            Ok(result) => result,
+            Err(err) => {
+                log_error!(
+                    "Database error while querying blocked users for requester {}: {}",
+                    requester_pubkey,
+                    err
+                );
+                return Err(self.create_error_response(
+                    "Internal server error during database query",
+                    "DATABASE_ERROR",
+                ));
+            }
+        };
+
+        let mut all_posts = Vec::new();
+
+        for k_broadcast_record in broadcasts_result.items {
+            let mut server_user_post = ServerUserPost::from_k_broadcast_record(&k_broadcast_record);
+
+            // Enrich with user profile data from broadcasts (self-enrichment)
+            server_user_post.user_nickname = Some(k_broadcast_record.base64_encoded_nickname);
+            server_user_post.user_profile_image = k_broadcast_record.base64_encoded_profile_image;
+
+            // Since these are blocked users, set blocked_user to true
+            server_user_post.blocked_user = Some(true);
+
+            all_posts.push(server_user_post);
+        }
+
+        let response = PaginatedUsersResponse {
+            posts: all_posts,
+            pagination: broadcasts_result.pagination,
+        };
+
+        match serde_json::to_string(&response) {
+            Ok(json) => Ok(json),
+            Err(err) => {
+                log_error!("Failed to serialize paginated blocked users response: {}", err);
+                Err(self.create_error_response(
+                    "Internal server error during serialization",
+                    "SERIALIZATION_ERROR",
+                ))
+            }
+        }
+    }
+
     /// Create a standardized error response
     fn create_error_response(&self, message: &str, code: &str) -> String {
         let error = ApiError {

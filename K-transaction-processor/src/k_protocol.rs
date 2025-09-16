@@ -17,6 +17,7 @@ pub enum KActionType {
     Post(KPost),
     Reply(KReply),
     Vote(KVote),
+    Block(KBlock),
     Unknown(String),
 }
 
@@ -54,6 +55,14 @@ pub struct KVote {
     pub post_id: String,
     pub vote: String, // "upvote" or "downvote"
     pub mentioned_pubkey: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct KBlock {
+    pub sender_pubkey: String,
+    pub sender_signature: String,
+    pub blocking_action: String, // "block" or "unblock"
+    pub blocked_user_pubkey: String,
 }
 
 // Database record structures for PostgreSQL
@@ -97,6 +106,16 @@ pub struct KVoteRecord {
     pub sender_signature: String,
     pub post_id: String,
     pub vote: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct KBlockRecord {
+    pub transaction_id: String,
+    pub block_time: i64,
+    pub sender_pubkey: String,
+    pub sender_signature: String,
+    pub blocking_action: String,
+    pub blocked_user_pubkey: String,
 }
 
 pub struct KProtocolProcessor {
@@ -335,6 +354,35 @@ impl KProtocolProcessor {
                     mentioned_pubkey,
                 }))
             }
+            "block" => {
+                // Expected format: block:sender_pubkey:sender_signature:blocking_action:blocked_user_pubkey
+                if parts.len() < 5 {
+                    return Err(anyhow::anyhow!(
+                        "Invalid block format: expected 5 parts, got {}",
+                        parts.len()
+                    ));
+                }
+
+                let sender_pubkey = parts[1].to_string();
+                let sender_signature = parts[2].to_string();
+                let blocking_action = parts[3].to_string();
+                let blocked_user_pubkey = parts[4].to_string();
+
+                // Validate blocking_action value
+                if blocking_action != "block" && blocking_action != "unblock" {
+                    return Err(anyhow::anyhow!(
+                        "Invalid blocking_action value: expected 'block' or 'unblock', got '{}'",
+                        blocking_action
+                    ));
+                }
+
+                Ok(KActionType::Block(KBlock {
+                    sender_pubkey,
+                    sender_signature,
+                    blocking_action,
+                    blocked_user_pubkey,
+                }))
+            }
             _ => Ok(KActionType::Unknown(action.to_string())),
         }
     }
@@ -396,6 +444,9 @@ impl KProtocolProcessor {
                 }
                 KActionType::Vote(k_vote) => {
                     self.save_k_vote_to_database(transaction, k_vote).await?;
+                }
+                KActionType::Block(k_block) => {
+                    self.process_k_block_in_database(transaction, k_block).await?;
                 }
                 KActionType::Unknown(action) => {
                     warn!(
@@ -789,6 +840,108 @@ impl KProtocolProcessor {
                 transaction_id, post_id_for_log, vote_for_log
             );
         }
+        Ok(())
+    }
+
+    /// Process K block action (block/unblock) in database
+    pub async fn process_k_block_in_database(
+        &self,
+        transaction: &Transaction,
+        k_block: KBlock,
+    ) -> Result<()> {
+        let transaction_id = &transaction.transaction_id;
+
+        // Construct the message to verify - it's blocking_action + blocked_user_pubkey
+        let message_to_verify = format!(
+            "{}:{}",
+            k_block.blocking_action, k_block.blocked_user_pubkey
+        );
+
+        // Verify the signature
+        if !self.verify_kaspa_signature(
+            &message_to_verify,
+            &k_block.sender_signature,
+            &k_block.sender_pubkey,
+        ) {
+            error!("Invalid signature for block action {}, skipping", transaction_id);
+            return Ok(()); // Skip block actions with invalid signatures
+        }
+
+        // Extract block time
+        let block_time = transaction.block_time.unwrap_or(0);
+
+        // Convert hex strings to bytea for database storage
+        let sender_pubkey_bytes = hex::decode(&k_block.sender_pubkey)?;
+        let blocked_user_pubkey_bytes = hex::decode(&k_block.blocked_user_pubkey)?;
+
+        match k_block.blocking_action.as_str() {
+            "block" => {
+                let transaction_id_bytes = hex::decode(transaction_id)?;
+                let sender_signature_bytes = hex::decode(&k_block.sender_signature)?;
+
+                // Insert block record (skip if already exists)
+                let result = sqlx::query(
+                    r#"
+                    INSERT INTO k_blocks (
+                        transaction_id, block_time, sender_pubkey, sender_signature,
+                        blocking_action, blocked_user_pubkey
+                    ) VALUES ($1, $2, $3, $4, $5, $6)
+                    ON CONFLICT (sender_signature) DO NOTHING
+                    "#,
+                )
+                .bind(&transaction_id_bytes)
+                .bind(block_time)
+                .bind(&sender_pubkey_bytes)
+                .bind(&sender_signature_bytes)
+                .bind(&k_block.blocking_action)
+                .bind(&blocked_user_pubkey_bytes)
+                .execute(&self.db_pool)
+                .await?;
+
+                if result.rows_affected() == 0 {
+                    info!(
+                        "Block transaction {} already exists, skipping",
+                        transaction_id
+                    );
+                } else {
+                    info!(
+                        "Saved K block: {} blocked {}",
+                        hex::encode(&sender_pubkey_bytes),
+                        hex::encode(&blocked_user_pubkey_bytes)
+                    );
+                }
+            }
+            "unblock" => {
+                // Delete any existing "block" record for the same sender and blocked user
+                let delete_result = sqlx::query(
+                    r#"
+                    DELETE FROM k_blocks
+                    WHERE sender_pubkey = $1
+                    AND blocked_user_pubkey = $2
+                    AND blocking_action = 'block'
+                    "#,
+                )
+                .bind(&sender_pubkey_bytes)
+                .bind(&blocked_user_pubkey_bytes)
+                .execute(&self.db_pool)
+                .await?;
+
+                info!(
+                    "Processed K unblock: {} unblocked {} (deleted {} existing block records)",
+                    hex::encode(&sender_pubkey_bytes),
+                    hex::encode(&blocked_user_pubkey_bytes),
+                    delete_result.rows_affected()
+                );
+            }
+            _ => {
+                error!("Invalid blocking_action: {}", k_block.blocking_action);
+                return Err(anyhow::anyhow!(
+                    "Invalid blocking_action: {}",
+                    k_block.blocking_action
+                ));
+            }
+        }
+
         Ok(())
     }
 }

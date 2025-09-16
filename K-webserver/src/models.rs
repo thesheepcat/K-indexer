@@ -194,6 +194,8 @@ pub struct ServerUserPost {
     pub user_nickname: Option<String>,
     #[serde(rename = "userProfileImage", skip_serializing_if = "Option::is_none")]
     pub user_profile_image: Option<String>,
+    #[serde(rename = "blockedUser", skip_serializing_if = "Option::is_none")]
+    pub blocked_user: Option<bool>,
 }
 
 impl ServerUserPost {
@@ -206,6 +208,20 @@ impl ServerUserPost {
             timestamp: record.block_time,
             user_nickname: Some(record.base64_encoded_nickname.clone()),
             user_profile_image: record.base64_encoded_profile_image.clone(),
+            blocked_user: None,
+        }
+    }
+
+    pub fn from_k_broadcast_record_with_block_status(record: &KBroadcastRecord, is_blocked: bool) -> Self {
+        Self {
+            id: record.transaction_id.clone(),
+            user_public_key: record.sender_pubkey.clone(),
+            post_content: record.base64_encoded_message.clone(),
+            signature: record.sender_signature.clone(),
+            timestamp: record.block_time,
+            user_nickname: Some(record.base64_encoded_nickname.clone()),
+            user_profile_image: record.base64_encoded_profile_image.clone(),
+            blocked_user: Some(is_blocked),
         }
     }
 }

@@ -21,7 +21,7 @@ use crate::config::ServerConfig;
 use crate::database_trait::DatabaseInterface;
 use crate::models::{
     ApiError, PaginatedPostsResponse, PaginatedRepliesResponse, PaginatedUsersResponse,
-    PostDetailsResponse,
+    PostDetailsResponse, ServerUserPost,
 };
 
 #[derive(Debug, Clone)]
@@ -96,6 +96,22 @@ struct GetPostDetailsQuery {
     requester_pubkey: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct GetUserDetailsQuery {
+    user: Option<String>,
+    #[serde(rename = "requesterPubkey")]
+    requester_pubkey: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GetBlockedUsersQuery {
+    #[serde(rename = "requesterPubkey")]
+    requester_pubkey: Option<String>,
+    limit: Option<u32>,
+    before: Option<String>,
+    after: Option<String>,
+}
+
 impl WebServer {
     pub fn new(db: Arc<dyn DatabaseInterface>, server_config: ServerConfig) -> Self {
         let api_handlers = ApiHandlers::new(db.clone());
@@ -126,6 +142,8 @@ impl WebServer {
             .route("/get-replies", get(handle_get_replies))
             .route("/get-mentions", get(handle_get_mentions))
             .route("/get-post-details", get(handle_get_post_details))
+            .route("/get-user-details", get(handle_get_user_details))
+            .route("/get-blocked-users", get(handle_get_blocked_users))
             .layer(prometheus_layer)
             .layer(TimeoutLayer::new(timeout_duration))
             .layer(RequestBodyLimitLayer::new(1024 * 1024)) // 1MB limit
@@ -786,6 +804,166 @@ async fn handle_get_replies(
                 code: "MISSING_PARAMETER".to_string(),
             };
             Err((StatusCode::BAD_REQUEST, Json(error)))
+        }
+    }
+}
+
+async fn handle_get_user_details(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    State(app_state): State<Arc<AppState>>,
+    Query(params): Query<GetUserDetailsQuery>,
+) -> Result<Json<ServerUserPost>, (StatusCode, Json<ApiError>)> {
+    // Check rate limit first
+    check_rate_limit(&app_state, addr).await?;
+
+    // Check if user parameter is provided
+    let user_public_key = match params.user {
+        Some(user) => user,
+        None => {
+            let error = ApiError {
+                error: "Missing required parameter: user".to_string(),
+                code: "MISSING_PARAMETER".to_string(),
+            };
+            return Err((StatusCode::BAD_REQUEST, Json(error)));
+        }
+    };
+
+    // Check if requesterPubkey parameter is provided
+    let requester_pubkey = match params.requester_pubkey {
+        Some(pubkey) => pubkey,
+        None => {
+            let error = ApiError {
+                error: "Missing required parameter: requesterPubkey".to_string(),
+                code: "MISSING_PARAMETER".to_string(),
+            };
+            return Err((StatusCode::BAD_REQUEST, Json(error)));
+        }
+    };
+
+    // Use the API handler to get user details
+    match app_state
+        .api_handlers
+        .get_user_details(&user_public_key, &requester_pubkey)
+        .await
+    {
+        Ok(response_json) => {
+            // Parse the JSON response back to ServerUserPost
+            match serde_json::from_str::<ServerUserPost>(&response_json) {
+                Ok(user_details_response) => Ok(Json(user_details_response)),
+                Err(err) => {
+                    log_error!("Failed to parse user details response: {}", err);
+                    let error = ApiError {
+                        error: "Internal server error".to_string(),
+                        code: "INTERNAL_ERROR".to_string(),
+                    };
+                    Err((StatusCode::INTERNAL_SERVER_ERROR, Json(error)))
+                }
+            }
+        }
+        Err(error_json) => {
+            // Parse the error response
+            match serde_json::from_str::<ApiError>(&error_json) {
+                Ok(api_error) => {
+                    let status_code = match api_error.code.as_str() {
+                        "MISSING_PARAMETER" | "INVALID_USER_KEY" => StatusCode::BAD_REQUEST,
+                        "USER_NOT_FOUND" => StatusCode::NOT_FOUND,
+                        _ => StatusCode::INTERNAL_SERVER_ERROR,
+                    };
+                    Err((status_code, Json(api_error)))
+                }
+                Err(_) => {
+                    let error = ApiError {
+                        error: "Internal server error".to_string(),
+                        code: "INTERNAL_ERROR".to_string(),
+                    };
+                    Err((StatusCode::INTERNAL_SERVER_ERROR, Json(error)))
+                }
+            }
+        }
+    }
+}
+
+async fn handle_get_blocked_users(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    State(app_state): State<Arc<AppState>>,
+    Query(params): Query<GetBlockedUsersQuery>,
+) -> Result<Json<PaginatedUsersResponse>, (StatusCode, Json<ApiError>)> {
+    // Check rate limit first
+    check_rate_limit(&app_state, addr).await?;
+
+    // Check if requesterPubkey parameter is provided
+    let requester_pubkey = match params.requester_pubkey {
+        Some(pubkey) => pubkey,
+        None => {
+            let error = ApiError {
+                error: "Missing required parameter: requesterPubkey".to_string(),
+                code: "MISSING_PARAMETER".to_string(),
+            };
+            return Err((StatusCode::BAD_REQUEST, Json(error)));
+        }
+    };
+
+    // Validate required limit parameter
+    let limit = match params.limit {
+        Some(limit) => {
+            if limit < 1 || limit > 100 {
+                let error = ApiError {
+                    error: "Limit parameter must be between 1 and 100".to_string(),
+                    code: "INVALID_LIMIT".to_string(),
+                };
+                return Err((StatusCode::BAD_REQUEST, Json(error)));
+            }
+            limit
+        }
+        None => {
+            let error = ApiError {
+                error: "Missing required parameter: limit".to_string(),
+                code: "MISSING_PARAMETER".to_string(),
+            };
+            return Err((StatusCode::BAD_REQUEST, Json(error)));
+        }
+    };
+
+    // Use the API handler to get paginated blocked users
+    match app_state
+        .api_handlers
+        .get_blocked_users_paginated(&requester_pubkey, limit, params.before, params.after)
+        .await
+    {
+        Ok(response_json) => {
+            // Parse the JSON response back to PaginatedUsersResponse
+            match serde_json::from_str::<PaginatedUsersResponse>(&response_json) {
+                Ok(users_response) => Ok(Json(users_response)),
+                Err(err) => {
+                    log_error!("Failed to parse paginated blocked users response: {}", err);
+                    let error = ApiError {
+                        error: "Internal server error".to_string(),
+                        code: "INTERNAL_ERROR".to_string(),
+                    };
+                    Err((StatusCode::INTERNAL_SERVER_ERROR, Json(error)))
+                }
+            }
+        }
+        Err(error_json) => {
+            // Parse the error response
+            match serde_json::from_str::<ApiError>(&error_json) {
+                Ok(api_error) => {
+                    let status_code = match api_error.code.as_str() {
+                        "MISSING_PARAMETER" | "INVALID_USER_KEY" | "INVALID_LIMIT" => {
+                            StatusCode::BAD_REQUEST
+                        }
+                        _ => StatusCode::INTERNAL_SERVER_ERROR,
+                    };
+                    Err((status_code, Json(api_error)))
+                }
+                Err(_) => {
+                    let error = ApiError {
+                        error: "Internal server error".to_string(),
+                        code: "INTERNAL_ERROR".to_string(),
+                    };
+                    Err((StatusCode::INTERNAL_SERVER_ERROR, Json(error)))
+                }
+            }
         }
     }
 }
