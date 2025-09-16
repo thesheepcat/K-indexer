@@ -6,7 +6,7 @@ use tracing::{error, info, warn};
 pub type DbPool = PgPool;
 
 // Schema version management
-const SCHEMA_VERSION: i32 = 1;
+const SCHEMA_VERSION: i32 = 2;
 
 /// K-transaction-processor Database Client
 /// Similar to KaspaDbClient in Simply Kaspa Indexer
@@ -80,6 +80,14 @@ impl KDbClient {
                             execute_ddl(MIGRATION_V0_TO_V1_SQL, &self.pool).await?;
                             current_version = 1;
                             info!("Migration v0 -> v1 completed successfully");
+                        }
+
+                        // v1 -> v2: Add signature deduplication and k_blocks table
+                        if current_version == 1 {
+                            info!("Applying migration v1 -> v2 (signature deduplication and blocking)");
+                            execute_ddl(MIGRATION_V1_TO_V2_SQL, &self.pool).await?;
+                            current_version = 2;
+                            info!("Migration v1 -> v2 completed successfully");
                         }
 
                         info!(
@@ -162,6 +170,7 @@ impl KDbClient {
 const SCHEMA_UP_SQL: &str = include_str!("migrations/schema/up.sql");
 const SCHEMA_DOWN_SQL: &str = include_str!("migrations/schema/down.sql");
 const MIGRATION_V0_TO_V1_SQL: &str = include_str!("migrations/schema/v0_to_v1.sql");
+const MIGRATION_V1_TO_V2_SQL: &str = include_str!("migrations/schema/v1_to_v2.sql");
 
 pub async fn create_pool(config: &AppConfig) -> Result<DbPool> {
     let connection_string = config.connection_string();
@@ -308,6 +317,7 @@ async fn verify_schema_setup(pool: &DbPool) -> Result<()> {
         "k_broadcasts",
         "k_votes",
         "k_mentions",
+        "k_blocks",
     ];
     let mut all_verified = true;
 

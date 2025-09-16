@@ -83,7 +83,25 @@ CREATE INDEX IF NOT EXISTS idx_k_replies_post_id_block_time ON k_replies(post_id
 CREATE INDEX IF NOT EXISTS idx_k_posts_block_time_id_covering ON k_posts(block_time DESC, id DESC) INCLUDE (transaction_id, sender_pubkey, sender_signature, base64_encoded_message);
 CREATE INDEX IF NOT EXISTS idx_k_mentions_content_type_id ON k_mentions(content_type, content_id);
 
+-- Create k_blocks table for blocking/unblocking users
+CREATE TABLE IF NOT EXISTS k_blocks (
+    id BIGSERIAL PRIMARY KEY,
+    transaction_id BYTEA UNIQUE NOT NULL,
+    block_time BIGINT NOT NULL,
+    sender_pubkey BYTEA NOT NULL,
+    sender_signature BYTEA NOT NULL,
+    blocking_action VARCHAR(10) NOT NULL CHECK (blocking_action IN ('block')),
+    blocked_user_pubkey BYTEA NOT NULL
+);
+
 -- Signature-based deduplication indexes
 CREATE UNIQUE INDEX IF NOT EXISTS idx_k_posts_sender_signature_unique ON k_posts(sender_signature);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_k_replies_sender_signature_unique ON k_replies(sender_signature);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_k_votes_sender_signature_unique ON k_votes(sender_signature);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_k_blocks_sender_signature_unique ON k_blocks(sender_signature);
+
+-- Create indexes for efficient blocking queries
+CREATE INDEX IF NOT EXISTS idx_k_blocks_sender_blocked_user ON k_blocks(sender_pubkey, blocked_user_pubkey);
+CREATE INDEX IF NOT EXISTS idx_k_blocks_sender_pubkey ON k_blocks(sender_pubkey);
+CREATE INDEX IF NOT EXISTS idx_k_blocks_blocked_user_pubkey ON k_blocks(blocked_user_pubkey);
+CREATE INDEX IF NOT EXISTS idx_k_blocks_block_time ON k_blocks(block_time);
