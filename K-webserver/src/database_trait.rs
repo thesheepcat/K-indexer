@@ -66,6 +66,23 @@ pub trait DatabaseInterface: Send + Sync {
         options: QueryOptions,
     ) -> DatabaseResult<PaginatedResult<KBroadcastRecord>>;
 
+    async fn get_broadcast_by_user(
+        &self,
+        user_public_key: &str,
+    ) -> DatabaseResult<Option<KBroadcastRecord>>;
+
+    async fn get_broadcast_by_user_with_block_status(
+        &self,
+        user_public_key: &str,
+        requester_pubkey: &str,
+    ) -> DatabaseResult<Option<(KBroadcastRecord, bool)>>;
+
+    async fn get_blocked_users_by_requester(
+        &self,
+        requester_pubkey: &str,
+        options: QueryOptions,
+    ) -> DatabaseResult<PaginatedResult<KBroadcastRecord>>;
+
     // Optimized single-query method for get-posts-watching API
     async fn get_all_posts_with_metadata(
         &self,
