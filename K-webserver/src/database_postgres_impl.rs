@@ -306,7 +306,9 @@ impl DatabaseInterface for PostgresDbManager {
             .bind(&user_pubkey_bytes)
             .fetch_optional(&self.pool)
             .await
-            .map_err(|e| DatabaseError::QueryError(format!("Failed to fetch broadcast by user: {}", e)))?;
+            .map_err(|e| {
+                DatabaseError::QueryError(format!("Failed to fetch broadcast by user: {}", e))
+            })?;
 
         if let Some(row) = row_opt {
             let transaction_id: Vec<u8> = row.get("transaction_id");
@@ -356,7 +358,12 @@ impl DatabaseInterface for PostgresDbManager {
             .bind(&requester_pubkey_bytes)
             .fetch_optional(&self.pool)
             .await
-            .map_err(|e| DatabaseError::QueryError(format!("Failed to fetch broadcast by user with block status: {}", e)))?;
+            .map_err(|e| {
+                DatabaseError::QueryError(format!(
+                    "Failed to fetch broadcast by user with block status: {}",
+                    e
+                ))
+            })?;
 
         if let Some(row) = row_opt {
             let transaction_id: Vec<u8> = row.get("transaction_id");
