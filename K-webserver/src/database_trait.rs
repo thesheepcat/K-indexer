@@ -128,4 +128,11 @@ pub trait DatabaseInterface: Send + Sync {
         content_id: &str,
         requester_pubkey: &str,
     ) -> DatabaseResult<Option<ContentRecord>>;
+
+    // Merged optimized single-query method for get-post-details API with blocking awareness
+    async fn get_content_by_id_with_metadata_and_block_status(
+        &self,
+        content_id: &str,
+        requester_pubkey: &str,
+    ) -> DatabaseResult<Option<(ContentRecord, bool)>>;
 }

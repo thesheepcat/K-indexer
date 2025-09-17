@@ -680,6 +680,98 @@ impl ApiHandlers {
         }
     }
 
+    /// GET /get-post-details?id={postId}&requesterPubkey={requesterPubkey}
+    /// Fetch details for a specific post or reply by its ID with voting information and blocking status for the requesting user
+    pub async fn get_post_details_with_votes_and_block_status(
+        &self,
+        content_id: &str,
+        requester_pubkey: &str,
+    ) -> Result<String, String> {
+        // Validate content ID format (64 hex characters for transaction hash)
+        if content_id.len() != 64 {
+            return Err(self.create_error_response(
+                "Invalid content ID format. Must be 64 hex characters.",
+                "INVALID_POST_ID",
+            ));
+        }
+
+        if !content_id.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(self.create_error_response(
+                "Invalid content ID format. Must contain only hex characters.",
+                "INVALID_POST_ID",
+            ));
+        }
+
+        // Validate requester public key format (66 hex characters for compressed public key)
+        if requester_pubkey.len() != 66 {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Must be 66 hex characters.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        if !requester_pubkey.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Must contain only hex characters.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        // Validate compressed public key prefix (should start with 02 or 03)
+        if !requester_pubkey.starts_with("02") && !requester_pubkey.starts_with("03") {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Compressed public key must start with 02 or 03.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        // Use the new blocking-aware function to get content with metadata and block status
+        match self
+            .db
+            .get_content_by_id_with_metadata_and_block_status(content_id, requester_pubkey)
+            .await
+        {
+            Ok(Some((content_record, is_blocked))) => {
+                let response = match content_record {
+                    ContentRecord::Post(k_post_record) => {
+                        let server_post = ServerPost::from_enriched_k_post_record_with_block_status(&k_post_record, is_blocked);
+                        PostDetailsResponse { post: server_post }
+                    }
+                    ContentRecord::Reply(k_reply_record) => {
+                        let server_reply = ServerReply::from_enriched_k_reply_record_with_block_status(&k_reply_record, is_blocked);
+                        PostDetailsResponse { post: server_reply }
+                    }
+                };
+
+                match serde_json::to_string(&response) {
+                    Ok(json) => Ok(json),
+                    Err(err) => {
+                        log_error!("Failed to serialize content details response: {}", err);
+                        Err(self.create_error_response(
+                            "Internal server error during serialization",
+                            "SERIALIZATION_ERROR",
+                        ))
+                    }
+                }
+            }
+            Ok(None) => {
+                // Content not found
+                Err(self.create_error_response("Content not found", "NOT_FOUND"))
+            }
+            Err(err) => {
+                log_error!(
+                    "Database error while querying content by ID {}: {}",
+                    content_id,
+                    err
+                );
+                Err(self.create_error_response(
+                    "Internal server error during database query",
+                    "DATABASE_ERROR",
+                ))
+            }
+        }
+    }
+
     /// GET /get-user-details with user parameter
     /// Fetch user details from k_broadcast table for a specific user public key
     pub async fn get_user_details(

@@ -158,6 +158,8 @@ pub struct ServerPost {
     pub user_nickname: Option<String>,
     #[serde(rename = "userProfileImage", skip_serializing_if = "Option::is_none")]
     pub user_profile_image: Option<String>,
+    #[serde(rename = "blockedUser", skip_serializing_if = "Option::is_none")]
+    pub blocked_user: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -216,10 +218,18 @@ impl ServerUserPost {
         record: &KBroadcastRecord,
         is_blocked: bool,
     ) -> Self {
+        // Use base64 encoded "**********" for blocked users, otherwise use original message
+        let post_content = if is_blocked {
+            // Base64 encoded version of "**********"
+            "KioqKioqKioqKg==".to_string()
+        } else {
+            record.base64_encoded_message.clone()
+        };
+
         Self {
             id: record.transaction_id.clone(),
             user_public_key: record.sender_pubkey.clone(),
-            post_content: record.base64_encoded_message.clone(),
+            post_content,
             signature: record.sender_signature.clone(),
             timestamp: record.block_time,
             user_nickname: Some(record.base64_encoded_nickname.clone()),
@@ -270,6 +280,40 @@ impl ServerPost {
             is_downvoted: record.is_downvoted,
             user_nickname: record.user_nickname.clone(),
             user_profile_image: record.user_profile_image.clone(),
+            blocked_user: None,
+        }
+    }
+
+    // New method to construct from enriched KPostRecord with blocking status
+    pub fn from_enriched_k_post_record_with_block_status(
+        record: &KPostRecord,
+        is_blocked: bool,
+    ) -> Self {
+        // Use base64 encoded "**********" for blocked users, otherwise use original message
+        let post_content = if is_blocked {
+            // Base64 encoded version of "**********"
+            "KioqKioqKioqKg==".to_string()
+        } else {
+            record.base64_encoded_message.clone()
+        };
+
+        Self {
+            id: record.transaction_id.clone(),
+            user_public_key: record.sender_pubkey.clone(),
+            post_content,
+            signature: record.sender_signature.clone(),
+            timestamp: record.block_time,
+            replies_count: record.replies_count.unwrap_or(0),
+            up_votes_count: record.up_votes_count.unwrap_or(0),
+            down_votes_count: record.down_votes_count.unwrap_or(0),
+            reposts_count: 0,
+            parent_post_id: None,
+            mentioned_pubkeys: record.mentioned_pubkeys.clone(),
+            is_upvoted: record.is_upvoted,
+            is_downvoted: record.is_downvoted,
+            user_nickname: record.user_nickname.clone(),
+            user_profile_image: record.user_profile_image.clone(),
+            blocked_user: Some(is_blocked),
         }
     }
 }
@@ -306,6 +350,40 @@ impl ServerReply {
             is_downvoted: record.is_downvoted,
             user_nickname: record.user_nickname.clone(),
             user_profile_image: record.user_profile_image.clone(),
+            blocked_user: None,
+        }
+    }
+
+    // New method to construct from enriched KReplyRecord with blocking status
+    pub fn from_enriched_k_reply_record_with_block_status(
+        record: &KReplyRecord,
+        is_blocked: bool,
+    ) -> Self {
+        // Use base64 encoded "**********" for blocked users, otherwise use original message
+        let post_content = if is_blocked {
+            // Base64 encoded version of "**********"
+            "KioqKioqKioqKg==".to_string()
+        } else {
+            record.base64_encoded_message.clone()
+        };
+
+        Self {
+            id: record.transaction_id.clone(),
+            user_public_key: record.sender_pubkey.clone(),
+            post_content,
+            signature: record.sender_signature.clone(),
+            timestamp: record.block_time,
+            replies_count: record.replies_count.unwrap_or(0),
+            up_votes_count: record.up_votes_count.unwrap_or(0),
+            down_votes_count: record.down_votes_count.unwrap_or(0),
+            reposts_count: 0,
+            parent_post_id: Some(record.post_id.clone()),
+            mentioned_pubkeys: record.mentioned_pubkeys.clone(),
+            is_upvoted: record.is_upvoted,
+            is_downvoted: record.is_downvoted,
+            user_nickname: record.user_nickname.clone(),
+            user_profile_image: record.user_profile_image.clone(),
+            blocked_user: Some(is_blocked),
         }
     }
 }
