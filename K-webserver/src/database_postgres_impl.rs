@@ -399,7 +399,7 @@ impl DatabaseInterface for PostgresDbManager {
 
         let mut query = String::from(
             r#"
-            SELECT b.id, b.transaction_id, b.block_time, b.sender_pubkey, b.sender_signature,
+            SELECT kb.id, kb.transaction_id, kb.block_time, kb.blocked_user_pubkey as sender_pubkey, kb.sender_signature,
                    b.base64_encoded_nickname, b.base64_encoded_profile_image, b.base64_encoded_message
             FROM k_blocks kb
             INNER JOIN k_broadcasts b ON b.sender_pubkey = kb.blocked_user_pubkey

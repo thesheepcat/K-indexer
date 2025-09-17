@@ -851,6 +851,9 @@ impl ApiHandlers {
             // Since these are blocked users, set blocked_user to true
             server_user_post.blocked_user = Some(true);
 
+            // Remove post content for blocked users
+            server_user_post.post_content = String::new();
+
             all_posts.push(server_user_post);
         }
 
