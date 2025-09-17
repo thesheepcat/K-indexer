@@ -350,10 +350,10 @@ async fn handle_get_post_details(
         }
     };
 
-    // Use the API handler to get post details with voting information
+    // Use the API handler to get post details with voting information and blocking status
     match app_state
         .api_handlers
-        .get_post_details_with_votes(&post_id, &requester_pubkey)
+        .get_post_details_with_votes_and_block_status(&post_id, &requester_pubkey)
         .await
     {
         Ok(response_json) => {
