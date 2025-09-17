@@ -734,11 +734,18 @@ impl ApiHandlers {
             Ok(Some((content_record, is_blocked))) => {
                 let response = match content_record {
                     ContentRecord::Post(k_post_record) => {
-                        let server_post = ServerPost::from_enriched_k_post_record_with_block_status(&k_post_record, is_blocked);
+                        let server_post = ServerPost::from_enriched_k_post_record_with_block_status(
+                            &k_post_record,
+                            is_blocked,
+                        );
                         PostDetailsResponse { post: server_post }
                     }
                     ContentRecord::Reply(k_reply_record) => {
-                        let server_reply = ServerReply::from_enriched_k_reply_record_with_block_status(&k_reply_record, is_blocked);
+                        let server_reply =
+                            ServerReply::from_enriched_k_reply_record_with_block_status(
+                                &k_reply_record,
+                                is_blocked,
+                            );
                         PostDetailsResponse { post: server_reply }
                     }
                 };
