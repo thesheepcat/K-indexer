@@ -79,10 +79,14 @@ impl ApiHandlers {
             sort_descending: true,
         };
 
-        // Use the new optimized single-query method
+        // Use the new optimized single-query method with blocking awareness
         let posts_result = match self
             .db
-            .get_posts_by_user_with_metadata(user_public_key, requester_pubkey, options)
+            .get_posts_by_user_with_metadata_and_block_status(
+                user_public_key,
+                requester_pubkey,
+                options,
+            )
             .await
         {
             Ok(result) => result,
@@ -99,11 +103,13 @@ impl ApiHandlers {
             }
         };
 
-        // Convert enriched KPostRecords to ServerPosts using the new method
+        // Convert enriched KPostRecords to ServerPosts with blocking awareness for get-posts
         let all_posts: Vec<ServerPost> = posts_result
             .items
             .iter()
-            .map(ServerPost::from_enriched_k_post_record)
+            .map(|(post_record, is_blocked)| {
+                ServerPost::from_enriched_k_post_record_with_block_status(post_record, *is_blocked)
+            })
             .collect();
 
         let response = PaginatedPostsResponse {
@@ -163,10 +169,10 @@ impl ApiHandlers {
             sort_descending: true,
         };
 
-        // Use the new optimized single-query method
+        // Use the new optimized single-query method with blocking awareness
         let posts_result = match self
             .db
-            .get_all_posts_with_metadata(requester_pubkey, options)
+            .get_all_posts_with_metadata_and_block_status(requester_pubkey, options)
             .await
         {
             Ok(result) => result,
@@ -182,11 +188,13 @@ impl ApiHandlers {
             }
         };
 
-        // Convert enriched KPostRecords to ServerPosts using the new method
+        // Convert enriched KPostRecords to ServerPosts with blocking awareness for get-posts-watching
         let all_posts: Vec<ServerPost> = posts_result
             .items
             .iter()
-            .map(ServerPost::from_enriched_k_post_record)
+            .map(|(post_record, is_blocked)| {
+                ServerPost::from_enriched_k_post_record_with_block_status(post_record, *is_blocked)
+            })
             .collect();
 
         let response = PaginatedPostsResponse {
@@ -319,10 +327,14 @@ impl ApiHandlers {
             sort_descending: true,
         };
 
-        // Use the new optimized single-query method
+        // Use the new optimized single-query method with blocking awareness
         let replies_result = match self
             .db
-            .get_replies_by_post_id_with_metadata(post_id, requester_pubkey, options)
+            .get_replies_by_post_id_with_metadata_and_block_status(
+                post_id,
+                requester_pubkey,
+                options,
+            )
             .await
         {
             Ok(result) => result,
@@ -339,11 +351,16 @@ impl ApiHandlers {
             }
         };
 
-        // Convert enriched KReplyRecords to ServerReplies using the new method
+        // Convert enriched KReplyRecords to ServerReplies with blocking awareness for post replies
         let all_replies: Vec<ServerReply> = replies_result
             .items
             .iter()
-            .map(ServerReply::from_enriched_k_reply_record)
+            .map(|(reply_record, is_blocked)| {
+                ServerReply::from_enriched_k_reply_record_with_block_status(
+                    reply_record,
+                    *is_blocked,
+                )
+            })
             .collect();
 
         let response = PaginatedRepliesResponse {
@@ -426,10 +443,14 @@ impl ApiHandlers {
             sort_descending: true,
         };
 
-        // Use the new optimized single-query method
+        // Use the new optimized single-query method with blocking awareness
         let replies_result = match self
             .db
-            .get_replies_by_user_with_metadata(user_public_key, requester_pubkey, options)
+            .get_replies_by_user_with_metadata_and_block_status(
+                user_public_key,
+                requester_pubkey,
+                options,
+            )
             .await
         {
             Ok(result) => result,
@@ -446,11 +467,16 @@ impl ApiHandlers {
             }
         };
 
-        // Convert enriched KReplyRecords to ServerReplies using the new method
+        // Convert enriched KReplyRecords to ServerReplies with blocking awareness for user replies
         let all_replies: Vec<ServerReply> = replies_result
             .items
             .iter()
-            .map(ServerReply::from_enriched_k_reply_record)
+            .map(|(reply_record, is_blocked)| {
+                ServerReply::from_enriched_k_reply_record_with_block_status(
+                    reply_record,
+                    *is_blocked,
+                )
+            })
             .collect();
 
         let response = PaginatedRepliesResponse {
@@ -538,10 +564,14 @@ impl ApiHandlers {
             sort_descending: true,
         };
 
-        // Use the new optimized single-query method
+        // Use the new optimized single-query method with blocking awareness
         let mentions_result = match self
             .db
-            .get_contents_mentioning_user_with_metadata(user_public_key, requester_pubkey, options)
+            .get_contents_mentioning_user_with_metadata_and_block_status(
+                user_public_key,
+                requester_pubkey,
+                options,
+            )
             .await
         {
             Ok(result) => result,
@@ -554,16 +584,22 @@ impl ApiHandlers {
             }
         };
 
-        // Convert enriched ContentRecords (posts and replies) to ServerPosts
+        // Convert enriched ContentRecords (posts and replies) to ServerPosts with blocking awareness
         let all_mentions: Vec<ServerPost> = mentions_result
             .items
             .iter()
-            .map(|content_record| match content_record {
+            .map(|(content_record, is_blocked)| match content_record {
                 ContentRecord::Post(post_record) => {
-                    ServerPost::from_enriched_k_post_record(post_record)
+                    ServerPost::from_enriched_k_post_record_with_block_status(
+                        post_record,
+                        *is_blocked,
+                    )
                 }
                 ContentRecord::Reply(reply_record) => {
-                    ServerReply::from_enriched_k_reply_record(reply_record)
+                    ServerReply::from_enriched_k_reply_record_with_block_status(
+                        reply_record,
+                        *is_blocked,
+                    )
                 }
             })
             .collect();

@@ -90,6 +90,29 @@ pub trait DatabaseInterface: Send + Sync {
         options: QueryOptions,
     ) -> DatabaseResult<PaginatedResult<KPostRecord>>;
 
+    // Optimized single-query method for get-posts-watching API with blocking awareness
+    async fn get_all_posts_with_metadata_and_block_status(
+        &self,
+        requester_pubkey: &str,
+        options: QueryOptions,
+    ) -> DatabaseResult<PaginatedResult<(KPostRecord, bool)>>;
+
+    // Optimized single-query method for get-replies API with blocking awareness
+    async fn get_replies_by_post_id_with_metadata_and_block_status(
+        &self,
+        post_id: &str,
+        requester_pubkey: &str,
+        options: QueryOptions,
+    ) -> DatabaseResult<PaginatedResult<(KReplyRecord, bool)>>;
+
+    // Optimized single-query method for get-user-replies API with blocking awareness
+    async fn get_replies_by_user_with_metadata_and_block_status(
+        &self,
+        user_public_key: &str,
+        requester_pubkey: &str,
+        options: QueryOptions,
+    ) -> DatabaseResult<PaginatedResult<(KReplyRecord, bool)>>;
+
     // Optimized single-query method for get-posts API
     async fn get_posts_by_user_with_metadata(
         &self,
@@ -97,6 +120,14 @@ pub trait DatabaseInterface: Send + Sync {
         requester_pubkey: &str,
         options: QueryOptions,
     ) -> DatabaseResult<PaginatedResult<KPostRecord>>;
+
+    // Optimized single-query method for get-posts API with blocking awareness
+    async fn get_posts_by_user_with_metadata_and_block_status(
+        &self,
+        user_public_key: &str,
+        requester_pubkey: &str,
+        options: QueryOptions,
+    ) -> DatabaseResult<PaginatedResult<(KPostRecord, bool)>>;
 
     // Optimized single-query method for get-replies API (by post)
     async fn get_replies_by_post_id_with_metadata(
@@ -121,6 +152,14 @@ pub trait DatabaseInterface: Send + Sync {
         requester_pubkey: &str,
         options: QueryOptions,
     ) -> DatabaseResult<PaginatedResult<ContentRecord>>;
+
+    // Optimized single-query method for get-mentions API with blocking awareness
+    async fn get_contents_mentioning_user_with_metadata_and_block_status(
+        &self,
+        user_public_key: &str,
+        requester_pubkey: &str,
+        options: QueryOptions,
+    ) -> DatabaseResult<PaginatedResult<(ContentRecord, bool)>>;
 
     // Merged optimized single-query method for get-post-details API (posts and replies)
     async fn get_content_by_id_with_metadata(
