@@ -77,6 +77,8 @@ struct GetUsersQuery {
     limit: Option<u32>,
     before: Option<String>,
     after: Option<String>,
+    #[serde(rename = "requesterPubkey")]
+    requester_pubkey: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -523,10 +525,27 @@ async fn handle_get_users(
         }
     };
 
-    // Use the API handler to get paginated user introduction posts
+    // Check if requesterPubkey parameter is provided
+    let requester_pubkey = match params.requester_pubkey {
+        Some(pubkey) => pubkey,
+        None => {
+            let error = ApiError {
+                error: "Missing required parameter: requesterPubkey".to_string(),
+                code: "MISSING_PARAMETER".to_string(),
+            };
+            return Err((StatusCode::BAD_REQUEST, Json(error)));
+        }
+    };
+
+    // Use the API handler to get paginated user introduction posts with block status
     match app_state
         .api_handlers
-        .get_users_paginated(limit, params.before, params.after)
+        .get_users_paginated_with_block_status(
+            limit,
+            &requester_pubkey,
+            params.before,
+            params.after,
+        )
         .await
     {
         Ok(response_json) => {

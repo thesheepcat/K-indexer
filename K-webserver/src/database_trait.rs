@@ -66,6 +66,12 @@ pub trait DatabaseInterface: Send + Sync {
         options: QueryOptions,
     ) -> DatabaseResult<PaginatedResult<KBroadcastRecord>>;
 
+    async fn get_all_broadcasts_with_block_status(
+        &self,
+        requester_pubkey: &str,
+        options: QueryOptions,
+    ) -> DatabaseResult<PaginatedResult<(KBroadcastRecord, bool)>>;
+
     async fn get_broadcast_by_user(
         &self,
         user_public_key: &str,

@@ -272,6 +272,75 @@ impl ApiHandlers {
         }
     }
 
+    /// GET /get-users with pagination and blocked users awareness
+    /// Fetch paginated user introduction posts with cursor-based pagination and blocking status
+    pub async fn get_users_paginated_with_block_status(
+        &self,
+        limit: u32,
+        requester_pubkey: &str,
+        before: Option<String>,
+        after: Option<String>,
+    ) -> Result<String, String> {
+        let options = QueryOptions {
+            limit: Some(limit as u64),
+            before,
+            after,
+            sort_descending: true,
+        };
+
+        let broadcasts_result = match self
+            .db
+            .get_all_broadcasts_with_block_status(requester_pubkey, options)
+            .await
+        {
+            Ok(result) => result,
+            Err(err) => {
+                log_error!(
+                    "Database error while querying paginated user broadcasts with block status: {}",
+                    err
+                );
+                return Err(self.create_error_response(
+                    "Internal server error during database query",
+                    "DATABASE_ERROR",
+                ));
+            }
+        };
+
+        let mut all_posts = Vec::new();
+
+        for (k_broadcast_record, is_blocked) in broadcasts_result.items {
+            let mut server_user_post = ServerUserPost::from_k_broadcast_record_with_block_status(
+                &k_broadcast_record,
+                is_blocked,
+            );
+
+            // Enrich with user profile data from broadcasts (self-enrichment)
+            server_user_post.user_nickname = Some(k_broadcast_record.base64_encoded_nickname);
+            server_user_post.user_profile_image = k_broadcast_record.base64_encoded_profile_image;
+
+            all_posts.push(server_user_post);
+        }
+
+        let response = PaginatedUsersResponse {
+            posts: all_posts,
+            pagination: broadcasts_result.pagination,
+        };
+
+        match serde_json::to_string(&response) {
+            Ok(json) => Ok(json),
+            Err(err) => {
+                log_error!(
+                    "Failed to serialize paginated users response with block status: {}",
+                    err
+                );
+                Err(self.create_error_response(
+                    "Internal server error during serialization",
+                    "SERIALIZATION_ERROR",
+                ))
+            }
+        }
+    }
+
     /// GET /get-replies with pagination (Post Replies Mode)
     /// Fetch paginated replies for a specific post with cursor-based pagination and voting status
     pub async fn get_replies_paginated(
