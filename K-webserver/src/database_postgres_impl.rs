@@ -460,16 +460,34 @@ impl DatabaseInterface for PostgresDbManager {
         let user_pubkey_bytes = Self::decode_hex_to_bytes(user_public_key)?;
         let requester_pubkey_bytes = Self::decode_hex_to_bytes(requester_pubkey)?;
 
+        // First, always check if user is blocked
+        let blocking_query = r#"
+            SELECT EXISTS (
+                SELECT 1 FROM k_blocks kb
+                WHERE kb.sender_pubkey = $2 AND kb.blocked_user_pubkey = $1
+            ) as is_blocked
+        "#;
+
+        let blocking_row = sqlx::query(blocking_query)
+            .bind(&user_pubkey_bytes)
+            .bind(&requester_pubkey_bytes)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| {
+                DatabaseError::QueryError(format!(
+                    "Failed to check blocking status: {}",
+                    e
+                ))
+            })?;
+
+        let is_blocked: bool = blocking_row.get("is_blocked");
+
+        // Then check for broadcast data
         let query = r#"
             SELECT
                 b.id, b.transaction_id, b.block_time, b.sender_pubkey, b.sender_signature,
-                b.base64_encoded_nickname, b.base64_encoded_profile_image, b.base64_encoded_message,
-                CASE
-                    WHEN kb.blocked_user_pubkey IS NOT NULL THEN true
-                    ELSE false
-                END as is_blocked
+                b.base64_encoded_nickname, b.base64_encoded_profile_image, b.base64_encoded_message
             FROM k_broadcasts b
-            LEFT JOIN k_blocks kb ON kb.sender_pubkey = $2 AND kb.blocked_user_pubkey = $1
             WHERE b.sender_pubkey = $1
             ORDER BY b.block_time DESC
             LIMIT 1
@@ -477,21 +495,20 @@ impl DatabaseInterface for PostgresDbManager {
 
         let row_opt = sqlx::query(query)
             .bind(&user_pubkey_bytes)
-            .bind(&requester_pubkey_bytes)
             .fetch_optional(&self.pool)
             .await
             .map_err(|e| {
                 DatabaseError::QueryError(format!(
-                    "Failed to fetch broadcast by user with block status: {}",
+                    "Failed to fetch broadcast by user: {}",
                     e
                 ))
             })?;
 
         if let Some(row) = row_opt {
+            // User has broadcast data
             let transaction_id: Vec<u8> = row.get("transaction_id");
             let sender_pubkey: Vec<u8> = row.get("sender_pubkey");
             let sender_signature: Vec<u8> = row.get("sender_signature");
-            let is_blocked: bool = row.get("is_blocked");
 
             let broadcast_record = KBroadcastRecord {
                 id: row.get::<i64, _>("id"),
@@ -506,7 +523,20 @@ impl DatabaseInterface for PostgresDbManager {
 
             Ok(Some((broadcast_record, is_blocked)))
         } else {
-            Ok(None)
+            // No broadcast data found, but we have blocking status
+            // Create a minimal broadcast record with empty fields and the blocking status
+            let broadcast_record = KBroadcastRecord {
+                id: 0, // Dummy ID
+                transaction_id: String::new(),
+                block_time: 0,
+                sender_pubkey: user_public_key.to_string(),
+                sender_signature: String::new(),
+                base64_encoded_nickname: String::new(),
+                base64_encoded_profile_image: None,
+                base64_encoded_message: String::new(),
+            };
+
+            Ok(Some((broadcast_record, is_blocked)))
         }
     }
 

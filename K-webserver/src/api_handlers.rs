@@ -960,15 +960,30 @@ impl ApiHandlers {
         // Handle user data (even if no broadcast exists)
         let server_user_post = match broadcast_result {
             Some((record, blocked)) => {
-                // User has broadcast data
-                let mut user_post =
-                    ServerUserPost::from_k_broadcast_record_with_block_status(&record, blocked);
-                user_post.user_nickname = Some(record.base64_encoded_nickname);
-                user_post.user_profile_image = record.base64_encoded_profile_image;
-                user_post
+                // Check if this is a dummy record (no real broadcast data)
+                if record.id == 0 && record.transaction_id.is_empty() {
+                    // User has no broadcast data - create minimal response with empty fields
+                    ServerUserPost {
+                        id: String::new(),
+                        user_public_key: user_public_key.to_string(),
+                        post_content: String::new(),
+                        signature: String::new(),
+                        timestamp: 0,
+                        user_nickname: None,
+                        user_profile_image: None,
+                        blocked_user: Some(blocked), // Use the actual blocking status from database
+                    }
+                } else {
+                    // User has real broadcast data
+                    let mut user_post =
+                        ServerUserPost::from_k_broadcast_record_with_block_status(&record, blocked);
+                    user_post.user_nickname = Some(record.base64_encoded_nickname);
+                    user_post.user_profile_image = record.base64_encoded_profile_image;
+                    user_post
+                }
             }
             None => {
-                // User exists but has no broadcast data - create minimal response with empty fields
+                // This case should no longer happen with our new implementation
                 ServerUserPost {
                     id: String::new(),
                     user_public_key: user_public_key.to_string(),
@@ -977,7 +992,7 @@ impl ApiHandlers {
                     timestamp: 0,
                     user_nickname: None,
                     user_profile_image: None,
-                    blocked_user: Some(false), // User is not blocked since we found no blocking relationship
+                    blocked_user: Some(false),
                 }
             }
         };
