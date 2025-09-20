@@ -883,14 +883,18 @@ impl KProtocolProcessor {
                 let transaction_id_bytes = hex::decode(transaction_id)?;
                 let sender_signature_bytes = hex::decode(&k_block.sender_signature)?;
 
-                // Insert block record (skip if already exists)
+                // Insert block record (update if same sender blocks same user again)
                 let result = sqlx::query(
                     r#"
                     INSERT INTO k_blocks (
                         transaction_id, block_time, sender_pubkey, sender_signature,
                         blocking_action, blocked_user_pubkey
                     ) VALUES ($1, $2, $3, $4, $5, $6)
-                    ON CONFLICT (sender_signature) DO NOTHING
+                    ON CONFLICT (sender_pubkey, blocked_user_pubkey)
+                    DO UPDATE SET
+                        transaction_id = EXCLUDED.transaction_id,
+                        block_time = EXCLUDED.block_time,
+                        sender_signature = EXCLUDED.sender_signature
                     "#,
                 )
                 .bind(&transaction_id_bytes)

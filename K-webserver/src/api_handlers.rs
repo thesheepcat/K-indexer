@@ -957,21 +957,32 @@ impl ApiHandlers {
             }
         };
 
-        // Check if user was found
-        let (broadcast_record, is_blocked) = match broadcast_result {
-            Some((record, blocked)) => (record, blocked),
+        // Handle user data (even if no broadcast exists)
+        let server_user_post = match broadcast_result {
+            Some((record, blocked)) => {
+                // User has broadcast data
+                let mut user_post = ServerUserPost::from_k_broadcast_record_with_block_status(
+                    &record,
+                    blocked,
+                );
+                user_post.user_nickname = Some(record.base64_encoded_nickname);
+                user_post.user_profile_image = record.base64_encoded_profile_image;
+                user_post
+            }
             None => {
-                return Err(self.create_error_response("User not found", "USER_NOT_FOUND"));
+                // User exists but has no broadcast data - create minimal response with empty fields
+                ServerUserPost {
+                    id: String::new(),
+                    user_public_key: user_public_key.to_string(),
+                    post_content: String::new(),
+                    signature: String::new(),
+                    timestamp: 0,
+                    user_nickname: None,
+                    user_profile_image: None,
+                    blocked_user: Some(false), // User is not blocked since we found no blocking relationship
+                }
             }
         };
-
-        // Convert to ServerUserPost with user profile data and block status
-        let mut server_user_post = ServerUserPost::from_k_broadcast_record_with_block_status(
-            &broadcast_record,
-            is_blocked,
-        );
-        server_user_post.user_nickname = Some(broadcast_record.base64_encoded_nickname);
-        server_user_post.user_profile_image = broadcast_record.base64_encoded_profile_image;
 
         match serde_json::to_string(&server_user_post) {
             Ok(json) => Ok(json),
