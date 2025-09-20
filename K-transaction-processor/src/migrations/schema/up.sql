@@ -1,6 +1,9 @@
 -- K-transaction-processor Schema v1
 -- Complete schema for fresh installation
 
+-- Enable pg_stat_statements extension for query performance monitoring
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+
 -- Create system variables table first
 CREATE TABLE IF NOT EXISTS k_vars (
     key VARCHAR(255) PRIMARY KEY,

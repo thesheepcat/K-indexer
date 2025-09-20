@@ -10,6 +10,7 @@ services:
       POSTGRES_DB: ${DB_NAME}
       PGPORT: ${DB_PORT}
     network_mode: "host"
+    command: c shared_preload_libraries=pg_stat_statements -c pg_stat_statements.max=10000 -c pg_stat_statements.track=all -c pg_stat_statements.save=on
     volumes:
       - /var/${DB_NAME}/:/var/lib/postgresql/data/
 

@@ -1,6 +1,10 @@
 -- K-transaction-processor Schema v1 to v2 Migration
 -- Add unique constraints on sender_signature for signature-based deduplication across k_posts, k_replies, and k_votes tables
 -- Add k_blocks table for user blocking functionality
+-- Add pg_stat_statements extension for query performance monitoring
+
+-- Enable pg_stat_statements extension for query performance monitoring
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
 
 -- Create unique indexes on sender_signature for signature-based deduplication
 CREATE UNIQUE INDEX IF NOT EXISTS idx_k_posts_sender_signature_unique ON k_posts(sender_signature);
