@@ -474,10 +474,7 @@ impl DatabaseInterface for PostgresDbManager {
             .fetch_one(&self.pool)
             .await
             .map_err(|e| {
-                DatabaseError::QueryError(format!(
-                    "Failed to check blocking status: {}",
-                    e
-                ))
+                DatabaseError::QueryError(format!("Failed to check blocking status: {}", e))
             })?;
 
         let is_blocked: bool = blocking_row.get("is_blocked");
@@ -498,10 +495,7 @@ impl DatabaseInterface for PostgresDbManager {
             .fetch_optional(&self.pool)
             .await
             .map_err(|e| {
-                DatabaseError::QueryError(format!(
-                    "Failed to fetch broadcast by user: {}",
-                    e
-                ))
+                DatabaseError::QueryError(format!("Failed to fetch broadcast by user: {}", e))
             })?;
 
         if let Some(row) = row_opt {
