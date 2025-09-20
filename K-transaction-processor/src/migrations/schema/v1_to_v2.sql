@@ -31,5 +31,8 @@ CREATE INDEX IF NOT EXISTS idx_k_blocks_sender_pubkey ON k_blocks(sender_pubkey)
 CREATE INDEX IF NOT EXISTS idx_k_blocks_blocked_user_pubkey ON k_blocks(blocked_user_pubkey);
 CREATE INDEX IF NOT EXISTS idx_k_blocks_block_time ON k_blocks(block_time);
 
+-- Create optimal composite index for k_mentions get-mentions API performance
+CREATE INDEX IF NOT EXISTS idx_k_mentions_optimal ON k_mentions(mentioned_pubkey, content_type, content_id);
+
 -- Update schema version to v2
 UPDATE k_vars SET value = '2' WHERE key = 'schema_version';
