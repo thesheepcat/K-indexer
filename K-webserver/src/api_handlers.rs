@@ -961,10 +961,8 @@ impl ApiHandlers {
         let server_user_post = match broadcast_result {
             Some((record, blocked)) => {
                 // User has broadcast data
-                let mut user_post = ServerUserPost::from_k_broadcast_record_with_block_status(
-                    &record,
-                    blocked,
-                );
+                let mut user_post =
+                    ServerUserPost::from_k_broadcast_record_with_block_status(&record, blocked);
                 user_post.user_nickname = Some(record.base64_encoded_nickname);
                 user_post.user_profile_image = record.base64_encoded_profile_image;
                 user_post
