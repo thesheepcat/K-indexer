@@ -101,7 +101,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_k_votes_sender_signature_unique ON k_votes
 CREATE UNIQUE INDEX IF NOT EXISTS idx_k_blocks_sender_signature_unique ON k_blocks(sender_signature);
 
 -- Create indexes for efficient blocking queries
-CREATE INDEX IF NOT EXISTS idx_k_blocks_sender_blocked_user ON k_blocks(sender_pubkey, blocked_user_pubkey);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_k_blocks_sender_blocked_user_unique ON k_blocks(sender_pubkey, blocked_user_pubkey);
 CREATE INDEX IF NOT EXISTS idx_k_blocks_sender_pubkey ON k_blocks(sender_pubkey);
 CREATE INDEX IF NOT EXISTS idx_k_blocks_blocked_user_pubkey ON k_blocks(blocked_user_pubkey);
 CREATE INDEX IF NOT EXISTS idx_k_blocks_block_time ON k_blocks(block_time);
