@@ -1,0 +1,52 @@
+# Build stage
+FROM rust:1.84-alpine as builder
+
+# Install required system dependencies
+RUN apk add --no-cache \
+    musl-dev \
+    pkgconfig \
+    openssl-dev
+
+# Set working directory
+WORKDIR /app
+
+# Create a temporary workspace with only K-webserver
+RUN printf '[workspace]\nmembers = ["K-webserver"]\nresolver = "2"\n' > Cargo.toml
+
+# Copy package files
+COPY K-webserver/Cargo.toml ./K-webserver/
+
+# Copy source code
+COPY K-webserver/src ./K-webserver/src
+
+# Build the application
+RUN cargo build --release --bin K-webserver
+
+# Runtime stage
+FROM alpine:3.19
+
+# Install runtime dependencies
+RUN apk add --no-cache \
+    ca-certificates \
+    libssl3
+
+# Create non-root user
+RUN adduser -D -s /bin/sh app
+
+# Set working directory
+WORKDIR /app
+
+# Copy the binary from builder stage
+COPY --from=builder /app/target/release/K-webserver /app/
+
+# Change ownership to app user
+RUN chown -R app:app /app
+
+# Switch to non-root user
+USER app
+
+# Expose the default port
+EXPOSE 3001
+
+# Default command
+ENTRYPOINT ["./K-webserver"]

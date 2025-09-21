@@ -214,67 +214,9 @@ impl ApiHandlers {
         }
     }
 
-    /// GET /get-users with pagination
-    /// Fetch paginated user introduction posts with cursor-based pagination
-    pub async fn get_users_paginated(
-        &self,
-        limit: u32,
-        before: Option<String>,
-        after: Option<String>,
-    ) -> Result<String, String> {
-        let options = QueryOptions {
-            limit: Some(limit as u64),
-            before,
-            after,
-            sort_descending: true,
-        };
-
-        let broadcasts_result = match self.db.get_all_broadcasts(options).await {
-            Ok(result) => result,
-            Err(err) => {
-                log_error!(
-                    "Database error while querying paginated user broadcasts: {}",
-                    err
-                );
-                return Err(self.create_error_response(
-                    "Internal server error during database query",
-                    "DATABASE_ERROR",
-                ));
-            }
-        };
-
-        let mut all_posts = Vec::new();
-
-        for k_broadcast_record in broadcasts_result.items {
-            let mut server_user_post = ServerUserPost::from_k_broadcast_record(&k_broadcast_record);
-
-            // Enrich with user profile data from broadcasts (self-enrichment)
-            server_user_post.user_nickname = Some(k_broadcast_record.base64_encoded_nickname);
-            server_user_post.user_profile_image = k_broadcast_record.base64_encoded_profile_image;
-
-            all_posts.push(server_user_post);
-        }
-
-        let response = PaginatedUsersResponse {
-            posts: all_posts,
-            pagination: broadcasts_result.pagination,
-        };
-
-        match serde_json::to_string(&response) {
-            Ok(json) => Ok(json),
-            Err(err) => {
-                log_error!("Failed to serialize paginated users response: {}", err);
-                Err(self.create_error_response(
-                    "Internal server error during serialization",
-                    "SERIALIZATION_ERROR",
-                ))
-            }
-        }
-    }
-
     /// GET /get-users with pagination and blocked users awareness
     /// Fetch paginated user introduction posts with cursor-based pagination and blocking status
-    pub async fn get_users_paginated_with_block_status(
+    pub async fn get_users_paginated(
         &self,
         limit: u32,
         requester_pubkey: &str,
@@ -694,100 +636,10 @@ impl ApiHandlers {
 
     /// GET /get-post-details?id={postId}&requesterPubkey={requesterPubkey}
     /// Fetch details for a specific post or reply by its ID with voting information for the requesting user
-    pub async fn get_post_details_with_votes(
-        &self,
-        content_id: &str,
-        requester_pubkey: &str,
-    ) -> Result<String, String> {
-        // Validate content ID format (64 hex characters for transaction hash)
-        if content_id.len() != 64 {
-            return Err(self.create_error_response(
-                "Invalid content ID format. Must be 64 hex characters.",
-                "INVALID_POST_ID",
-            ));
-        }
-
-        if !content_id.chars().all(|c| c.is_ascii_hexdigit()) {
-            return Err(self.create_error_response(
-                "Invalid content ID format. Must contain only hex characters.",
-                "INVALID_POST_ID",
-            ));
-        }
-
-        // Validate requester public key format (66 hex characters for compressed public key)
-        if requester_pubkey.len() != 66 {
-            return Err(self.create_error_response(
-                "Invalid requester public key format. Must be 66 hex characters.",
-                "INVALID_USER_KEY",
-            ));
-        }
-
-        if !requester_pubkey.chars().all(|c| c.is_ascii_hexdigit()) {
-            return Err(self.create_error_response(
-                "Invalid requester public key format. Must contain only hex characters.",
-                "INVALID_USER_KEY",
-            ));
-        }
-
-        // Validate compressed public key prefix (should start with 02 or 03)
-        if !requester_pubkey.starts_with("02") && !requester_pubkey.starts_with("03") {
-            return Err(self.create_error_response(
-                "Invalid requester public key format. Compressed public key must start with 02 or 03.",
-                "INVALID_USER_KEY",
-            ));
-        }
-
-        // Use the new merged function to get content with metadata in a single query
-        match self
-            .db
-            .get_content_by_id_with_metadata(content_id, requester_pubkey)
-            .await
-        {
-            Ok(Some(content_record)) => {
-                let response = match content_record {
-                    ContentRecord::Post(k_post_record) => {
-                        let server_post = ServerPost::from_enriched_k_post_record(&k_post_record);
-                        PostDetailsResponse { post: server_post }
-                    }
-                    ContentRecord::Reply(k_reply_record) => {
-                        let server_reply =
-                            ServerReply::from_enriched_k_reply_record(&k_reply_record);
-                        PostDetailsResponse { post: server_reply }
-                    }
-                };
-
-                match serde_json::to_string(&response) {
-                    Ok(json) => Ok(json),
-                    Err(err) => {
-                        log_error!("Failed to serialize content details response: {}", err);
-                        Err(self.create_error_response(
-                            "Internal server error during serialization",
-                            "SERIALIZATION_ERROR",
-                        ))
-                    }
-                }
-            }
-            Ok(None) => {
-                // Content not found
-                Err(self.create_error_response("Content not found", "NOT_FOUND"))
-            }
-            Err(err) => {
-                log_error!(
-                    "Database error while querying content by ID {}: {}",
-                    content_id,
-                    err
-                );
-                Err(self.create_error_response(
-                    "Internal server error during database query",
-                    "DATABASE_ERROR",
-                ))
-            }
-        }
-    }
 
     /// GET /get-post-details?id={postId}&requesterPubkey={requesterPubkey}
     /// Fetch details for a specific post or reply by its ID with voting information and blocking status for the requesting user
-    pub async fn get_post_details_with_votes_and_block_status(
+    pub async fn get_post_details(
         &self,
         content_id: &str,
         requester_pubkey: &str,

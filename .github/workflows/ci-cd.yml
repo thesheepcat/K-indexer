@@ -2,7 +2,7 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [ dev ]
+    branches: [ dev, master ]
 
 env:
   CARGO_TERM_COLOR: always
@@ -51,10 +51,10 @@ jobs:
       uses: docker/build-push-action@v5
       with:
         context: .
-        file: ./docker/DEV/Dockerfile.K-transaction-processor
+        file: ${{ github.ref == 'refs/heads/master' && './docker/PROD/Dockerfile.K-transaction-processor' || './docker/DEV/Dockerfile.K-transaction-processor' }}
         push: true
         tags: |
-          thesheepcat/k-transaction-processor:dev
+          ${{ github.ref == 'refs/heads/master' && 'thesheepcat/k-transaction-processor:latest' || 'thesheepcat/k-transaction-processor:dev' }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
@@ -62,9 +62,9 @@ jobs:
       uses: docker/build-push-action@v5
       with:
         context: .
-        file: ./docker/DEV/Dockerfile.K-webserver
+        file: ${{ github.ref == 'refs/heads/master' && './docker/PROD/Dockerfile.K-webserver' || './docker/DEV/Dockerfile.K-webserver' }}
         push: true
         tags: |
-          thesheepcat/k-webserver:dev          
+          ${{ github.ref == 'refs/heads/master' && 'thesheepcat/k-webserver:latest' || 'thesheepcat/k-webserver:dev' }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
