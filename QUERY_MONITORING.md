@@ -114,6 +114,26 @@ SELECT
 FROM pg_stat_statements
 WHERE query ILIKE '%k_posts%' OR query ILIKE '%k_replies%'
 ORDER BY calls DESC;
+
+-- Top 3 slowest queries on k_ tables with execution/planning breakdown
+SELECT
+    LEFT(query, 100) as query_type,
+    calls,
+    -- Execution times
+    ROUND(min_exec_time::numeric, 2) as min_exec_ms,
+    ROUND(mean_exec_time::numeric, 2) as avg_exec_ms,
+    ROUND(max_exec_time::numeric, 2) as max_exec_ms,
+    -- Planning times
+    ROUND(min_plan_time::numeric, 2) as min_plan_ms,
+    ROUND(mean_plan_time::numeric, 2) as avg_plan_ms,
+    ROUND(max_plan_time::numeric, 2) as max_plan_ms,
+    ROUND(total_exec_time::numeric, 2) as total_exec_ms,
+    ROUND(total_plan_time::numeric, 2) as total_plan_ms
+FROM pg_stat_statements
+WHERE query ILIKE '%k_blocks%' OR query ILIKE '%k_broadcasts%' OR query ILIKE '%k_mentions%'
+   OR query ILIKE '%k_posts%' OR query ILIKE '%k_replies%' OR query ILIKE '%k_vars%' OR query ILIKE '%k_votes%'
+ORDER BY total_exec_time DESC
+LIMIT 3;
 ```
 
 ### 7. Overall Database Performance Summary

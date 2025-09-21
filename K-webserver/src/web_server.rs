@@ -355,7 +355,7 @@ async fn handle_get_post_details(
     // Use the API handler to get post details with voting information and blocking status
     match app_state
         .api_handlers
-        .get_post_details_with_votes_and_block_status(&post_id, &requester_pubkey)
+        .get_post_details(&post_id, &requester_pubkey)
         .await
     {
         Ok(response_json) => {
@@ -540,12 +540,7 @@ async fn handle_get_users(
     // Use the API handler to get paginated user introduction posts with block status
     match app_state
         .api_handlers
-        .get_users_paginated_with_block_status(
-            limit,
-            &requester_pubkey,
-            params.before,
-            params.after,
-        )
+        .get_users_paginated(limit, &requester_pubkey, params.before, params.after)
         .await
     {
         Ok(response_json) => {

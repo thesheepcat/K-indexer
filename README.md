@@ -5,8 +5,6 @@
 
 K-indexer is a simplified Kaspa transaction indexer designed specifically for indexing and serving K protocol transactions.
 
-**Note:** All legacy K-indexer code has been moved into the `K-indexer-legacy` folder.
-
 ## 🚀 New Architecture
 
 The new indexer architecture is composed of the following components:
@@ -76,71 +74,37 @@ Follow the [documentation here on how to run rusty-kaspa](https://kaspa.aspectro
 - `--utxoindex`: Enable UTXO indexing
 - `--rpclisten-borsh=0.0.0.0:17120`: Enable BORSH RPC on all interfaces
 
-#### 2. **Setup Database and Services**
-Navigate to docker/ folder and use docker compose to activate Postgres database and simply-kaspa-indexer by SuperTypo:
+#### 2. **Setup enviroment variables**
+Navigate to docker/PROD folder, open .env file and set the variables depending on your preferences:
 
 ```bash
-cd K-indexer/docker/PROD_compose
+cd K-indexer/docker/PROD
+nano .env
+```
+##### Variables description
+| Variable | Default | Description |
+|-----------|---------|-------------|
+| `DB_USER` | `username` | PostgreSQL database username |
+| `DB_PASSWORD` | `password` | PostgreSQL database password |
+| `DB_NAME` | `k-db` | PostgreSQL database name |
+| `DB_PORT` | `5432` | PostgreSQL database access port |
+| `WEBSERVER_PORT` | `3000` | K-webserver access port (used by K-webapp, to connect to K-indexer) |
+
+**IMPORTANT**: It's recommended that you change the DB_USER and DB_PASSWORD variables to your username and password.
+
+#### 3. **Activate all Services**
+Navigate to docker/PROD folder and use docker compose to activate all services:
+
+```bash
+cd K-indexer/docker/PROD
 docker compose up -d
 ```
+The following services will be activated:
+- k-indexer-db (PostgreSQL database)
+- simply-kaspa-indexer
+- k-transaction-processor
+- k-webserver
 
-#### 3. **Compile and Run K-transaction-processor**
-On the main folder compile K-transaction-processor:
-```bash
-cargo build --release -p K-transaction-processor
-```
-
-Run the compiled binary:
-```bash
-./target/release/K-transaction-processor --db-host localhost --db-port 5432 --db-name k-db --db-user username --db-password password --db-max-connections 10 --workers 4 --channel transaction_channel --retry-attempts 10 --retry-delay 1000
-```
-
-#### 4. **Compile and Run K-webserver**
-On the main folder compile K-webserver:
-```bash
-cargo build --release -p K-webserver
-```
-
-Run the compiled binary:
-```bash
-# Basic usage (uses auto-detected CPU cores and intelligent defaults)
-./target/release/K-webserver --db-host localhost --db-name k-db --db-user username --db-password password --bind-address 0.0.0.0:3000
-
-# High-performance configuration
-./target/release/K-webserver --db-host localhost --db-name k-db --db-user username --db-password password --bind-address 0.0.0.0:3000 --worker-threads 16 --db-max-connections 50 --request-timeout 45 --rate-limit 500
-```
-
----
-
-## 🔧 Configuration Options
-
-### K-transaction-processor Options
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `--db-host` | `localhost` | PostgreSQL database host |
-| `--db-port` | `5432` | PostgreSQL database port |
-| `--db-name` | `k-db` | PostgreSQL database name |
-| `--db-user` | `username` | PostgreSQL database username |
-| `--db-password` | `password` | PostgreSQL database password |
-| `--db-max-connections` | `10` | Maximum database connections |
-| `--workers` | `4` | Number of worker threads |
-| `--channel` | `transaction_channel` | Transaction channel name |
-| `--retry-attempts` | `10` | Number of retry attempts |
-| `--retry-delay` | `1000` | Retry delay in milliseconds |
-
-### K-webserver Options
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `--db-host` | `localhost` | PostgreSQL database host |
-| `--db-port` | `5432` | PostgreSQL database port |
-| `--db-name` | `k-db` | PostgreSQL database name |
-| `--db-user` | `username` | PostgreSQL database username |
-| `--db-password` | `password` | PostgreSQL database password |
-| `--bind-address` | `127.0.0.1:8080` | REST API listening address and port |
-| `--worker-threads` | auto-detect CPU cores | Number of Tokio worker threads for request processing |
-| `--db-max-connections` | `worker_threads * 3` (min 10) | Maximum database connection pool size |
-| `--request-timeout` | `30` | Request timeout in seconds |
-| `--rate-limit` | `100` | Rate limit: requests per minute per IP address |
 
 ---
 

@@ -1,0 +1,52 @@
+# Build stage
+FROM rust:1.84-alpine as builder
+
+# Install required system dependencies
+RUN apk add --no-cache \
+    musl-dev \
+    pkgconfig \
+    openssl-dev
+
+# Set working directory
+WORKDIR /app
+
+# Create a temporary workspace with only K-transaction-processor
+RUN printf '[workspace]\nmembers = ["K-transaction-processor"]\nresolver = "2"\n' > Cargo.toml
+
+# Copy package files
+COPY K-transaction-processor/Cargo.toml ./K-transaction-processor/
+
+# Copy source code
+COPY K-transaction-processor/src ./K-transaction-processor/src
+
+# Build the application
+RUN cargo build --release --bin K-transaction-processor
+
+# Runtime stage
+FROM alpine:3.19
+
+# Install runtime dependencies
+RUN apk add --no-cache \
+    ca-certificates \
+    libssl3
+
+# Create non-root user
+RUN adduser -D -s /bin/sh app
+
+# Set working directory
+WORKDIR /app
+
+# Copy the binary from builder stage
+COPY --from=builder /app/target/release/K-transaction-processor /app/
+
+# Change ownership to app user
+RUN chown -R app:app /app
+
+# Switch to non-root user
+USER app
+
+# Expose any ports if needed (adjust as necessary)
+EXPOSE 8080
+
+# Default command
+ENTRYPOINT ["./K-transaction-processor"]
