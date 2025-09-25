@@ -1,8 +1,8 @@
-use anyhow::Result;
-use serde_json;
-use tracing::{info, error, warn};
 use crate::database::{DbPool, Transaction};
+use anyhow::Result;
 use hex;
+use serde_json;
+use tracing::{error, info, warn};
 
 // Kaspa message signature verification imports (from main K-indexer)
 use kaspa_wallet_core::message::{verify_message, PersonalMessage};
@@ -17,6 +17,7 @@ pub enum KActionType {
     Post(KPost),
     Reply(KReply),
     Vote(KVote),
+    Block(KBlock),
     Unknown(String),
 }
 
@@ -54,6 +55,14 @@ pub struct KVote {
     pub post_id: String,
     pub vote: String, // "upvote" or "downvote"
     pub mentioned_pubkey: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct KBlock {
+    pub sender_pubkey: String,
+    pub sender_signature: String,
+    pub blocking_action: String, // "block" or "unblock"
+    pub blocked_user_pubkey: String,
 }
 
 // Database record structures for PostgreSQL
@@ -99,6 +108,16 @@ pub struct KVoteRecord {
     pub vote: String,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct KBlockRecord {
+    pub transaction_id: String,
+    pub block_time: i64,
+    pub sender_pubkey: String,
+    pub sender_signature: String,
+    pub blocking_action: String,
+    pub blocked_user_pubkey: String,
+}
+
 pub struct KProtocolProcessor {
     db_pool: DbPool,
 }
@@ -113,22 +132,25 @@ impl KProtocolProcessor {
     fn verify_kaspa_signature(&self, message: &str, signature: &str, public_key_hex: &str) -> bool {
         // Create PersonalMessage from the message string
         let personal_message = PersonalMessage(message);
-        
+
         // Parse signature from hex (64 bytes for Schnorr signature)
         let signature_bytes = match hex::decode(signature) {
             Ok(bytes) => {
                 if bytes.len() != 64 {
-                    error!("Invalid signature length: expected 64 bytes, got {}", bytes.len());
+                    error!(
+                        "Invalid signature length: expected 64 bytes, got {}",
+                        bytes.len()
+                    );
                     return false;
                 }
                 bytes
-            },
+            }
             Err(err) => {
                 error!("Failed to decode signature hex '{}': {}", signature, err);
                 return false;
             }
         };
-        
+
         // Parse public key from hex
         let public_key_bytes = match hex::decode(public_key_hex) {
             Ok(bytes) => {
@@ -139,16 +161,22 @@ impl KProtocolProcessor {
                     // Already x-only format
                     bytes
                 } else {
-                    error!("Invalid public key length: expected 32 or 33 bytes, got {}", bytes.len());
+                    error!(
+                        "Invalid public key length: expected 32 or 33 bytes, got {}",
+                        bytes.len()
+                    );
                     return false;
                 }
-            },
+            }
             Err(err) => {
-                error!("Failed to decode public key hex '{}': {}", public_key_hex, err);
+                error!(
+                    "Failed to decode public key hex '{}': {}",
+                    public_key_hex, err
+                );
                 return false;
             }
         };
-        
+
         // Create XOnlyPublicKey for verification
         let public_key = match XOnlyPublicKey::from_slice(&public_key_bytes) {
             Ok(key) => key,
@@ -157,13 +185,13 @@ impl KProtocolProcessor {
                 return false;
             }
         };
-        
+
         // Verify the message signature using Kaspa's verify_message function
         match verify_message(&personal_message, &signature_bytes, &public_key) {
             Ok(()) => {
                 //info!("Kaspa message signature verification successful");
                 true
-            },
+            }
             Err(err) => {
                 error!("Kaspa message signature verification failed: {}", err);
                 false
@@ -179,27 +207,36 @@ impl KProtocolProcessor {
         }
 
         let k_payload = &payload[4..]; // Remove "k:1:" prefix
-        
+
         // Split by colons to get the components
         let parts: Vec<&str> = k_payload.split(':').collect();
-        
+
         if parts.is_empty() {
-            return Err(anyhow::anyhow!("Empty K protocol payload after removing prefix"));
+            return Err(anyhow::anyhow!(
+                "Empty K protocol payload after removing prefix"
+            ));
         }
-        
+
         let action = parts[0];
 
         match action {
             "broadcast" => {
                 // Expected format: broadcast:sender_pubkey:sender_signature:base64_encoded_nickname:base64_encoded_profile_image:base64_encoded_message
                 if parts.len() < 6 {
-                    return Err(anyhow::anyhow!("Invalid broadcast format: expected 6 parts, got {}", parts.len()));
+                    return Err(anyhow::anyhow!(
+                        "Invalid broadcast format: expected 6 parts, got {}",
+                        parts.len()
+                    ));
                 }
 
                 let sender_pubkey = parts[1].to_string();
                 let sender_signature = parts[2].to_string();
                 let base64_encoded_nickname = parts[3].to_string();
-                let base64_encoded_profile_image = if parts[4].is_empty() { None } else { Some(parts[4].to_string()) };
+                let base64_encoded_profile_image = if parts[4].is_empty() {
+                    None
+                } else {
+                    Some(parts[4].to_string())
+                };
                 let base64_encoded_message = parts[5].to_string();
 
                 Ok(KActionType::Broadcast(KBroadcast {
@@ -213,20 +250,26 @@ impl KProtocolProcessor {
             "post" => {
                 // Expected format: post:sender_pubkey:sender_signature:base64_message:mentioned_pubkeys_json
                 if parts.len() < 4 {
-                    return Err(anyhow::anyhow!("Invalid post format: expected at least 4 parts, got {}", parts.len()));
+                    return Err(anyhow::anyhow!(
+                        "Invalid post format: expected at least 4 parts, got {}",
+                        parts.len()
+                    ));
                 }
 
                 let sender_pubkey = parts[1].to_string();
                 let sender_signature = parts[2].to_string();
                 let base64_encoded_message = parts[3].to_string();
-                
+
                 // Parse mentioned_pubkeys from JSON if present
                 let mentioned_pubkeys: Vec<String> = if parts.len() > 4 {
                     let mentioned_pubkeys_json = parts[4];
                     match serde_json::from_str::<Vec<String>>(mentioned_pubkeys_json) {
                         Ok(pubkeys) => pubkeys,
                         Err(err) => {
-                            error!("Failed to parse mentioned_pubkeys JSON '{}': {}", mentioned_pubkeys_json, err);
+                            error!(
+                                "Failed to parse mentioned_pubkeys JSON '{}': {}",
+                                mentioned_pubkeys_json, err
+                            );
                             Vec::new() // Default to empty array on parse error
                         }
                     }
@@ -244,21 +287,27 @@ impl KProtocolProcessor {
             "reply" => {
                 // Expected format: reply:sender_pubkey:sender_signature:post_id:base64_message:mentioned_pubkeys_json
                 if parts.len() < 5 {
-                    return Err(anyhow::anyhow!("Invalid reply format: expected at least 5 parts, got {}", parts.len()));
+                    return Err(anyhow::anyhow!(
+                        "Invalid reply format: expected at least 5 parts, got {}",
+                        parts.len()
+                    ));
                 }
 
                 let sender_pubkey = parts[1].to_string();
                 let sender_signature = parts[2].to_string();
                 let post_id = parts[3].to_string();
                 let base64_encoded_message = parts[4].to_string();
-                
+
                 // Parse mentioned_pubkeys from JSON if present
                 let mentioned_pubkeys: Vec<String> = if parts.len() > 5 {
                     let mentioned_pubkeys_json = parts[5];
                     match serde_json::from_str::<Vec<String>>(mentioned_pubkeys_json) {
                         Ok(pubkeys) => pubkeys,
                         Err(err) => {
-                            error!("Failed to parse mentioned_pubkeys JSON '{}': {}", mentioned_pubkeys_json, err);
+                            error!(
+                                "Failed to parse mentioned_pubkeys JSON '{}': {}",
+                                mentioned_pubkeys_json, err
+                            );
                             Vec::new() // Default to empty array on parse error
                         }
                     }
@@ -277,7 +326,10 @@ impl KProtocolProcessor {
             "vote" => {
                 // Expected format: vote:sender_pubkey:sender_signature:post_id:vote:mentioned_pubkey
                 if parts.len() < 6 {
-                    return Err(anyhow::anyhow!("Invalid vote format: expected 6 parts, got {}", parts.len()));
+                    return Err(anyhow::anyhow!(
+                        "Invalid vote format: expected 6 parts, got {}",
+                        parts.len()
+                    ));
                 }
 
                 let sender_pubkey = parts[1].to_string();
@@ -288,7 +340,10 @@ impl KProtocolProcessor {
 
                 // Validate vote value
                 if vote != "upvote" && vote != "downvote" {
-                    return Err(anyhow::anyhow!("Invalid vote value: expected 'upvote' or 'downvote', got '{}'", vote));
+                    return Err(anyhow::anyhow!(
+                        "Invalid vote value: expected 'upvote' or 'downvote', got '{}'",
+                        vote
+                    ));
                 }
 
                 Ok(KActionType::Vote(KVote {
@@ -299,34 +354,37 @@ impl KProtocolProcessor {
                     mentioned_pubkey,
                 }))
             }
+            "block" => {
+                // Expected format: block:sender_pubkey:sender_signature:blocking_action:blocked_user_pubkey
+                if parts.len() < 5 {
+                    return Err(anyhow::anyhow!(
+                        "Invalid block format: expected 5 parts, got {}",
+                        parts.len()
+                    ));
+                }
+
+                let sender_pubkey = parts[1].to_string();
+                let sender_signature = parts[2].to_string();
+                let blocking_action = parts[3].to_string();
+                let blocked_user_pubkey = parts[4].to_string();
+
+                // Validate blocking_action value
+                if blocking_action != "block" && blocking_action != "unblock" {
+                    return Err(anyhow::anyhow!(
+                        "Invalid blocking_action value: expected 'block' or 'unblock', got '{}'",
+                        blocking_action
+                    ));
+                }
+
+                Ok(KActionType::Block(KBlock {
+                    sender_pubkey,
+                    sender_signature,
+                    blocking_action,
+                    blocked_user_pubkey,
+                }))
+            }
             _ => Ok(KActionType::Unknown(action.to_string())),
         }
-    }
-
-    /// Check if transaction already exists in any K protocol table
-    pub async fn transaction_exists(&self, transaction_id: &str) -> Result<bool> {
-        // Convert hex string to bytea for database query
-        let transaction_id_bytes = hex::decode(transaction_id)?;
-        
-        // Single query using UNION ALL to check all K protocol tables
-        let result = sqlx::query(
-            r#"
-            SELECT 1 FROM (
-                SELECT transaction_id FROM k_posts WHERE transaction_id = $1
-                UNION ALL
-                SELECT transaction_id FROM k_replies WHERE transaction_id = $1
-                UNION ALL  
-                SELECT transaction_id FROM k_broadcasts WHERE transaction_id = $1
-                UNION ALL
-                SELECT transaction_id FROM k_votes WHERE transaction_id = $1
-            ) AS combined LIMIT 1
-            "#
-        )
-        .bind(&transaction_id_bytes)
-        .fetch_optional(&self.db_pool)
-        .await?;
-
-        Ok(result.is_some())
     }
 
     /// Process K protocol transaction
@@ -346,7 +404,10 @@ impl KProtocolProcessor {
         let payload_bytes = match hex::decode(payload_hex) {
             Ok(bytes) => bytes,
             Err(err) => {
-                error!("Failed to decode hex payload for transaction {}: {}", transaction_id, err);
+                error!(
+                    "Failed to decode hex payload for transaction {}: {}",
+                    transaction_id, err
+                );
                 return Ok(());
             }
         };
@@ -354,45 +415,52 @@ impl KProtocolProcessor {
         let payload_str = match std::str::from_utf8(&payload_bytes) {
             Ok(payload_str) => payload_str,
             Err(err) => {
-                error!("Invalid UTF-8 in transaction payload for ID: {}: {}", transaction_id, err);
+                error!(
+                    "Invalid UTF-8 in transaction payload for ID: {}: {}",
+                    transaction_id, err
+                );
                 return Ok(());
             }
         };
 
         // Clean the payload string by removing null bytes and other control characters
-        let cleaned_payload = payload_str.chars()
+        let cleaned_payload = payload_str
+            .chars()
             .filter(|c| !c.is_control() || *c == '\n' || *c == '\r' || *c == '\t')
             .collect::<String>();
 
-        // Check if this transaction already exists in the database to avoid duplicates
-        if self.transaction_exists(transaction_id).await? {
-            info!("Transaction {} already exists, skipping", transaction_id);
-            return Ok(());
-        }
-
         // Parse K protocol payload
         match self.parse_k_protocol_payload(&cleaned_payload) {
-            Ok(action_type) => {
-                match action_type {
-                    KActionType::Broadcast(k_broadcast) => {
-                        self.save_k_broadcast_to_database(transaction, k_broadcast).await?;
-                    }
-                    KActionType::Post(k_post) => {
-                        self.save_k_post_to_database(transaction, k_post).await?;
-                    }
-                    KActionType::Reply(k_reply) => {
-                        self.save_k_reply_to_database(transaction, k_reply).await?;
-                    }
-                    KActionType::Vote(k_vote) => {
-                        self.save_k_vote_to_database(transaction, k_vote).await?;
-                    }
-                    KActionType::Unknown(action) => {
-                        warn!("Unknown K protocol action '{}' in transaction {}", action, transaction_id);
-                    }
+            Ok(action_type) => match action_type {
+                KActionType::Broadcast(k_broadcast) => {
+                    self.save_k_broadcast_to_database(transaction, k_broadcast)
+                        .await?;
                 }
-            }
+                KActionType::Post(k_post) => {
+                    self.save_k_post_to_database(transaction, k_post).await?;
+                }
+                KActionType::Reply(k_reply) => {
+                    self.save_k_reply_to_database(transaction, k_reply).await?;
+                }
+                KActionType::Vote(k_vote) => {
+                    self.save_k_vote_to_database(transaction, k_vote).await?;
+                }
+                KActionType::Block(k_block) => {
+                    self.process_k_block_in_database(transaction, k_block)
+                        .await?;
+                }
+                KActionType::Unknown(action) => {
+                    warn!(
+                        "Unknown K protocol action '{}' in transaction {}",
+                        action, transaction_id
+                    );
+                }
+            },
             Err(err) => {
-                error!("Failed to parse K protocol payload for transaction {}: {}", transaction_id, err);
+                error!(
+                    "Failed to parse K protocol payload for transaction {}: {}",
+                    transaction_id, err
+                );
             }
         }
 
@@ -400,15 +468,27 @@ impl KProtocolProcessor {
     }
 
     /// Save K post to database
-    pub async fn save_k_post_to_database(&self, transaction: &Transaction, k_post: KPost) -> Result<()> {
+    pub async fn save_k_post_to_database(
+        &self,
+        transaction: &Transaction,
+        k_post: KPost,
+    ) -> Result<()> {
         let transaction_id = &transaction.transaction_id;
 
         // Construct the message to verify - it's the base64 message + mentioned_pubkeys JSON
-        let mentioned_pubkeys_json_str = serde_json::to_string(&k_post.mentioned_pubkeys).unwrap_or_else(|_| "[]".to_string());
-        let message_to_verify = format!("{}:{}", k_post.base64_encoded_message, mentioned_pubkeys_json_str);
+        let mentioned_pubkeys_json_str =
+            serde_json::to_string(&k_post.mentioned_pubkeys).unwrap_or_else(|_| "[]".to_string());
+        let message_to_verify = format!(
+            "{}:{}",
+            k_post.base64_encoded_message, mentioned_pubkeys_json_str
+        );
 
         // Verify the signature
-        if !self.verify_kaspa_signature(&message_to_verify, &k_post.sender_signature, &k_post.sender_pubkey) {
+        if !self.verify_kaspa_signature(
+            &message_to_verify,
+            &k_post.sender_signature,
+            &k_post.sender_pubkey,
+        ) {
             error!("Invalid signature for post {}, skipping", transaction_id);
             return Ok(()); // Skip posts with invalid signatures
         }
@@ -420,17 +500,18 @@ impl KProtocolProcessor {
         let transaction_id_bytes = hex::decode(transaction_id)?;
         let sender_pubkey_bytes = hex::decode(&k_post.sender_pubkey)?;
         let sender_signature_bytes = hex::decode(&k_post.sender_signature)?;
-        
+
         // Single query to insert post and all mentions using CTE
         if k_post.mentioned_pubkeys.is_empty() {
-            // If no mentions, just insert the post
-            sqlx::query(
+            // If no mentions, just insert the post (skip if already exists)
+            let result = sqlx::query(
                 r#"
                 INSERT INTO k_posts (
                     transaction_id, block_time, sender_pubkey, sender_signature, 
                     base64_encoded_message
                 ) VALUES ($1, $2, $3, $4, $5)
-                "#
+                ON CONFLICT (sender_signature) DO NOTHING
+                "#,
             )
             .bind(&transaction_id_bytes)
             .bind(block_time)
@@ -439,28 +520,39 @@ impl KProtocolProcessor {
             .bind(k_post.base64_encoded_message)
             .execute(&self.db_pool)
             .await?;
+
+            if result.rows_affected() == 0 {
+                info!(
+                    "Post transaction {} already exists, skipping",
+                    transaction_id
+                );
+            } else {
+                info!("Saved K post: {}", transaction_id);
+            }
         } else {
             // Convert mentioned pubkeys to bytea
-            let mentioned_pubkeys_bytes: Result<Vec<Vec<u8>>, _> = k_post.mentioned_pubkeys
+            let mentioned_pubkeys_bytes: Result<Vec<Vec<u8>>, _> = k_post
+                .mentioned_pubkeys
                 .iter()
                 .map(|pk| hex::decode(pk))
                 .collect();
             let mentioned_pubkeys_bytes = mentioned_pubkeys_bytes?;
-            
-            // Insert post and mentions in a single query using CTE
-            sqlx::query(
+
+            // Insert post and mentions in a single query using CTE (skip if already exists)
+            let result = sqlx::query(
                 r#"
                 WITH post_insert AS (
                     INSERT INTO k_posts (
                         transaction_id, block_time, sender_pubkey, sender_signature, 
                         base64_encoded_message
                     ) VALUES ($1, $2, $3, $4, $5)
+                    ON CONFLICT (sender_signature) DO NOTHING
                     RETURNING transaction_id, block_time
                 )
                 INSERT INTO k_mentions (content_id, content_type, mentioned_pubkey, block_time)
                 SELECT pi.transaction_id, 'post', unnest($6::bytea[]), pi.block_time
                 FROM post_insert pi
-                "#
+                "#,
             )
             .bind(&transaction_id_bytes)
             .bind(block_time)
@@ -470,48 +562,68 @@ impl KProtocolProcessor {
             .bind(&mentioned_pubkeys_bytes)
             .execute(&self.db_pool)
             .await?;
-        }
 
-        info!("Saved K post: {}", transaction_id);
+            if result.rows_affected() == 0 {
+                info!(
+                    "Post transaction {} already exists, skipping",
+                    transaction_id
+                );
+            } else {
+                info!("Saved K post: {}", transaction_id);
+            }
+        }
         Ok(())
     }
 
     /// Save K reply to database
-    pub async fn save_k_reply_to_database(&self, transaction: &Transaction, k_reply: KReply) -> Result<()> {
+    pub async fn save_k_reply_to_database(
+        &self,
+        transaction: &Transaction,
+        k_reply: KReply,
+    ) -> Result<()> {
         let transaction_id = &transaction.transaction_id;
 
         // Construct the message to verify - it's post_id + base64_message + mentioned_pubkeys JSON
-        let mentioned_pubkeys_json_str = serde_json::to_string(&k_reply.mentioned_pubkeys).unwrap_or_else(|_| "[]".to_string());
-        let message_to_verify = format!("{}:{}:{}", k_reply.post_id, k_reply.base64_encoded_message, mentioned_pubkeys_json_str);
+        let mentioned_pubkeys_json_str =
+            serde_json::to_string(&k_reply.mentioned_pubkeys).unwrap_or_else(|_| "[]".to_string());
+        let message_to_verify = format!(
+            "{}:{}:{}",
+            k_reply.post_id, k_reply.base64_encoded_message, mentioned_pubkeys_json_str
+        );
 
         // Verify the signature
-        if !self.verify_kaspa_signature(&message_to_verify, &k_reply.sender_signature, &k_reply.sender_pubkey) {
+        if !self.verify_kaspa_signature(
+            &message_to_verify,
+            &k_reply.sender_signature,
+            &k_reply.sender_pubkey,
+        ) {
             error!("Invalid signature for reply {}, skipping", transaction_id);
             return Ok(()); // Skip replies with invalid signatures
         }
 
         // Store values we need for logging before they're moved
         let post_id_for_log = k_reply.post_id.clone();
-        
+
         // Extract block time
         let block_time = transaction.block_time.unwrap_or(0);
-        
+
         // Convert hex strings to bytea for database storage
         let transaction_id_bytes = hex::decode(transaction_id)?;
         let sender_pubkey_bytes = hex::decode(&k_reply.sender_pubkey)?;
         let sender_signature_bytes = hex::decode(&k_reply.sender_signature)?;
         let post_id_bytes = hex::decode(&k_reply.post_id)?;
-        
+
         // Single query to insert reply and all mentions using CTE
         if k_reply.mentioned_pubkeys.is_empty() {
-            // If no mentions, just insert the reply
-            sqlx::query(
+            // If no mentions, just insert the reply (skip if already exists)
+            let result = sqlx::query(
                 r#"
                 INSERT INTO k_replies (
                     transaction_id, block_time, sender_pubkey, sender_signature, 
                     post_id, base64_encoded_message
                 ) VALUES ($1, $2, $3, $4, $5, $6)
-                "#
+                ON CONFLICT (sender_signature) DO NOTHING
+                "#,
             )
             .bind(&transaction_id_bytes)
             .bind(block_time)
@@ -521,28 +633,39 @@ impl KProtocolProcessor {
             .bind(k_reply.base64_encoded_message)
             .execute(&self.db_pool)
             .await?;
+
+            if result.rows_affected() == 0 {
+                info!(
+                    "Reply transaction {} already exists, skipping",
+                    transaction_id
+                );
+            } else {
+                info!("Saved K reply: {} -> {}", transaction_id, post_id_for_log);
+            }
         } else {
             // Convert mentioned pubkeys to bytea
-            let mentioned_pubkeys_bytes: Result<Vec<Vec<u8>>, _> = k_reply.mentioned_pubkeys
+            let mentioned_pubkeys_bytes: Result<Vec<Vec<u8>>, _> = k_reply
+                .mentioned_pubkeys
                 .iter()
                 .map(|pk| hex::decode(pk))
                 .collect();
             let mentioned_pubkeys_bytes = mentioned_pubkeys_bytes?;
-            
-            // Insert reply and mentions in a single query using CTE
-            sqlx::query(
+
+            // Insert reply and mentions in a single query using CTE (skip if already exists)
+            let result = sqlx::query(
                 r#"
                 WITH reply_insert AS (
                     INSERT INTO k_replies (
                         transaction_id, block_time, sender_pubkey, sender_signature, 
                         post_id, base64_encoded_message
                     ) VALUES ($1, $2, $3, $4, $5, $6)
+                    ON CONFLICT (sender_signature) DO NOTHING
                     RETURNING transaction_id, block_time
                 )
                 INSERT INTO k_mentions (content_id, content_type, mentioned_pubkey, block_time)
                 SELECT ri.transaction_id, 'reply', unnest($7::bytea[]), ri.block_time
                 FROM reply_insert ri
-                "#
+                "#,
             )
             .bind(&transaction_id_bytes)
             .bind(block_time)
@@ -553,23 +676,49 @@ impl KProtocolProcessor {
             .bind(&mentioned_pubkeys_bytes)
             .execute(&self.db_pool)
             .await?;
-        }
 
-        info!("Saved K reply: {} -> {}", transaction_id, post_id_for_log);
+            if result.rows_affected() == 0 {
+                info!(
+                    "Reply transaction {} already exists, skipping",
+                    transaction_id
+                );
+            } else {
+                info!("Saved K reply: {} -> {}", transaction_id, post_id_for_log);
+            }
+        }
         Ok(())
     }
 
     /// Save K broadcast to database
-    pub async fn save_k_broadcast_to_database(&self, transaction: &Transaction, k_broadcast: KBroadcast) -> Result<()> {
+    pub async fn save_k_broadcast_to_database(
+        &self,
+        transaction: &Transaction,
+        k_broadcast: KBroadcast,
+    ) -> Result<()> {
         let transaction_id = &transaction.transaction_id;
 
         // Construct the message to verify - it's nickname + profile_image + message
-        let profile_image_str = k_broadcast.base64_encoded_profile_image.as_deref().unwrap_or("");
-        let message_to_verify = format!("{}:{}:{}", k_broadcast.base64_encoded_nickname, profile_image_str, k_broadcast.base64_encoded_message);
+        let profile_image_str = k_broadcast
+            .base64_encoded_profile_image
+            .as_deref()
+            .unwrap_or("");
+        let message_to_verify = format!(
+            "{}:{}:{}",
+            k_broadcast.base64_encoded_nickname,
+            profile_image_str,
+            k_broadcast.base64_encoded_message
+        );
 
         // Verify the signature
-        if !self.verify_kaspa_signature(&message_to_verify, &k_broadcast.sender_signature, &k_broadcast.sender_pubkey) {
-            error!("Invalid signature for broadcast {}, skipping", transaction_id);
+        if !self.verify_kaspa_signature(
+            &message_to_verify,
+            &k_broadcast.sender_signature,
+            &k_broadcast.sender_pubkey,
+        ) {
+            error!(
+                "Invalid signature for broadcast {}, skipping",
+                transaction_id
+            );
             return Ok(()); // Skip broadcasts with invalid signatures
         }
 
@@ -577,20 +726,21 @@ impl KProtocolProcessor {
         let transaction_id_bytes = hex::decode(transaction_id)?;
         let sender_pubkey_bytes = hex::decode(&k_broadcast.sender_pubkey)?;
         let sender_signature_bytes = hex::decode(&k_broadcast.sender_signature)?;
-        
-        // Use a single query to delete existing records and insert the new one atomically
-        sqlx::query(
+
+        // Use a single query to delete existing records and insert the new one atomically (skip if transaction already exists)
+        let result = sqlx::query(
             r#"
             WITH deleted AS (
                 DELETE FROM k_broadcasts 
-                WHERE sender_pubkey = $3
+                WHERE sender_pubkey = $3 AND transaction_id != $1
                 RETURNING transaction_id
             )
             INSERT INTO k_broadcasts (
                 transaction_id, block_time, sender_pubkey, sender_signature, 
                 base64_encoded_nickname, base64_encoded_profile_image, base64_encoded_message
             ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-            "#
+            ON CONFLICT (transaction_id) DO NOTHING
+            "#,
         )
         .bind(&transaction_id_bytes)
         .bind(transaction.block_time.unwrap_or(0))
@@ -602,19 +752,40 @@ impl KProtocolProcessor {
         .execute(&self.db_pool)
         .await?;
 
-        info!("Saved K broadcast: {} (replaced any existing broadcasts for sender)", transaction_id);
+        if result.rows_affected() == 0 {
+            info!(
+                "Broadcast transaction {} already exists, skipping",
+                transaction_id
+            );
+        } else {
+            info!(
+                "Saved K broadcast: {} (replaced any existing broadcasts for sender)",
+                transaction_id
+            );
+        }
         Ok(())
     }
 
     /// Save K vote to database
-    pub async fn save_k_vote_to_database(&self, transaction: &Transaction, k_vote: KVote) -> Result<()> {
+    pub async fn save_k_vote_to_database(
+        &self,
+        transaction: &Transaction,
+        k_vote: KVote,
+    ) -> Result<()> {
         let transaction_id = &transaction.transaction_id;
 
         // Construct the message to verify - it's post_id + vote + mentioned_pubkey
-        let message_to_verify = format!("{}:{}:{}", k_vote.post_id, k_vote.vote, k_vote.mentioned_pubkey);
+        let message_to_verify = format!(
+            "{}:{}:{}",
+            k_vote.post_id, k_vote.vote, k_vote.mentioned_pubkey
+        );
 
         // Verify the signature
-        if !self.verify_kaspa_signature(&message_to_verify, &k_vote.sender_signature, &k_vote.sender_pubkey) {
+        if !self.verify_kaspa_signature(
+            &message_to_verify,
+            &k_vote.sender_signature,
+            &k_vote.sender_pubkey,
+        ) {
             error!("Invalid signature for vote {}, skipping", transaction_id);
             return Ok(()); // Skip votes with invalid signatures
         }
@@ -622,31 +793,32 @@ impl KProtocolProcessor {
         // Store values we need for logging before they're moved
         let post_id_for_log = k_vote.post_id.clone();
         let vote_for_log = k_vote.vote.clone();
-        
+
         // Extract block time
         let block_time = transaction.block_time.unwrap_or(0);
-        
+
         // Convert hex strings to bytea for database storage
         let transaction_id_bytes = hex::decode(transaction_id)?;
         let sender_pubkey_bytes = hex::decode(&k_vote.sender_pubkey)?;
         let sender_signature_bytes = hex::decode(&k_vote.sender_signature)?;
         let post_id_bytes = hex::decode(&k_vote.post_id)?;
         let mentioned_pubkey_bytes = hex::decode(&k_vote.mentioned_pubkey)?;
-        
-        // Single query to insert vote and mention using CTE
-        sqlx::query(
+
+        // Single query to insert vote and mention using CTE (skip if already exists)
+        let result = sqlx::query(
             r#"
             WITH vote_insert AS (
                 INSERT INTO k_votes (
                     transaction_id, block_time, sender_pubkey, sender_signature, 
                     post_id, vote
                 ) VALUES ($1, $2, $3, $4, $5, $6)
+                ON CONFLICT (sender_signature) DO NOTHING
                 RETURNING transaction_id, block_time
             )
             INSERT INTO k_mentions (content_id, content_type, mentioned_pubkey, block_time)
             SELECT vi.transaction_id, 'vote', $7, vi.block_time
             FROM vote_insert vi
-            "#
+            "#,
         )
         .bind(&transaction_id_bytes)
         .bind(block_time)
@@ -658,7 +830,126 @@ impl KProtocolProcessor {
         .execute(&self.db_pool)
         .await?;
 
-        info!("Saved K vote: {} -> {} ({})", transaction_id, post_id_for_log, vote_for_log);
+        if result.rows_affected() == 0 {
+            info!(
+                "Vote transaction {} already exists, skipping",
+                transaction_id
+            );
+        } else {
+            info!(
+                "Saved K vote: {} -> {} ({})",
+                transaction_id, post_id_for_log, vote_for_log
+            );
+        }
+        Ok(())
+    }
+
+    /// Process K block action (block/unblock) in database
+    pub async fn process_k_block_in_database(
+        &self,
+        transaction: &Transaction,
+        k_block: KBlock,
+    ) -> Result<()> {
+        let transaction_id = &transaction.transaction_id;
+
+        // Construct the message to verify - it's blocking_action + blocked_user_pubkey
+        let message_to_verify = format!(
+            "{}:{}",
+            k_block.blocking_action, k_block.blocked_user_pubkey
+        );
+
+        // Verify the signature
+        if !self.verify_kaspa_signature(
+            &message_to_verify,
+            &k_block.sender_signature,
+            &k_block.sender_pubkey,
+        ) {
+            error!(
+                "Invalid signature for block action {}, skipping",
+                transaction_id
+            );
+            return Ok(()); // Skip block actions with invalid signatures
+        }
+
+        // Extract block time
+        let block_time = transaction.block_time.unwrap_or(0);
+
+        // Convert hex strings to bytea for database storage
+        let sender_pubkey_bytes = hex::decode(&k_block.sender_pubkey)?;
+        let blocked_user_pubkey_bytes = hex::decode(&k_block.blocked_user_pubkey)?;
+
+        match k_block.blocking_action.as_str() {
+            "block" => {
+                let transaction_id_bytes = hex::decode(transaction_id)?;
+                let sender_signature_bytes = hex::decode(&k_block.sender_signature)?;
+
+                // Insert block record (update if same sender blocks same user again)
+                let result = sqlx::query(
+                    r#"
+                    INSERT INTO k_blocks (
+                        transaction_id, block_time, sender_pubkey, sender_signature,
+                        blocking_action, blocked_user_pubkey
+                    ) VALUES ($1, $2, $3, $4, $5, $6)
+                    ON CONFLICT (sender_pubkey, blocked_user_pubkey)
+                    DO UPDATE SET
+                        transaction_id = EXCLUDED.transaction_id,
+                        block_time = EXCLUDED.block_time,
+                        sender_signature = EXCLUDED.sender_signature
+                    "#,
+                )
+                .bind(&transaction_id_bytes)
+                .bind(block_time)
+                .bind(&sender_pubkey_bytes)
+                .bind(&sender_signature_bytes)
+                .bind(&k_block.blocking_action)
+                .bind(&blocked_user_pubkey_bytes)
+                .execute(&self.db_pool)
+                .await?;
+
+                if result.rows_affected() == 0 {
+                    info!(
+                        "Block transaction {} already exists, skipping",
+                        transaction_id
+                    );
+                } else {
+                    info!(
+                        "Saved K block: {} blocked {}",
+                        hex::encode(&sender_pubkey_bytes),
+                        hex::encode(&blocked_user_pubkey_bytes)
+                    );
+                }
+            }
+            "unblock" => {
+                // Delete any existing "block" record for the same sender and blocked user
+                let delete_result = sqlx::query(
+                    r#"
+                    DELETE FROM k_blocks
+                    WHERE sender_pubkey = $1
+                    AND blocked_user_pubkey = $2
+                    AND blocking_action = 'block'
+                    "#,
+                )
+                .bind(&sender_pubkey_bytes)
+                .bind(&blocked_user_pubkey_bytes)
+                .execute(&self.db_pool)
+                .await?;
+
+                info!(
+                    "Processed K unblock: {} unblocked {} (deleted {} existing block records)",
+                    hex::encode(&sender_pubkey_bytes),
+                    hex::encode(&blocked_user_pubkey_bytes),
+                    delete_result.rows_affected()
+                );
+            }
+            _ => {
+                error!("Invalid blocking_action: {}", k_block.blocking_action);
+                return Err(anyhow::anyhow!(
+                    "Invalid blocking_action: {}",
+                    k_block.blocking_action
+                ));
+            }
+        }
+
         Ok(())
     }
 }

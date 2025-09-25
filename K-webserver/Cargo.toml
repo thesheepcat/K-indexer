@@ -1,6 +1,6 @@
 [package]
 name = "K-webserver"
-version = "0.1.1"
+version = "0.1.3"
 edition = "2021"
 
 [dependencies]
@@ -18,3 +18,4 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 hex = "0.4"
 clap = { version = "4.0", features = ["derive"] }
 axum-prometheus = "0.9"
+base64ct = "=1.6.0"

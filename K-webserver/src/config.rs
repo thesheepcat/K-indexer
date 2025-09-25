@@ -1,4 +1,3 @@
-
 #[derive(Debug, Clone)]
 pub struct AppConfig {
     pub database: DatabaseConfig,
@@ -27,7 +26,7 @@ impl AppConfig {
         // Calculate default db connections as worker_threads * 3, with a minimum of 10
         let default_db_connections = std::cmp::max(worker_threads * 3, 10);
         let max_connections = args.db_max_connections.unwrap_or(default_db_connections);
-        
+
         Self {
             database: DatabaseConfig {
                 host: args.db_host.clone(),

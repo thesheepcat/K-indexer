@@ -1,5 +1,5 @@
 use tokio::sync::mpsc;
-use tracing::{info, error};
+use tracing::{error, info};
 
 pub struct NotificationQueue {
     receiver: mpsc::UnboundedReceiver<String>,
@@ -31,8 +31,11 @@ impl NotificationQueue {
     }
 
     pub async fn start(&mut self) {
-        info!("Starting notification queue with {} workers", self.worker_senders.len());
-        
+        info!(
+            "Starting notification queue with {} workers",
+            self.worker_senders.len()
+        );
+
         while let Some(transaction_id) = self.receiver.recv().await {
             self.distribute_to_worker(transaction_id).await;
         }
@@ -42,10 +45,13 @@ impl NotificationQueue {
 
     async fn distribute_to_worker(&mut self, transaction_id: String) {
         let worker_index = self.current_worker;
-        
+
         if let Some(sender) = self.worker_senders.get(worker_index) {
             if let Err(e) = sender.send(transaction_id.clone()) {
-                error!("Failed to send transaction {} to worker {}: {}", transaction_id, worker_index, e);
+                error!(
+                    "Failed to send transaction {} to worker {}: {}",
+                    transaction_id, worker_index, e
+                );
             } else {
                 //info!("Sent transaction {} to worker {}", transaction_id, worker_index);
             }

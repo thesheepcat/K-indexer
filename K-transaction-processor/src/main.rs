@@ -2,18 +2,17 @@ mod config;
 mod database;
 mod k_protocol;
 mod listener;
-mod migrations;
 mod queue;
 mod worker;
 
 use anyhow::Result;
 use clap::Parser;
 use tokio::sync::mpsc;
-use tracing::{info, error};
+use tracing::{error, info};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use config::AppConfig;
-use database::{create_pool, verify_and_setup_database};
+use database::{create_pool, KDbClient};
 use listener::NotificationListener;
 use queue::NotificationQueue;
 use worker::WorkerPool;
@@ -30,7 +29,7 @@ struct Args {
     #[arg(short = 'd', long, help = "Database name")]
     db_name: Option<String>,
 
-    #[arg(short = 'u', long, help = "Database username")]
+    #[arg(short = 'U', long, help = "Database username")]
     db_user: Option<String>,
 
     #[arg(short = 'p', long, help = "Database password")]
@@ -51,6 +50,11 @@ struct Args {
     #[arg(short = 'D', long, help = "Retry delay in milliseconds")]
     retry_delay: Option<u64>,
 
+    #[arg(long, help = "Initialize database (drops existing schema)")]
+    initialize_db: bool,
+
+    #[arg(short = 'u', long, help = "Enable automatic schema upgrades")]
+    upgrade_db: bool,
 }
 
 #[tokio::main]
@@ -58,52 +62,56 @@ async fn main() -> Result<()> {
     // Initialize tracing with default INFO level
     tracing_subscriber::registry()
         .with(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    info!("Starting Transaction Processor v{}", env!("CARGO_PKG_VERSION"));
+    info!(
+        "Starting Transaction Processor v{}",
+        env!("CARGO_PKG_VERSION")
+    );
 
     // Parse CLI arguments
     let args = Args::parse();
-    
+
     // Load configuration from CLI arguments only
     let config = AppConfig::from_args(&args);
-    info!("Configuration loaded: {} workers, channel: {}", 
-          config.workers.count, config.processing.channel_name);
-    info!("Database connection: {}:{}/{}", config.database.host, config.database.port, config.database.database);
+    info!(
+        "Configuration loaded: {} workers, channel: {}",
+        config.workers.count, config.processing.channel_name
+    );
+    info!(
+        "Database connection: {}:{}/{}",
+        config.database.host, config.database.port, config.database.database
+    );
 
     let db_pool = create_pool(&config).await?;
-    info!("Database connection pool created with {} max connections", 
-          config.database.max_connections);
-    
-    // Test the pool connection
-    match sqlx::query("SELECT 1").fetch_one(&db_pool).await {
-        Ok(_) => info!("Database pool connection test successful"),
-        Err(e) => {
-            error!("Database pool connection test failed: {}", e);
-            return Err(e.into());
-        }
-    }
+    info!(
+        "Database connection pool created with {} max connections",
+        config.database.max_connections
+    );
 
-    // Verify and setup database requirements
-    if let Err(e) = verify_and_setup_database(&db_pool).await {
-        error!("Database setup failed: {}", e);
-        return Err(e);
+    // Initialize database following Simply Kaspa Indexer pattern
+    let database = KDbClient::new(db_pool);
+
+    if args.initialize_db {
+        info!("Initializing database");
+        database.drop_schema().await.expect("Unable to drop schema");
     }
+    database
+        .create_schema(args.upgrade_db)
+        .await
+        .expect("Unable to create schema");
 
     let (notification_sender, notification_receiver) = mpsc::unbounded_channel();
 
-    let (mut notification_queue, worker_receivers) = NotificationQueue::new(
-        notification_receiver,
-        config.workers.count,
-    );
+    let (mut notification_queue, worker_receivers) =
+        NotificationQueue::new(notification_receiver, config.workers.count);
 
     let notification_listener = NotificationListener::new(config.clone(), notification_sender);
 
-    let worker_pool = WorkerPool::new(worker_receivers, db_pool, config.clone());
+    let worker_pool = WorkerPool::new(worker_receivers, database.pool().clone(), config.clone());
 
     info!("Starting all components...");
 
@@ -122,7 +130,10 @@ async fn main() -> Result<()> {
     });
 
     info!("Transaction Processor started successfully");
-    info!("Listening for notifications on channel: {}", config.processing.channel_name);
+    info!(
+        "Listening for notifications on channel: {}",
+        config.processing.channel_name
+    );
 
     tokio::select! {
         _ = listener_handle => {
