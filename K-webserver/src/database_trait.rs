@@ -118,6 +118,13 @@ pub trait DatabaseInterface: Send + Sync {
         options: QueryOptions,
     ) -> DatabaseResult<PaginatedResult<(ContentRecord, bool)>>;
 
+    // Optimized single-query method for get-notifications API with content details and blocking awareness
+    async fn get_notifications_with_content_details(
+        &self,
+        requester_pubkey: &str,
+        options: QueryOptions,
+    ) -> DatabaseResult<PaginatedResult<(ContentRecord, bool)>>;
+
     // Merged optimized single-query method for get-post-details API with blocking awareness
     async fn get_content_by_id_with_metadata_and_block_status(
         &self,

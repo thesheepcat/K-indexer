@@ -634,6 +634,105 @@ impl ApiHandlers {
         }
     }
 
+    /// GET /get-notifications?requesterPubkey={requesterPubkey}&limit={limit}&before={before}&after={after}
+    /// Fetch notifications for a user based on mentions in k_mentions table with detailed content information
+    pub async fn get_notifications_paginated(
+        &self,
+        requester_pubkey: &str,
+        limit: u32,
+        before: Option<String>,
+        after: Option<String>,
+    ) -> Result<String, String> {
+        // Validate requester public key format (66 hex characters for compressed public key)
+        if requester_pubkey.len() != 66 {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Must be 66 hex characters.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        if !requester_pubkey.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Must contain only hex characters.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        // Validate compressed public key prefix (should start with 02 or 03)
+        if !requester_pubkey.starts_with("02") && !requester_pubkey.starts_with("03") {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Compressed public key must start with 02 or 03.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        // Fetch limit + 1 to check if there are more results
+        let fetch_limit = limit + 1;
+        let options = QueryOptions {
+            limit: Some(fetch_limit as u64),
+            before,
+            after,
+            sort_descending: true,
+        };
+
+        // Use the database method to get notifications with content details
+        let notifications_result = match self
+            .db
+            .get_notifications_with_content_details(
+                requester_pubkey,
+                options,
+            )
+            .await
+        {
+            Ok(result) => result,
+            Err(err) => {
+                log_error!("Error getting notifications for user: {}", err);
+                return Err(self.create_error_response(
+                    "Internal server error during database query",
+                    "DATABASE_ERROR",
+                ));
+            }
+        };
+
+        // Convert enriched ContentRecords (posts, replies, votes) to ServerPosts with blocking awareness
+        let all_notifications: Vec<ServerPost> = notifications_result
+            .items
+            .iter()
+            .map(|(content_record, is_blocked)| match content_record {
+                ContentRecord::Post(post_record) => {
+                    ServerPost::from_enriched_k_post_record_with_block_status(
+                        &post_record,
+                        *is_blocked,
+                    )
+                }
+                ContentRecord::Reply(reply_record) => {
+                    ServerReply::from_enriched_k_reply_record_with_block_status(
+                        &reply_record,
+                        *is_blocked,
+                    )
+                }
+            })
+            .collect();
+
+        let pagination = notifications_result.pagination;
+
+        let response = PaginatedPostsResponse {
+            posts: all_notifications,
+            pagination,
+        };
+
+        match serde_json::to_string(&response) {
+            Ok(json) => Ok(json),
+            Err(err) => {
+                log_error!("Failed to serialize paginated notifications response: {}", err);
+                Err(self.create_error_response(
+                    "Internal server error during serialization",
+                    "SERIALIZATION_ERROR",
+                ))
+            }
+        }
+    }
+
     /// GET /get-post-details?id={postId}&requesterPubkey={requesterPubkey}
     /// Fetch details for a specific post or reply by its ID with voting information for the requesting user
 
