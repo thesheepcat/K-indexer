@@ -1,6 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use sqlx::{postgres::PgPoolOptions, PgPool, Row};
+use sqlx::{PgPool, Row, postgres::PgPoolOptions};
 use tracing::{info, warn};
 
 use crate::database_trait::{
@@ -958,7 +958,7 @@ impl DatabaseInterface for PostgresDbManager {
                         None => {
                             return Err(DatabaseError::QueryError(
                                 "Missing post_id for reply".to_string(),
-                            ))
+                            ));
                         }
                     };
 
@@ -985,7 +985,7 @@ impl DatabaseInterface for PostgresDbManager {
                     return Err(DatabaseError::QueryError(format!(
                         "Unknown content type: {}",
                         content_type
-                    )))
+                    )));
                 }
             };
 
@@ -1229,7 +1229,7 @@ impl DatabaseInterface for PostgresDbManager {
                 return Err(DatabaseError::QueryError(format!(
                     "Unknown content type: {}",
                     content_type
-                )))
+                )));
             }
         };
 
@@ -2227,7 +2227,8 @@ impl DatabaseInterface for PostgresDbManager {
                     user_profile_image: row.get("user_profile_image"),
                 };
 
-                notifications_with_block_status.push((ContentRecord::Post(post_record), is_blocked));
+                notifications_with_block_status
+                    .push((ContentRecord::Post(post_record), is_blocked));
             } else if content_type == "reply" {
                 let post_id: Vec<u8> = row.get("post_id");
 
@@ -2249,7 +2250,8 @@ impl DatabaseInterface for PostgresDbManager {
                     user_profile_image: row.get("user_profile_image"),
                 };
 
-                notifications_with_block_status.push((ContentRecord::Reply(reply_record), is_blocked));
+                notifications_with_block_status
+                    .push((ContentRecord::Reply(reply_record), is_blocked));
             }
         }
 
@@ -2262,23 +2264,28 @@ impl DatabaseInterface for PostgresDbManager {
 
         if !notifications_with_block_status.is_empty() {
             let first_item = &notifications_with_block_status[0];
-            let last_item = &notifications_with_block_status[notifications_with_block_status.len() - 1];
+            let last_item =
+                &notifications_with_block_status[notifications_with_block_status.len() - 1];
 
             match first_item.0 {
                 ContentRecord::Post(ref post) => {
-                    pagination.prev_cursor = Some(Self::create_compound_cursor(post.block_time, post.id));
+                    pagination.prev_cursor =
+                        Some(Self::create_compound_cursor(post.block_time, post.id));
                 }
                 ContentRecord::Reply(ref reply) => {
-                    pagination.prev_cursor = Some(Self::create_compound_cursor(reply.block_time, reply.id));
+                    pagination.prev_cursor =
+                        Some(Self::create_compound_cursor(reply.block_time, reply.id));
                 }
             }
 
             match last_item.0 {
                 ContentRecord::Post(ref post) => {
-                    pagination.next_cursor = Some(Self::create_compound_cursor(post.block_time, post.id));
+                    pagination.next_cursor =
+                        Some(Self::create_compound_cursor(post.block_time, post.id));
                 }
                 ContentRecord::Reply(ref reply) => {
-                    pagination.next_cursor = Some(Self::create_compound_cursor(reply.block_time, reply.id));
+                    pagination.next_cursor =
+                        Some(Self::create_compound_cursor(reply.block_time, reply.id));
                 }
             }
         }

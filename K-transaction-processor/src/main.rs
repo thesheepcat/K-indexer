@@ -12,7 +12,7 @@ use tracing::{error, info};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use config::AppConfig;
-use database::{create_pool, KDbClient};
+use database::{KDbClient, create_pool};
 use listener::NotificationListener;
 use queue::NotificationQueue;
 use worker::WorkerPool;

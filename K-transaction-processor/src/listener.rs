@@ -1,6 +1,6 @@
 use crate::config::AppConfig;
 use anyhow::Result;
-use sqlx::{postgres::PgListener, Error as SqlxError};
+use sqlx::{Error as SqlxError, postgres::PgListener};
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 

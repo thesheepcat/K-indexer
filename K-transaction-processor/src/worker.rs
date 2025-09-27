@@ -1,5 +1,5 @@
 use crate::config::AppConfig;
-use crate::database::{fetch_transaction, DbPool, Transaction};
+use crate::database::{DbPool, Transaction, fetch_transaction};
 use crate::k_protocol::KProtocolProcessor;
 use anyhow::Result;
 use tokio::sync::mpsc;
@@ -56,7 +56,10 @@ impl Worker {
                                 if let Err(k_err) =
                                     self.k_processor.process_k_transaction(&transaction).await
                                 {
-                                    error!("Worker {} - Error processing K protocol transaction {}: {}", self.id, transaction_id, k_err);
+                                    error!(
+                                        "Worker {} - Error processing K protocol transaction {}: {}",
+                                        self.id, transaction_id, k_err
+                                    );
                                 }
                             } else {
                                 info!(
@@ -151,7 +154,10 @@ impl Worker {
                                     if let Err(k_err) =
                                         self.k_processor.process_k_transaction(&transaction).await
                                     {
-                                        error!("Worker {} - Error processing K protocol transaction on retry {}: {}", self.id, transaction_id, k_err);
+                                        error!(
+                                            "Worker {} - Error processing K protocol transaction on retry {}: {}",
+                                            self.id, transaction_id, k_err
+                                        );
                                     }
                                 }
                             }

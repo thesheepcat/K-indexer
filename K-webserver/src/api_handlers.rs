@@ -678,10 +678,7 @@ impl ApiHandlers {
         // Use the database method to get notifications with content details
         let notifications_result = match self
             .db
-            .get_notifications_with_content_details(
-                requester_pubkey,
-                options,
-            )
+            .get_notifications_with_content_details(requester_pubkey, options)
             .await
         {
             Ok(result) => result,
@@ -724,7 +721,10 @@ impl ApiHandlers {
         match serde_json::to_string(&response) {
             Ok(json) => Ok(json),
             Err(err) => {
-                log_error!("Failed to serialize paginated notifications response: {}", err);
+                log_error!(
+                    "Failed to serialize paginated notifications response: {}",
+                    err
+                );
                 Err(self.create_error_response(
                     "Internal server error during serialization",
                     "SERIALIZATION_ERROR",
