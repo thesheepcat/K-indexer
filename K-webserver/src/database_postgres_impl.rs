@@ -2154,8 +2154,8 @@ impl DatabaseInterface for PostgresDbManager {
                     'vote' as content_type,
                     v.vote as vote_type,
                     v.block_time as vote_block_time,
-                    v.post_id as content_id,
-                    v.post_id as post_id,
+                    encode(v.post_id, 'hex') as content_id,
+                    encode(v.post_id, 'hex') as post_id,
                     -- Get the content of the post/reply being voted on
                     COALESCE(vp.base64_encoded_message, vr.base64_encoded_message, '') as voted_content
                 FROM k_mentions km
@@ -2182,14 +2182,14 @@ impl DatabaseInterface for PostgresDbManager {
                     id, transaction_id, block_time, sender_pubkey,
                     base64_encoded_message, user_nickname, user_profile_image,
                     content_type,
-                    NULL as vote_type, NULL as vote_block_time, NULL as content_id, NULL as post_id, NULL as voted_content
+                    NULL::text as vote_type, NULL::bigint as vote_block_time, NULL::text as content_id, NULL::text as post_id, NULL::text as voted_content
                 FROM notification_posts
                 UNION ALL
                 SELECT
                     id, transaction_id, block_time, sender_pubkey,
                     base64_encoded_message, user_nickname, user_profile_image,
                     content_type,
-                    NULL as vote_type, NULL as vote_block_time, NULL as content_id, NULL as post_id, NULL as voted_content
+                    NULL::text as vote_type, NULL::bigint as vote_block_time, NULL::text as content_id, NULL::text as post_id, NULL::text as voted_content
                 FROM notification_replies
                 UNION ALL
                 SELECT
