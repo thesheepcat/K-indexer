@@ -20,8 +20,8 @@ use crate::api_handlers::ApiHandlers;
 use crate::config::ServerConfig;
 use crate::database_trait::DatabaseInterface;
 use crate::models::{
-    ApiError, PaginatedPostsResponse, PaginatedRepliesResponse, PaginatedUsersResponse,
-    PostDetailsResponse, ServerUserPost,
+    ApiError, PaginatedNotificationsResponse, PaginatedPostsResponse, PaginatedRepliesResponse,
+    PaginatedUsersResponse, PostDetailsResponse, ServerUserPost,
 };
 
 #[derive(Debug, Clone)]
@@ -522,7 +522,7 @@ async fn handle_get_notifications(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(app_state): State<Arc<AppState>>,
     Query(params): Query<GetNotificationsQuery>,
-) -> Result<Json<PaginatedPostsResponse>, (StatusCode, Json<ApiError>)> {
+) -> Result<Json<PaginatedNotificationsResponse>, (StatusCode, Json<ApiError>)> {
     // Check rate limit first
     check_rate_limit(&app_state, addr).await?;
 
@@ -566,8 +566,8 @@ async fn handle_get_notifications(
         .await
     {
         Ok(response_json) => {
-            // Parse the JSON response back to PaginatedPostsResponse
-            match serde_json::from_str::<PaginatedPostsResponse>(&response_json) {
+            // Parse the JSON response back to PaginatedNotificationsResponse
+            match serde_json::from_str::<PaginatedNotificationsResponse>(&response_json) {
                 Ok(notifications_response) => Ok(Json(notifications_response)),
                 Err(err) => {
                     log_error!("Failed to parse paginated notifications response: {}", err);
