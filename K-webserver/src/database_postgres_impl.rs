@@ -1905,4 +1905,55 @@ impl DatabaseInterface for PostgresDbManager {
             pagination,
         })
     }
+
+    async fn get_notification_count(
+        &self,
+        requester_pubkey: &str,
+        cursor: Option<String>,
+    ) -> DatabaseResult<u64> {
+        let requester_pubkey_bytes = Self::decode_hex_to_bytes(requester_pubkey)?;
+
+        let count_result = if let Some(cursor_str) = cursor {
+            // If cursor is provided, count notifications since that cursor
+            if let Ok((cursor_timestamp, cursor_id)) = Self::parse_compound_cursor(&cursor_str) {
+                sqlx::query_scalar::<_, i64>(
+                    r#"
+                    SELECT COUNT(*)
+                    FROM k_mentions km
+                    WHERE km.mentioned_pubkey = $1
+                      AND (km.block_time > $2 OR (km.block_time = $2 AND km.id > $3))
+                    "#,
+                )
+                .bind(&requester_pubkey_bytes)
+                .bind(cursor_timestamp as i64)
+                .bind(cursor_id)
+                .fetch_one(&self.pool)
+                .await
+            } else {
+                return Err(DatabaseError::InvalidInput(
+                    "Invalid cursor format".to_string(),
+                ));
+            }
+        } else {
+            // If no cursor is provided, count all notifications
+            sqlx::query_scalar::<_, i64>(
+                r#"
+                SELECT COUNT(*)
+                FROM k_mentions km
+                WHERE km.mentioned_pubkey = $1
+                "#,
+            )
+            .bind(&requester_pubkey_bytes)
+            .fetch_one(&self.pool)
+            .await
+        };
+
+        match count_result {
+            Ok(count) => Ok(count as u64),
+            Err(e) => Err(DatabaseError::QueryError(format!(
+                "Failed to count notifications: {}",
+                e
+            ))),
+        }
+    }
 }

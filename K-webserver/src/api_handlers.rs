@@ -957,6 +957,71 @@ impl ApiHandlers {
         }
     }
 
+    /// GET /get-notifications-amount
+    /// Get count of notifications for a specific user, optionally with cursor
+    pub async fn get_notification_count(
+        &self,
+        requester_pubkey: &str,
+        cursor: Option<String>,
+    ) -> Result<String, String> {
+        // Validate requester public key format (66 hex characters for compressed public key)
+        if requester_pubkey.len() != 66 {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Must be 66 hex characters.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        if !requester_pubkey.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Must contain only hex characters.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        // Validate compressed public key prefix (should start with 02 or 03)
+        if !requester_pubkey.starts_with("02") && !requester_pubkey.starts_with("03") {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Compressed public key must start with 02 or 03.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        // Get notification count from database
+        match self
+            .db
+            .get_notification_count(requester_pubkey, cursor)
+            .await
+        {
+            Ok(count) => {
+                let response = serde_json::json!({
+                    "count": count
+                });
+                match serde_json::to_string(&response) {
+                    Ok(json_response) => Ok(json_response),
+                    Err(err) => {
+                        log_error!("Failed to serialize notification count response: {}", err);
+                        Err(self.create_error_response(
+                            "Internal server error during serialization",
+                            "SERIALIZATION_ERROR",
+                        ))
+                    }
+                }
+            }
+            Err(err) => {
+                log_error!(
+                    "Database error while getting notification count for user {}: {}",
+                    requester_pubkey,
+                    err
+                );
+                Err(self.create_error_response(
+                    "Internal server error during database query",
+                    "DATABASE_ERROR",
+                ))
+            }
+        }
+    }
+
     /// Create a standardized error response
     fn create_error_response(&self, message: &str, code: &str) -> String {
         let error = ApiError {
