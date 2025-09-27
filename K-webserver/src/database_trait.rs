@@ -124,4 +124,11 @@ pub trait DatabaseInterface: Send + Sync {
         content_id: &str,
         requester_pubkey: &str,
     ) -> DatabaseResult<Option<(ContentRecord, bool)>>;
+
+    // Get count of notifications (mentions) for a user
+    async fn get_notification_count(
+        &self,
+        requester_pubkey: &str,
+        cursor: Option<String>,
+    ) -> DatabaseResult<u64>;
 }
