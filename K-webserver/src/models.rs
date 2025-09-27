@@ -184,6 +184,12 @@ pub struct PaginatedPostsResponse {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct PaginatedNotificationsResponse {
+    pub posts: Vec<NotificationPost>,
+    pub pagination: PaginationMetadata,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ServerUserPost {
     pub id: String,
     #[serde(rename = "userPublicKey")]
@@ -297,6 +303,41 @@ impl ServerPost {
 }
 
 pub type ServerReply = ServerPost;
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationPost {
+    pub id: String,
+    pub user_public_key: String,
+    pub post_content: String,
+    pub timestamp: u64,
+    pub user_nickname: Option<String>,
+    pub user_profile_image: Option<String>,
+}
+
+impl NotificationPost {
+    pub fn from_k_post_record(record: &KPostRecord) -> Self {
+        Self {
+            id: record.transaction_id.clone(),
+            user_public_key: record.sender_pubkey.clone(),
+            post_content: record.base64_encoded_message.clone(),
+            timestamp: record.block_time,
+            user_nickname: record.user_nickname.clone(),
+            user_profile_image: record.user_profile_image.clone(),
+        }
+    }
+
+    pub fn from_k_reply_record(record: &KReplyRecord) -> Self {
+        Self {
+            id: record.transaction_id.clone(),
+            user_public_key: record.sender_pubkey.clone(),
+            post_content: record.base64_encoded_message.clone(),
+            timestamp: record.block_time,
+            user_nickname: record.user_nickname.clone(),
+            user_profile_image: record.user_profile_image.clone(),
+        }
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RepliesResponse {
