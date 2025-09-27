@@ -1,9 +1,9 @@
 use axum::{
+    Router,
     extract::{ConnectInfo, Query, State},
     http::StatusCode,
     response::Json,
     routing::get,
-    Router,
 };
 use axum_prometheus::PrometheusMetricLayer;
 use serde::Deserialize;
@@ -562,12 +562,7 @@ async fn handle_get_notifications(
     // Use the API handler to get paginated notifications for the user
     match app_state
         .api_handlers
-        .get_notifications_paginated(
-            &requester_pubkey,
-            limit,
-            params.before,
-            params.after,
-        )
+        .get_notifications_paginated(&requester_pubkey, limit, params.before, params.after)
         .await
     {
         Ok(response_json) => {

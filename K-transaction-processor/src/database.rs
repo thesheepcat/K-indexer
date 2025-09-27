@@ -1,6 +1,6 @@
 use crate::config::AppConfig;
 use anyhow::Result;
-use sqlx::{postgres::PgPoolOptions, PgPool, Row};
+use sqlx::{PgPool, Row, postgres::PgPoolOptions};
 use tracing::{error, info, warn};
 
 pub type DbPool = PgPool;
@@ -35,10 +35,14 @@ impl KDbClient {
             .get::<bool, _>(0);
 
             if table_exists {
-                info!("✓ Transactions table found - proceeding with K-transaction-processor schema setup");
+                info!(
+                    "✓ Transactions table found - proceeding with K-transaction-processor schema setup"
+                );
                 return Ok(());
             } else {
-                warn!("⚠️  Transactions table not found - K-transaction-processor requires the main Kaspa indexer to be running first");
+                warn!(
+                    "⚠️  Transactions table not found - K-transaction-processor requires the main Kaspa indexer to be running first"
+                );
                 warn!("   Waiting 10 seconds before checking again...");
                 tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
             }
@@ -84,7 +88,9 @@ impl KDbClient {
 
                         // v1 -> v2: Add signature deduplication and k_blocks table
                         if current_version == 1 {
-                            info!("Applying migration v1 -> v2 (signature deduplication and blocking)");
+                            info!(
+                                "Applying migration v1 -> v2 (signature deduplication and blocking)"
+                            );
                             execute_ddl(MIGRATION_V1_TO_V2_SQL, &self.pool).await?;
                             current_version = 2;
                             info!("Migration v1 -> v2 completed successfully");
@@ -103,7 +109,8 @@ impl KDbClient {
                 } else if version > SCHEMA_VERSION {
                     return Err(anyhow::anyhow!(
                         "Found newer & unsupported schema version {}. Current supported version is {}",
-                        version, SCHEMA_VERSION
+                        version,
+                        SCHEMA_VERSION
                     ));
                 } else {
                     info!("Schema version {} is up to date", version);

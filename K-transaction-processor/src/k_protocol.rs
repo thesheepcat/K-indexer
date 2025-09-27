@@ -5,7 +5,7 @@ use serde_json;
 use tracing::{error, info, warn};
 
 // Kaspa message signature verification imports (from main K-indexer)
-use kaspa_wallet_core::message::{verify_message, PersonalMessage};
+use kaspa_wallet_core::message::{PersonalMessage, verify_message};
 use secp256k1::XOnlyPublicKey;
 
 // K Protocol Data Models (ported from main K-indexer)
