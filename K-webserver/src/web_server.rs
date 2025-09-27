@@ -159,15 +159,17 @@ impl WebServer {
             .route("/get-users", get(handle_get_users))
             .route("/get-replies", get(handle_get_replies))
             .route("/get-mentions", get(handle_get_mentions))
-            .route("/get-post-details", get(handle_get_post_details))
-            .route("/get-user-details", get(handle_get_user_details))
-            .route("/get-blocked-users", get(handle_get_blocked_users))
             .route(
                 "/get-notifications-count",
                 get(handle_get_notifications_count),
             )
             .route("/get-notifications", get(handle_get_notifications))
-            .layer(prometheus_layer(RequestBodyLimitLayer::new(1024 * 1024)) // 1MB limit
+            .route("/get-post-details", get(handle_get_post_details))
+            .route("/get-user-details", get(handle_get_user_details))
+            .route("/get-blocked-users", get(handle_get_blocked_users))
+            .layer(prometheus_layer)
+            .layer(TimeoutLayer::new(timeout_duration))
+            .layer(RequestBodyLimitLayer::new(1024 * 1024)) // 1MB limit
             .layer(
                 CorsLayer::new()
                     .allow_origin(Any)
