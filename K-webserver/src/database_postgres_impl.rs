@@ -1956,4 +1956,336 @@ impl DatabaseInterface for PostgresDbManager {
             ))),
         }
     }
+
+    async fn get_notifications_with_content_details(
+        &self,
+        requester_pubkey: &str,
+        options: QueryOptions,
+    ) -> DatabaseResult<PaginatedResult<(ContentRecord, bool)>> {
+        let requester_pubkey_bytes = Self::decode_hex_to_bytes(requester_pubkey)?;
+        let limit = options.limit.unwrap_or(20) as i64;
+        let offset_limit = limit + 1; // Get one extra to check if there are more
+
+        let mut bind_count = 1;
+        let mut post_cursor_conditions = String::new();
+        let mut reply_cursor_conditions = String::new();
+
+        // Add cursor logic for posts
+        if let Some(before_cursor) = &options.before {
+            if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
+                bind_count += 2;
+                post_cursor_conditions.push_str(&format!(
+                    " AND (p.block_time < ${} OR (p.block_time = ${} AND p.id < ${}))",
+                    bind_count - 1,
+                    bind_count - 1,
+                    bind_count
+                ));
+                reply_cursor_conditions.push_str(&format!(
+                    " AND (r.block_time < ${} OR (r.block_time = ${} AND r.id < ${}))",
+                    bind_count - 1,
+                    bind_count - 1,
+                    bind_count
+                ));
+            }
+        }
+
+        if let Some(after_cursor) = &options.after {
+            if let Ok((after_timestamp, after_id)) = Self::parse_compound_cursor(after_cursor) {
+                bind_count += 2;
+                post_cursor_conditions.push_str(&format!(
+                    " AND (p.block_time > ${} OR (p.block_time = ${} AND p.id > ${}))",
+                    bind_count - 1,
+                    bind_count - 1,
+                    bind_count
+                ));
+                reply_cursor_conditions.push_str(&format!(
+                    " AND (r.block_time > ${} OR (r.block_time = ${} AND r.id > ${}))",
+                    bind_count - 1,
+                    bind_count - 1,
+                    bind_count
+                ));
+            }
+        }
+
+        let order_clause = if options.sort_descending {
+            "ORDER BY block_time DESC, id DESC"
+        } else {
+            "ORDER BY block_time ASC, id ASC"
+        };
+
+        let final_order_clause = format!("{} LIMIT ${}", order_clause, bind_count + 1);
+        let requester_param = bind_count + 2;
+
+        // Combined query to get notifications with detailed content information
+        let query = format!(
+            r#"
+            WITH notification_posts AS (
+                SELECT DISTINCT
+                    p.id, p.transaction_id, p.block_time, p.sender_pubkey,
+                    p.sender_signature, p.base64_encoded_message,
+
+                    -- Get mentioned pubkeys efficiently with subquery
+                    COALESCE(
+                        ARRAY(
+                            SELECT encode(m.mentioned_pubkey, 'hex')
+                            FROM k_mentions m
+                            WHERE m.content_id = p.transaction_id AND m.content_type = 'post'
+                        ),
+                        '{{}}'::text[]
+                    ) as mentioned_pubkeys,
+
+                    -- Vote counts and user voting status for posts
+                    COALESCE(v.up_votes_count, 0) as up_votes_count,
+                    COALESCE(v.down_votes_count, 0) as down_votes_count,
+                    COALESCE(v.user_upvoted, false) as is_upvoted,
+                    COALESCE(v.user_downvoted, false) as is_downvoted,
+
+                    -- Reply counts
+                    COALESCE(reply_counts.replies_count, 0) as replies_count,
+
+                    -- User profile lookup
+                    COALESCE(b.base64_encoded_nickname, '') as user_nickname,
+                    b.base64_encoded_profile_image as user_profile_image,
+
+                    -- Blocking status check
+                    CASE
+                        WHEN kb.blocked_user_pubkey IS NOT NULL THEN true
+                        ELSE false
+                    END as is_blocked,
+
+                    'post' as content_type
+                FROM k_mentions km
+                JOIN k_posts p ON km.content_id = p.transaction_id AND km.content_type = 'post'
+                LEFT JOIN (
+                    SELECT
+                        post_id,
+                        COUNT(*) FILTER (WHERE vote = 'upvote') as up_votes_count,
+                        COUNT(*) FILTER (WHERE vote = 'downvote') as down_votes_count,
+                        bool_or(vote = 'upvote' AND sender_pubkey = ${requester_param}) as user_upvoted,
+                        bool_or(vote = 'downvote' AND sender_pubkey = ${requester_param}) as user_downvoted
+                    FROM k_votes
+                    GROUP BY post_id
+                ) v ON p.transaction_id = v.post_id
+                LEFT JOIN (
+                    SELECT post_id, COUNT(*) as replies_count
+                    FROM k_replies
+                    GROUP BY post_id
+                ) reply_counts ON p.transaction_id = reply_counts.post_id
+                LEFT JOIN LATERAL (
+                    SELECT base64_encoded_nickname, base64_encoded_profile_image
+                    FROM k_broadcasts b
+                    WHERE b.sender_pubkey = p.sender_pubkey
+                    ORDER BY b.block_time DESC
+                    LIMIT 1
+                ) b ON true
+                LEFT JOIN k_blocks kb ON kb.sender_pubkey = ${requester_param} AND kb.blocked_user_pubkey = p.sender_pubkey
+                WHERE km.mentioned_pubkey = $1
+                {post_cursor_conditions}
+            ),
+            notification_replies AS (
+                SELECT DISTINCT
+                    r.id, r.transaction_id, r.block_time, r.sender_pubkey,
+                    r.sender_signature, r.post_id, r.base64_encoded_message,
+
+                    -- Get mentioned pubkeys efficiently with subquery
+                    COALESCE(
+                        ARRAY(
+                            SELECT encode(m.mentioned_pubkey, 'hex')
+                            FROM k_mentions m
+                            WHERE m.content_id = r.transaction_id AND m.content_type = 'reply'
+                        ),
+                        '{{}}'::text[]
+                    ) as mentioned_pubkeys,
+
+                    -- Reply counts and vote counts for replies
+                    COALESCE(reply_counts.replies_count, 0) as replies_count,
+                    COALESCE(v.up_votes_count, 0) as up_votes_count,
+                    COALESCE(v.down_votes_count, 0) as down_votes_count,
+                    COALESCE(v.user_upvoted, false) as is_upvoted,
+                    COALESCE(v.user_downvoted, false) as is_downvoted,
+
+                    -- User profile lookup
+                    COALESCE(b.base64_encoded_nickname, '') as user_nickname,
+                    b.base64_encoded_profile_image as user_profile_image,
+
+                    -- Blocking status check
+                    CASE
+                        WHEN kb.blocked_user_pubkey IS NOT NULL THEN true
+                        ELSE false
+                    END as is_blocked,
+
+                    'reply' as content_type
+                FROM k_mentions km
+                JOIN k_replies r ON km.content_id = r.transaction_id AND km.content_type = 'reply'
+                LEFT JOIN (
+                    SELECT
+                        post_id,
+                        COUNT(*) FILTER (WHERE vote = 'upvote') as up_votes_count,
+                        COUNT(*) FILTER (WHERE vote = 'downvote') as down_votes_count,
+                        bool_or(vote = 'upvote' AND sender_pubkey = ${requester_param}) as user_upvoted,
+                        bool_or(vote = 'downvote' AND sender_pubkey = ${requester_param}) as user_downvoted
+                    FROM k_votes
+                    GROUP BY post_id
+                ) v ON r.transaction_id = v.post_id
+                LEFT JOIN (
+                    SELECT post_id, COUNT(*) as replies_count
+                    FROM k_replies rcount
+                    WHERE rcount.post_id = r.post_id
+                    GROUP BY post_id
+                ) reply_counts ON r.post_id = reply_counts.post_id
+                LEFT JOIN LATERAL (
+                    SELECT base64_encoded_nickname, base64_encoded_profile_image
+                    FROM k_broadcasts b
+                    WHERE b.sender_pubkey = r.sender_pubkey
+                    ORDER BY b.block_time DESC
+                    LIMIT 1
+                ) b ON true
+                LEFT JOIN k_blocks kb ON kb.sender_pubkey = ${requester_param} AND kb.blocked_user_pubkey = r.sender_pubkey
+                WHERE km.mentioned_pubkey = $1
+                {reply_cursor_conditions}
+            ),
+            all_notifications AS (
+                SELECT
+                    id, transaction_id, block_time, sender_pubkey, sender_signature,
+                    base64_encoded_message, mentioned_pubkeys, up_votes_count, down_votes_count,
+                    is_upvoted, is_downvoted, replies_count, user_nickname, user_profile_image,
+                    is_blocked, content_type, null::bytea as post_id
+                FROM notification_posts
+                UNION ALL
+                SELECT
+                    id, transaction_id, block_time, sender_pubkey, sender_signature,
+                    base64_encoded_message, mentioned_pubkeys, up_votes_count, down_votes_count,
+                    is_upvoted, is_downvoted, replies_count, user_nickname, user_profile_image,
+                    is_blocked, content_type, post_id
+                FROM notification_replies
+            )
+            SELECT * FROM all_notifications
+            {final_order_clause}
+            "#,
+            post_cursor_conditions = post_cursor_conditions,
+            reply_cursor_conditions = reply_cursor_conditions,
+            final_order_clause = final_order_clause,
+            requester_param = requester_param
+        );
+
+        // Build query with parameter binding
+        let mut query_builder = sqlx::query(&query).bind(&requester_pubkey_bytes);
+
+        // Add cursor parameters if present
+        if let Some(before_cursor) = &options.before {
+            if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
+                query_builder = query_builder.bind(before_timestamp as i64).bind(before_id);
+            }
+        }
+
+        if let Some(after_cursor) = &options.after {
+            if let Ok((after_timestamp, after_id)) = Self::parse_compound_cursor(after_cursor) {
+                query_builder = query_builder.bind(after_timestamp as i64).bind(after_id);
+            }
+        }
+
+        query_builder = query_builder
+            .bind(offset_limit)
+            .bind(&requester_pubkey_bytes);
+
+        let rows = query_builder
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
+
+        let has_more = rows.len() > limit as usize;
+        let actual_items = if has_more {
+            rows.into_iter().take(limit as usize).collect::<Vec<_>>()
+        } else {
+            rows.into_iter().collect::<Vec<_>>()
+        };
+
+        let mut notifications_with_block_status = Vec::new();
+        for row in actual_items {
+            let transaction_id: Vec<u8> = row.get("transaction_id");
+            let sender_pubkey: Vec<u8> = row.get("sender_pubkey");
+            let sender_signature: Vec<u8> = row.get("sender_signature");
+            let mentioned_pubkeys_array: Vec<String> = row.get("mentioned_pubkeys");
+            let is_blocked: bool = row.get("is_blocked");
+            let content_type: String = row.get("content_type");
+
+            if content_type == "post" {
+                let post_record = KPostRecord {
+                    id: row.get::<i64, _>("id"),
+                    transaction_id: Self::encode_bytes_to_hex(&transaction_id),
+                    block_time: row.get::<i64, _>("block_time") as u64,
+                    sender_pubkey: Self::encode_bytes_to_hex(&sender_pubkey),
+                    sender_signature: Self::encode_bytes_to_hex(&sender_signature),
+                    base64_encoded_message: row.get("base64_encoded_message"),
+                    mentioned_pubkeys: mentioned_pubkeys_array,
+                    up_votes_count: Some(row.get::<i64, _>("up_votes_count") as u64),
+                    down_votes_count: Some(row.get::<i64, _>("down_votes_count") as u64),
+                    is_upvoted: Some(row.get("is_upvoted")),
+                    is_downvoted: Some(row.get("is_downvoted")),
+                    replies_count: Some(row.get::<i64, _>("replies_count") as u64),
+                    user_nickname: Some(row.get("user_nickname")),
+                    user_profile_image: row.get("user_profile_image"),
+                };
+
+                notifications_with_block_status.push((ContentRecord::Post(post_record), is_blocked));
+            } else if content_type == "reply" {
+                let post_id: Vec<u8> = row.get("post_id");
+
+                let reply_record = KReplyRecord {
+                    id: row.get::<i64, _>("id"),
+                    transaction_id: Self::encode_bytes_to_hex(&transaction_id),
+                    block_time: row.get::<i64, _>("block_time") as u64,
+                    sender_pubkey: Self::encode_bytes_to_hex(&sender_pubkey),
+                    sender_signature: Self::encode_bytes_to_hex(&sender_signature),
+                    post_id: Self::encode_bytes_to_hex(&post_id),
+                    base64_encoded_message: row.get("base64_encoded_message"),
+                    mentioned_pubkeys: mentioned_pubkeys_array,
+                    replies_count: Some(row.get::<i64, _>("replies_count") as u64),
+                    up_votes_count: Some(row.get::<i64, _>("up_votes_count") as u64),
+                    down_votes_count: Some(row.get::<i64, _>("down_votes_count") as u64),
+                    is_upvoted: Some(row.get("is_upvoted")),
+                    is_downvoted: Some(row.get("is_downvoted")),
+                    user_nickname: Some(row.get("user_nickname")),
+                    user_profile_image: row.get("user_profile_image"),
+                };
+
+                notifications_with_block_status.push((ContentRecord::Reply(reply_record), is_blocked));
+            }
+        }
+
+        // Generate pagination info
+        let mut pagination = PaginationMetadata {
+            has_more,
+            next_cursor: None,
+            prev_cursor: None,
+        };
+
+        if !notifications_with_block_status.is_empty() {
+            let first_item = &notifications_with_block_status[0];
+            let last_item = &notifications_with_block_status[notifications_with_block_status.len() - 1];
+
+            match first_item.0 {
+                ContentRecord::Post(ref post) => {
+                    pagination.prev_cursor = Some(Self::create_compound_cursor(post.block_time, post.id));
+                }
+                ContentRecord::Reply(ref reply) => {
+                    pagination.prev_cursor = Some(Self::create_compound_cursor(reply.block_time, reply.id));
+                }
+            }
+
+            match last_item.0 {
+                ContentRecord::Post(ref post) => {
+                    pagination.next_cursor = Some(Self::create_compound_cursor(post.block_time, post.id));
+                }
+                ContentRecord::Reply(ref reply) => {
+                    pagination.next_cursor = Some(Self::create_compound_cursor(reply.block_time, reply.id));
+                }
+            }
+        }
+
+        Ok(PaginatedResult {
+            items: notifications_with_block_status,
+            pagination,
+        })
+    }
 }
