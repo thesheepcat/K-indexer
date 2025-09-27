@@ -1,5 +1,6 @@
 use crate::models::{
-    ContentRecord, KBroadcastRecord, KPostRecord, KReplyRecord, PaginationMetadata,
+    ContentRecord, KBroadcastRecord, KPostRecord, KReplyRecord, NotificationContentRecord,
+    PaginationMetadata,
 };
 use async_trait::async_trait;
 use std::result::Result as StdResult;
@@ -123,7 +124,7 @@ pub trait DatabaseInterface: Send + Sync {
         &self,
         requester_pubkey: &str,
         options: QueryOptions,
-    ) -> DatabaseResult<PaginatedResult<ContentRecord>>;
+    ) -> DatabaseResult<PaginatedResult<NotificationContentRecord>>;
 
     // Merged optimized single-query method for get-post-details API with blocking awareness
     async fn get_content_by_id_with_metadata_and_block_status(

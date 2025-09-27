@@ -7,7 +7,8 @@ use crate::database_trait::{
     DatabaseError, DatabaseInterface, DatabaseResult, PaginatedResult, QueryOptions,
 };
 use crate::models::{
-    ContentRecord, KBroadcastRecord, KPostRecord, KReplyRecord, KVoteRecord, PaginationMetadata,
+    ContentRecord, KBroadcastRecord, KPostRecord, KReplyRecord, KVoteRecord,
+    NotificationContentRecord, PaginationMetadata,
 };
 
 pub struct PostgresDbManager {
@@ -2019,7 +2020,7 @@ impl DatabaseInterface for PostgresDbManager {
         &self,
         requester_pubkey: &str,
         options: QueryOptions,
-    ) -> DatabaseResult<PaginatedResult<ContentRecord>> {
+    ) -> DatabaseResult<PaginatedResult<NotificationContentRecord>> {
         let requester_pubkey_bytes = Self::decode_hex_to_bytes(requester_pubkey)?;
         let limit = options.limit.unwrap_or(20) as i64;
         let offset_limit = limit + 1; // Get one extra to check if there are more
@@ -2094,6 +2095,7 @@ impl DatabaseInterface for PostgresDbManager {
                 SELECT DISTINCT
                     p.id, p.transaction_id, km.block_time, p.sender_pubkey,
                     p.base64_encoded_message,
+                    km.id as mention_id,
 
                     -- User profile lookup
                     COALESCE(b.base64_encoded_nickname, '') as user_nickname,
@@ -2120,6 +2122,7 @@ impl DatabaseInterface for PostgresDbManager {
                 SELECT DISTINCT
                     r.id, r.transaction_id, km.block_time, r.sender_pubkey,
                     r.base64_encoded_message,
+                    km.id as mention_id,
 
                     -- User profile lookup
                     COALESCE(b.base64_encoded_nickname, '') as user_nickname,
@@ -2146,6 +2149,7 @@ impl DatabaseInterface for PostgresDbManager {
                 SELECT DISTINCT
                     v.id, v.transaction_id, km.block_time, v.sender_pubkey,
                     '' as base64_encoded_message, -- Votes don't have content
+                    km.id as mention_id,
 
                     -- User profile lookup for voter
                     COALESCE(b.base64_encoded_nickname, '') as user_nickname,
@@ -2180,21 +2184,21 @@ impl DatabaseInterface for PostgresDbManager {
             all_notifications AS (
                 SELECT
                     id, transaction_id, block_time, sender_pubkey,
-                    base64_encoded_message, user_nickname, user_profile_image,
+                    base64_encoded_message, mention_id, user_nickname, user_profile_image,
                     content_type,
                     NULL::text as vote_type, NULL::bigint as vote_block_time, NULL::text as content_id, NULL::text as post_id, NULL::text as voted_content
                 FROM notification_posts
                 UNION ALL
                 SELECT
                     id, transaction_id, block_time, sender_pubkey,
-                    base64_encoded_message, user_nickname, user_profile_image,
+                    base64_encoded_message, mention_id, user_nickname, user_profile_image,
                     content_type,
                     NULL::text as vote_type, NULL::bigint as vote_block_time, NULL::text as content_id, NULL::text as post_id, NULL::text as voted_content
                 FROM notification_replies
                 UNION ALL
                 SELECT
                     id, transaction_id, block_time, sender_pubkey,
-                    base64_encoded_message, user_nickname, user_profile_image,
+                    base64_encoded_message, mention_id, user_nickname, user_profile_image,
                     content_type,
                     vote_type, vote_block_time, content_id, post_id, voted_content
                 FROM notification_votes
@@ -2246,6 +2250,8 @@ impl DatabaseInterface for PostgresDbManager {
             let transaction_id: Vec<u8> = row.get("transaction_id");
             let sender_pubkey: Vec<u8> = row.get("sender_pubkey");
             let content_type: String = row.get("content_type");
+            let mention_id: i64 = row.get("mention_id");
+            let block_time: i64 = row.get("block_time");
 
             if content_type == "post" {
                 let post_record = KPostRecord {
@@ -2265,7 +2271,11 @@ impl DatabaseInterface for PostgresDbManager {
                     user_profile_image: row.get("user_profile_image"),
                 };
 
-                notifications.push(ContentRecord::Post(post_record));
+                notifications.push(NotificationContentRecord {
+                    content: ContentRecord::Post(post_record),
+                    mention_id,
+                    mention_block_time: block_time as u64,
+                });
             } else if content_type == "reply" {
                 let reply_record = KReplyRecord {
                     id: row.get::<i64, _>("id"),
@@ -2285,7 +2295,11 @@ impl DatabaseInterface for PostgresDbManager {
                     user_profile_image: row.get("user_profile_image"),
                 };
 
-                notifications.push(ContentRecord::Reply(reply_record));
+                notifications.push(NotificationContentRecord {
+                    content: ContentRecord::Reply(reply_record),
+                    mention_id,
+                    mention_block_time: block_time as u64,
+                });
             } else if content_type == "vote" {
                 let vote_record = KVoteRecord {
                     id: row.get::<i64, _>("id"),
@@ -2305,7 +2319,11 @@ impl DatabaseInterface for PostgresDbManager {
                     user_profile_image: row.get("user_profile_image"),
                 };
 
-                notifications.push(ContentRecord::Vote(vote_record));
+                notifications.push(NotificationContentRecord {
+                    content: ContentRecord::Vote(vote_record),
+                    mention_id,
+                    mention_block_time: block_time as u64,
+                });
             }
         }
 
@@ -2320,35 +2338,16 @@ impl DatabaseInterface for PostgresDbManager {
             let first_item = &notifications[0];
             let last_item = &notifications[notifications.len() - 1];
 
-            match first_item {
-                ContentRecord::Post(post) => {
-                    pagination.prev_cursor =
-                        Some(Self::create_compound_cursor(post.block_time, post.id));
-                }
-                ContentRecord::Reply(reply) => {
-                    pagination.prev_cursor =
-                        Some(Self::create_compound_cursor(reply.block_time, reply.id));
-                }
-                ContentRecord::Vote(vote) => {
-                    pagination.prev_cursor =
-                        Some(Self::create_compound_cursor(vote.block_time, vote.id));
-                }
-            }
+            // Use mention data for cursor generation
+            pagination.prev_cursor = Some(Self::create_compound_cursor(
+                first_item.mention_block_time,
+                first_item.mention_id,
+            ));
 
-            match last_item {
-                ContentRecord::Post(post) => {
-                    pagination.next_cursor =
-                        Some(Self::create_compound_cursor(post.block_time, post.id));
-                }
-                ContentRecord::Reply(reply) => {
-                    pagination.next_cursor =
-                        Some(Self::create_compound_cursor(reply.block_time, reply.id));
-                }
-                ContentRecord::Vote(vote) => {
-                    pagination.next_cursor =
-                        Some(Self::create_compound_cursor(vote.block_time, vote.id));
-                }
-            }
+            pagination.next_cursor = Some(Self::create_compound_cursor(
+                last_item.mention_block_time,
+                last_item.mention_id,
+            ));
         }
 
         Ok(PaginatedResult {
