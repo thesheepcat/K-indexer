@@ -127,7 +127,7 @@ struct GetBlockedUsersQuery {
 struct GetNotificationsCountQuery {
     #[serde(rename = "requesterPubkey")]
     requester_pubkey: Option<String>,
-    cursor: Option<String>,
+    after: Option<String>,
 }
 
 impl WebServer {
@@ -1110,7 +1110,7 @@ async fn handle_get_notifications_count(
     // Use the API handler to get notification count
     match app_state
         .api_handlers
-        .get_notification_count(&requester_pubkey, params.cursor)
+        .get_notification_count(&requester_pubkey, params.after)
         .await
     {
         Ok(response_json) => {

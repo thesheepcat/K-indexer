@@ -191,7 +191,7 @@ pub struct PaginatedPostsResponse {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PaginatedNotificationsResponse {
-    pub posts: Vec<NotificationPost>,
+    pub notifications: Vec<NotificationPost>,
     pub pagination: PaginationMetadata,
 }
 
@@ -320,6 +320,7 @@ pub struct NotificationPost {
     pub user_nickname: Option<String>,
     pub user_profile_image: Option<String>,
     pub content_type: String, // "post", "reply", or "vote" from k_mentions table
+    pub cursor: String,       // Compound cursor combining block_time and k_mentions.id
     // Vote-specific fields
     pub vote_type: Option<String>,       // "upvote" or "downvote"
     pub mention_block_time: Option<u64>, // block_time from k_mentions table
@@ -338,6 +339,7 @@ impl NotificationPost {
             user_nickname: record.user_nickname.clone(),
             user_profile_image: record.user_profile_image.clone(),
             content_type: "post".to_string(),
+            cursor: format!("{}_{}", record.block_time, record.id),
             vote_type: None,
             mention_block_time: None,
             content_id: None,
@@ -355,6 +357,7 @@ impl NotificationPost {
             user_nickname: record.user_nickname.clone(),
             user_profile_image: record.user_profile_image.clone(),
             content_type: "reply".to_string(),
+            cursor: format!("{}_{}", record.block_time, record.id),
             vote_type: None,
             mention_block_time: None,
             content_id: None,
@@ -378,6 +381,7 @@ impl NotificationPost {
             user_nickname,
             user_profile_image,
             content_type: "vote".to_string(),
+            cursor: format!("{}_{}", vote_record.block_time, vote_record.id),
             vote_type: Some(vote_record.vote.clone()),
             mention_block_time: Some(mention_block_time), // Same as timestamp now
             content_id: Some(vote_record.post_id.clone()),

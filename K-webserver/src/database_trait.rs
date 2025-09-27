@@ -136,6 +136,6 @@ pub trait DatabaseInterface: Send + Sync {
     async fn get_notification_count(
         &self,
         requester_pubkey: &str,
-        cursor: Option<String>,
+        after: Option<String>,
     ) -> DatabaseResult<u64>;
 }
