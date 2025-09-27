@@ -1911,12 +1911,12 @@ impl DatabaseInterface for PostgresDbManager {
     async fn get_notification_count(
         &self,
         requester_pubkey: &str,
-        cursor: Option<String>,
+        after: Option<String>,
     ) -> DatabaseResult<u64> {
         let requester_pubkey_bytes = Self::decode_hex_to_bytes(requester_pubkey)?;
 
-        let count_result = if let Some(cursor_str) = cursor {
-            // If cursor is provided, count notifications since that cursor (excluding blocked users)
+        let count_result = if let Some(cursor_str) = after {
+            // If after cursor is provided, count notifications since that cursor (excluding blocked users)
             if let Ok((cursor_timestamp, cursor_id)) = Self::parse_compound_cursor(&cursor_str) {
                 sqlx::query_scalar::<_, i64>(
                     r#"

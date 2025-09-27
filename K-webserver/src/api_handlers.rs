@@ -1112,7 +1112,7 @@ impl ApiHandlers {
     pub async fn get_notification_count(
         &self,
         requester_pubkey: &str,
-        cursor: Option<String>,
+        after: Option<String>,
     ) -> Result<String, String> {
         // Validate requester public key format (66 hex characters for compressed public key)
         if requester_pubkey.len() != 66 {
@@ -1140,7 +1140,7 @@ impl ApiHandlers {
         // Get notification count from database
         match self
             .db
-            .get_notification_count(requester_pubkey, cursor)
+            .get_notification_count(requester_pubkey, after)
             .await
         {
             Ok(count) => {
