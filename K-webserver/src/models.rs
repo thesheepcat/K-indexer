@@ -134,6 +134,14 @@ pub enum ContentRecord {
     Vote(KVoteRecord),
 }
 
+// Content record with mention metadata for notifications
+#[derive(Debug, Clone)]
+pub struct NotificationContentRecord {
+    pub content: ContentRecord,
+    pub mention_id: i64,
+    pub mention_block_time: u64,
+}
+
 // API Response models
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ServerPost {
@@ -348,6 +356,28 @@ impl NotificationPost {
         }
     }
 
+    pub fn from_k_post_record_with_mention_cursor(
+        record: &KPostRecord,
+        mention_id: i64,
+        mention_block_time: u64,
+    ) -> Self {
+        Self {
+            id: record.transaction_id.clone(),
+            user_public_key: record.sender_pubkey.clone(),
+            post_content: record.base64_encoded_message.clone(),
+            timestamp: mention_block_time,
+            user_nickname: record.user_nickname.clone(),
+            user_profile_image: record.user_profile_image.clone(),
+            content_type: "post".to_string(),
+            cursor: format!("{}_{}", mention_block_time, mention_id),
+            vote_type: None,
+            mention_block_time: None,
+            content_id: None,
+            post_id: None,
+            voted_content: None,
+        }
+    }
+
     pub fn from_k_reply_record(record: &KReplyRecord) -> Self {
         Self {
             id: record.transaction_id.clone(),
@@ -358,6 +388,28 @@ impl NotificationPost {
             user_profile_image: record.user_profile_image.clone(),
             content_type: "reply".to_string(),
             cursor: format!("{}_{}", record.block_time, record.id),
+            vote_type: None,
+            mention_block_time: None,
+            content_id: None,
+            post_id: None,
+            voted_content: None,
+        }
+    }
+
+    pub fn from_k_reply_record_with_mention_cursor(
+        record: &KReplyRecord,
+        mention_id: i64,
+        mention_block_time: u64,
+    ) -> Self {
+        Self {
+            id: record.transaction_id.clone(),
+            user_public_key: record.sender_pubkey.clone(),
+            post_content: record.base64_encoded_message.clone(),
+            timestamp: mention_block_time,
+            user_nickname: record.user_nickname.clone(),
+            user_profile_image: record.user_profile_image.clone(),
+            content_type: "reply".to_string(),
+            cursor: format!("{}_{}", mention_block_time, mention_id),
             vote_type: None,
             mention_block_time: None,
             content_id: None,
@@ -384,6 +436,31 @@ impl NotificationPost {
             cursor: format!("{}_{}", vote_record.block_time, vote_record.id),
             vote_type: Some(vote_record.vote.clone()),
             mention_block_time: Some(mention_block_time), // Same as timestamp now
+            content_id: Some(vote_record.post_id.clone()),
+            post_id: Some(vote_record.post_id.clone()),
+            voted_content: Some(voted_content),
+        }
+    }
+
+    pub fn from_k_vote_record_with_mention_cursor(
+        vote_record: &KVoteRecord,
+        mention_id: i64,
+        mention_block_time: u64,
+        voted_content: String,
+        user_nickname: Option<String>,
+        user_profile_image: Option<String>,
+    ) -> Self {
+        Self {
+            id: vote_record.transaction_id.clone(),
+            user_public_key: vote_record.sender_pubkey.clone(),
+            post_content: String::new(), // Votes don't have content
+            timestamp: mention_block_time,
+            user_nickname,
+            user_profile_image,
+            content_type: "vote".to_string(),
+            cursor: format!("{}_{}", mention_block_time, mention_id),
+            vote_type: Some(vote_record.vote.clone()),
+            mention_block_time: Some(mention_block_time),
             content_id: Some(vote_record.post_id.clone()),
             post_id: Some(vote_record.post_id.clone()),
             voted_content: Some(voted_content),

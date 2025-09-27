@@ -714,24 +714,31 @@ impl ApiHandlers {
             }
         };
 
-        // Convert ContentRecords (posts, replies, votes) to simplified NotificationPost for notifications
+        // Convert NotificationContentRecords to NotificationPost with correct mention cursors
         let all_notifications: Vec<NotificationPost> = notifications_result
             .items
             .iter()
-            .map(|content_record| match content_record {
+            .map(|notification_record| match &notification_record.content {
                 ContentRecord::Post(post_record) => {
-                    NotificationPost::from_k_post_record(&post_record)
+                    NotificationPost::from_k_post_record_with_mention_cursor(
+                        &post_record,
+                        notification_record.mention_id,
+                        notification_record.mention_block_time,
+                    )
                 }
                 ContentRecord::Reply(reply_record) => {
-                    NotificationPost::from_k_reply_record(&reply_record)
+                    NotificationPost::from_k_reply_record_with_mention_cursor(
+                        &reply_record,
+                        notification_record.mention_id,
+                        notification_record.mention_block_time,
+                    )
                 }
                 ContentRecord::Vote(vote_record) => {
                     // For votes, we now have enriched vote record with all necessary data
-                    NotificationPost::from_k_vote_record(
+                    NotificationPost::from_k_vote_record_with_mention_cursor(
                         &vote_record,
-                        vote_record
-                            .mention_block_time
-                            .unwrap_or(vote_record.block_time),
+                        notification_record.mention_id,
+                        notification_record.mention_block_time,
                         vote_record.voted_content.clone().unwrap_or_default(),
                         vote_record.user_nickname.clone(),
                         vote_record.user_profile_image.clone(),
