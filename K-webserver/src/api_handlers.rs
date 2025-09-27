@@ -613,6 +613,28 @@ impl ApiHandlers {
                         *is_blocked,
                     )
                 }
+                ContentRecord::Vote(_vote_record) => {
+                    // For get-mentions, votes are returned as ServerReply (same structure as ServerPost)
+                    // but with minimal content since votes don't have message content
+                    ServerPost {
+                        id: _vote_record.transaction_id.clone(),
+                        user_public_key: _vote_record.sender_pubkey.clone(),
+                        post_content: String::new(), // Votes don't have content in mentions
+                        signature: _vote_record.sender_signature.clone(),
+                        timestamp: _vote_record.block_time,
+                        replies_count: 0,
+                        up_votes_count: 0,
+                        down_votes_count: 0,
+                        reposts_count: 0,
+                        parent_post_id: Some(_vote_record.post_id.clone()),
+                        mentioned_pubkeys: Vec::new(),
+                        is_upvoted: None,
+                        is_downvoted: None,
+                        user_nickname: _vote_record.user_nickname.clone(),
+                        user_profile_image: _vote_record.user_profile_image.clone(),
+                        blocked_user: Some(*is_blocked),
+                    }
+                }
             })
             .collect();
 
@@ -692,7 +714,7 @@ impl ApiHandlers {
             }
         };
 
-        // Convert ContentRecords (posts, replies) to simplified NotificationPost for notifications
+        // Convert ContentRecords (posts, replies, votes) to simplified NotificationPost for notifications
         let all_notifications: Vec<NotificationPost> = notifications_result
             .items
             .iter()
@@ -702,6 +724,18 @@ impl ApiHandlers {
                 }
                 ContentRecord::Reply(reply_record) => {
                     NotificationPost::from_k_reply_record(&reply_record)
+                }
+                ContentRecord::Vote(vote_record) => {
+                    // For votes, we now have enriched vote record with all necessary data
+                    NotificationPost::from_k_vote_record(
+                        &vote_record,
+                        vote_record
+                            .mention_block_time
+                            .unwrap_or(vote_record.block_time),
+                        vote_record.voted_content.clone().unwrap_or_default(),
+                        vote_record.user_nickname.clone(),
+                        vote_record.user_profile_image.clone(),
+                    )
                 }
             })
             .collect();
@@ -798,6 +832,28 @@ impl ApiHandlers {
                                 is_blocked,
                             );
                         PostDetailsResponse { post: server_reply }
+                    }
+                    ContentRecord::Vote(k_vote_record) => {
+                        // For get-post-details, votes are returned as ServerPost with vote-specific info
+                        let server_vote = ServerPost {
+                            id: k_vote_record.transaction_id.clone(),
+                            user_public_key: k_vote_record.sender_pubkey.clone(),
+                            post_content: String::new(), // Votes don't have content
+                            signature: k_vote_record.sender_signature.clone(),
+                            timestamp: k_vote_record.block_time,
+                            replies_count: 0,
+                            up_votes_count: 0,
+                            down_votes_count: 0,
+                            reposts_count: 0,
+                            parent_post_id: Some(k_vote_record.post_id.clone()),
+                            mentioned_pubkeys: Vec::new(),
+                            is_upvoted: None,
+                            is_downvoted: None,
+                            user_nickname: k_vote_record.user_nickname.clone(),
+                            user_profile_image: k_vote_record.user_profile_image.clone(),
+                            blocked_user: Some(is_blocked),
+                        };
+                        PostDetailsResponse { post: server_vote }
                     }
                 };
 

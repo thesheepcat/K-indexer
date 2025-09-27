@@ -169,6 +169,7 @@ impl HasCompoundCursor for ContentRecord {
         match self {
             ContentRecord::Post(post) => post.block_time,
             ContentRecord::Reply(reply) => reply.block_time,
+            ContentRecord::Vote(vote) => vote.block_time,
         }
     }
 
@@ -176,6 +177,7 @@ impl HasCompoundCursor for ContentRecord {
         match self {
             ContentRecord::Post(post) => post.id,
             ContentRecord::Reply(reply) => reply.id,
+            ContentRecord::Vote(vote) => vote.id,
         }
     }
 }
@@ -1940,6 +1942,15 @@ impl DatabaseInterface for PostgresDbManager {
                                     WHERE kb.sender_pubkey = $1 AND kb.blocked_user_pubkey = r.sender_pubkey
                                 )
                           ))
+                          OR
+                          (km.content_type = 'vote' AND EXISTS (
+                              SELECT 1 FROM k_votes v
+                              WHERE v.transaction_id = km.content_id
+                                AND NOT EXISTS (
+                                    SELECT 1 FROM k_blocks kb
+                                    WHERE kb.sender_pubkey = $1 AND kb.blocked_user_pubkey = v.sender_pubkey
+                                )
+                          ))
                       )
                     "#,
                 )
@@ -1978,6 +1989,15 @@ impl DatabaseInterface for PostgresDbManager {
                                 WHERE kb.sender_pubkey = $1 AND kb.blocked_user_pubkey = r.sender_pubkey
                             )
                       ))
+                      OR
+                      (km.content_type = 'vote' AND EXISTS (
+                          SELECT 1 FROM k_votes v
+                          WHERE v.transaction_id = km.content_id
+                            AND NOT EXISTS (
+                                SELECT 1 FROM k_blocks kb
+                                WHERE kb.sender_pubkey = $1 AND kb.blocked_user_pubkey = v.sender_pubkey
+                            )
+                      ))
                   )
                 "#,
             )
@@ -2007,19 +2027,26 @@ impl DatabaseInterface for PostgresDbManager {
         let mut bind_count = 1;
         let mut post_cursor_conditions = String::new();
         let mut reply_cursor_conditions = String::new();
+        let mut vote_cursor_conditions = String::new();
 
-        // Add cursor logic for posts
+        // Add cursor logic for posts, replies, and votes
         if let Some(before_cursor) = &options.before {
             if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
                 bind_count += 2;
                 post_cursor_conditions.push_str(&format!(
-                    " AND (p.block_time < ${} OR (p.block_time = ${} AND p.id < ${}))",
+                    " AND (km.block_time < ${} OR (km.block_time = ${} AND p.id < ${}))",
                     bind_count - 1,
                     bind_count - 1,
                     bind_count
                 ));
                 reply_cursor_conditions.push_str(&format!(
-                    " AND (r.block_time < ${} OR (r.block_time = ${} AND r.id < ${}))",
+                    " AND (km.block_time < ${} OR (km.block_time = ${} AND r.id < ${}))",
+                    bind_count - 1,
+                    bind_count - 1,
+                    bind_count
+                ));
+                vote_cursor_conditions.push_str(&format!(
+                    " AND (km.block_time < ${} OR (km.block_time = ${} AND v.id < ${}))",
                     bind_count - 1,
                     bind_count - 1,
                     bind_count
@@ -2031,13 +2058,19 @@ impl DatabaseInterface for PostgresDbManager {
             if let Ok((after_timestamp, after_id)) = Self::parse_compound_cursor(after_cursor) {
                 bind_count += 2;
                 post_cursor_conditions.push_str(&format!(
-                    " AND (p.block_time > ${} OR (p.block_time = ${} AND p.id > ${}))",
+                    " AND (km.block_time > ${} OR (km.block_time = ${} AND p.id > ${}))",
                     bind_count - 1,
                     bind_count - 1,
                     bind_count
                 ));
                 reply_cursor_conditions.push_str(&format!(
-                    " AND (r.block_time > ${} OR (r.block_time = ${} AND r.id > ${}))",
+                    " AND (km.block_time > ${} OR (km.block_time = ${} AND r.id > ${}))",
+                    bind_count - 1,
+                    bind_count - 1,
+                    bind_count
+                ));
+                vote_cursor_conditions.push_str(&format!(
+                    " AND (km.block_time > ${} OR (km.block_time = ${} AND v.id > ${}))",
                     bind_count - 1,
                     bind_count - 1,
                     bind_count
@@ -2059,7 +2092,7 @@ impl DatabaseInterface for PostgresDbManager {
             r#"
             WITH notification_posts AS (
                 SELECT DISTINCT
-                    p.id, p.transaction_id, p.block_time, p.sender_pubkey,
+                    p.id, p.transaction_id, km.block_time, p.sender_pubkey,
                     p.base64_encoded_message,
 
                     -- User profile lookup
@@ -2085,7 +2118,7 @@ impl DatabaseInterface for PostgresDbManager {
             ),
             notification_replies AS (
                 SELECT DISTINCT
-                    r.id, r.transaction_id, r.block_time, r.sender_pubkey,
+                    r.id, r.transaction_id, km.block_time, r.sender_pubkey,
                     r.base64_encoded_message,
 
                     -- User profile lookup
@@ -2109,24 +2142,69 @@ impl DatabaseInterface for PostgresDbManager {
                   )
                 {reply_cursor_conditions}
             ),
+            notification_votes AS (
+                SELECT DISTINCT
+                    v.id, v.transaction_id, km.block_time, v.sender_pubkey,
+                    '' as base64_encoded_message, -- Votes don't have content
+
+                    -- User profile lookup for voter
+                    COALESCE(b.base64_encoded_nickname, '') as user_nickname,
+                    b.base64_encoded_profile_image as user_profile_image,
+
+                    'vote' as content_type,
+                    v.vote as vote_type,
+                    v.block_time as vote_block_time,
+                    v.post_id as content_id,
+                    v.post_id as post_id,
+                    -- Get the content of the post/reply being voted on
+                    COALESCE(vp.base64_encoded_message, vr.base64_encoded_message, '') as voted_content
+                FROM k_mentions km
+                JOIN k_votes v ON km.content_id = v.transaction_id AND km.content_type = 'vote'
+                LEFT JOIN LATERAL (
+                    SELECT base64_encoded_nickname, base64_encoded_profile_image
+                    FROM k_broadcasts b
+                    WHERE b.sender_pubkey = v.sender_pubkey
+                    ORDER BY b.block_time DESC
+                    LIMIT 1
+                ) b ON true
+                -- Join with the post or reply being voted on
+                LEFT JOIN k_posts vp ON v.post_id = vp.transaction_id
+                LEFT JOIN k_replies vr ON v.post_id = vr.transaction_id
+                WHERE km.mentioned_pubkey = $1
+                  AND NOT EXISTS (
+                      SELECT 1 FROM k_blocks kb
+                      WHERE kb.sender_pubkey = ${requester_param} AND kb.blocked_user_pubkey = v.sender_pubkey
+                  )
+                {vote_cursor_conditions}
+            ),
             all_notifications AS (
                 SELECT
                     id, transaction_id, block_time, sender_pubkey,
                     base64_encoded_message, user_nickname, user_profile_image,
-                    content_type
+                    content_type,
+                    NULL as vote_type, NULL as vote_block_time, NULL as content_id, NULL as post_id, NULL as voted_content
                 FROM notification_posts
                 UNION ALL
                 SELECT
                     id, transaction_id, block_time, sender_pubkey,
                     base64_encoded_message, user_nickname, user_profile_image,
-                    content_type
+                    content_type,
+                    NULL as vote_type, NULL as vote_block_time, NULL as content_id, NULL as post_id, NULL as voted_content
                 FROM notification_replies
+                UNION ALL
+                SELECT
+                    id, transaction_id, block_time, sender_pubkey,
+                    base64_encoded_message, user_nickname, user_profile_image,
+                    content_type,
+                    vote_type, vote_block_time, content_id, post_id, voted_content
+                FROM notification_votes
             )
             SELECT * FROM all_notifications
             {final_order_clause}
             "#,
             post_cursor_conditions = post_cursor_conditions,
             reply_cursor_conditions = reply_cursor_conditions,
+            vote_cursor_conditions = vote_cursor_conditions,
             final_order_clause = final_order_clause,
             requester_param = requester_param
         );
@@ -2208,6 +2286,26 @@ impl DatabaseInterface for PostgresDbManager {
                 };
 
                 notifications.push(ContentRecord::Reply(reply_record));
+            } else if content_type == "vote" {
+                let vote_record = KVoteRecord {
+                    id: row.get::<i64, _>("id"),
+                    transaction_id: Self::encode_bytes_to_hex(&transaction_id),
+                    block_time: row.get::<i64, _>("block_time") as u64,
+                    sender_pubkey: Self::encode_bytes_to_hex(&sender_pubkey),
+                    sender_signature: String::new(),
+                    post_id: row
+                        .get::<Option<String>, _>("content_id")
+                        .unwrap_or_default(),
+                    vote: row
+                        .get::<Option<String>, _>("vote_type")
+                        .unwrap_or_default(),
+                    mention_block_time: Some(row.get::<i64, _>("block_time") as u64), // Now k_mentions.block_time
+                    voted_content: row.get::<Option<String>, _>("voted_content"),
+                    user_nickname: Some(row.get("user_nickname")),
+                    user_profile_image: row.get("user_profile_image"),
+                };
+
+                notifications.push(ContentRecord::Vote(vote_record));
             }
         }
 
@@ -2231,6 +2329,10 @@ impl DatabaseInterface for PostgresDbManager {
                     pagination.prev_cursor =
                         Some(Self::create_compound_cursor(reply.block_time, reply.id));
                 }
+                ContentRecord::Vote(vote) => {
+                    pagination.prev_cursor =
+                        Some(Self::create_compound_cursor(vote.block_time, vote.id));
+                }
             }
 
             match last_item {
@@ -2241,6 +2343,10 @@ impl DatabaseInterface for PostgresDbManager {
                 ContentRecord::Reply(reply) => {
                     pagination.next_cursor =
                         Some(Self::create_compound_cursor(reply.block_time, reply.id));
+                }
+                ContentRecord::Vote(vote) => {
+                    pagination.next_cursor =
+                        Some(Self::create_compound_cursor(vote.block_time, vote.id));
                 }
             }
         }
