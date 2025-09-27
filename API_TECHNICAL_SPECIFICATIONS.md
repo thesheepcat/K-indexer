@@ -1004,7 +1004,7 @@ curl "http://localhost:3000/get-notifications?requesterPubkey=02218b3732df235397
 **Response:**
 ```json
 {
-  "posts": [
+  "notifications": [
     {
       "id": "9a9ac8900065bc858b762e0ae379bdf9286a42d571159af260925158a2c80ca3",
       "userPublicKey": "03f56f6ad1c1166e330fb2897ae60afcb25afa10006212cfee24264c04d21bce60",
@@ -1013,6 +1013,7 @@ curl "http://localhost:3000/get-notifications?requesterPubkey=02218b3732df235397
       "userNickname": "VGhlIEtpbmc=",
       "userProfileImage": "iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAAABXAvmH...",
       "contentType": "vote",
+      "cursor": "1758996519522_571321",
       "voteType": "downvote",
       "mentionBlockTime": 1758996519522,
       "contentId": "d2ed33d371322d9033ec27e93a7cbdb47613d703465f0f7a9b58f5a1afa01c4d",
@@ -1027,6 +1028,7 @@ curl "http://localhost:3000/get-notifications?requesterPubkey=02218b3732df235397
       "userNickname": "VGhlIEtpbmc=",
       "userProfileImage": "iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAAABXAvmH...",
       "contentType": "reply",
+      "cursor": "1758996486131_571322",
       "voteType": null,
       "mentionBlockTime": null,
       "contentId": null,
@@ -1041,6 +1043,7 @@ curl "http://localhost:3000/get-notifications?requesterPubkey=02218b3732df235397
       "userNickname": "VGhlIEtpbmc=",
       "userProfileImage": "iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAAABXAvmH...",
       "contentType": "post",
+      "cursor": "1758985495931_571323",
       "voteType": null,
       "mentionBlockTime": null,
       "contentId": null,
@@ -1084,6 +1087,7 @@ curl "http://localhost:3000/get-notifications?requesterPubkey=02218b3732df235397
 - `userNickname`: Base64 encoded nickname from user's broadcast (optional)
 - `userProfileImage`: Base64 encoded profile image from user's broadcast (optional)
 - `contentType`: Type of mention - "post", "reply", or "vote"
+- `cursor`: Compound cursor combining timestamp and record ID (e.g., `"1758996519522_571321"`) for use with pagination
 
 **Vote-Specific Fields (only for vote notifications):**
 - `voteType`: "upvote" or "downvote"
@@ -1106,6 +1110,15 @@ curl "http://localhost:3000/get-notifications?requesterPubkey=02218b3732df235397
 - Navigate to original posts/replies from notifications
 - Display vote activity on user's content
 - Real-time polling for new notifications
+- Use individual notification `cursor` values with `get-notifications-count` API to count newer notifications
+
+**Cursor Integration:**
+Each notification includes a `cursor` field that can be used with the `get-notifications-count` API:
+```bash
+# Get count of notifications newer than a specific notification
+curl "http://localhost:3000/get-notifications-count?requesterPubkey=02218b...&after=1758996519522_571321"
+```
+This allows the webapp to determine how many new notifications have arrived since the last viewed notification.
 
 ## Error Handling
 

@@ -743,7 +743,7 @@ impl ApiHandlers {
         let pagination = notifications_result.pagination;
 
         let response = PaginatedNotificationsResponse {
-            posts: all_notifications,
+            notifications: all_notifications,
             pagination,
         };
 
