@@ -1914,7 +1914,7 @@ impl DatabaseInterface for PostgresDbManager {
         let requester_pubkey_bytes = Self::decode_hex_to_bytes(requester_pubkey)?;
 
         let count_result = if let Some(cursor_str) = cursor {
-            // If cursor is provided, count notifications since that cursor
+            // If cursor is provided, count notifications since that cursor (excluding blocked users)
             if let Ok((cursor_timestamp, cursor_id)) = Self::parse_compound_cursor(&cursor_str) {
                 sqlx::query_scalar::<_, i64>(
                     r#"
@@ -1922,6 +1922,25 @@ impl DatabaseInterface for PostgresDbManager {
                     FROM k_mentions km
                     WHERE km.mentioned_pubkey = $1
                       AND (km.block_time > $2 OR (km.block_time = $2 AND km.id > $3))
+                      AND (
+                          (km.content_type = 'post' AND EXISTS (
+                              SELECT 1 FROM k_posts p
+                              WHERE p.transaction_id = km.content_id
+                                AND NOT EXISTS (
+                                    SELECT 1 FROM k_blocks kb
+                                    WHERE kb.sender_pubkey = $1 AND kb.blocked_user_pubkey = p.sender_pubkey
+                                )
+                          ))
+                          OR
+                          (km.content_type = 'reply' AND EXISTS (
+                              SELECT 1 FROM k_replies r
+                              WHERE r.transaction_id = km.content_id
+                                AND NOT EXISTS (
+                                    SELECT 1 FROM k_blocks kb
+                                    WHERE kb.sender_pubkey = $1 AND kb.blocked_user_pubkey = r.sender_pubkey
+                                )
+                          ))
+                      )
                     "#,
                 )
                 .bind(&requester_pubkey_bytes)
@@ -1935,12 +1954,31 @@ impl DatabaseInterface for PostgresDbManager {
                 ));
             }
         } else {
-            // If no cursor is provided, count all notifications
+            // If no cursor is provided, count all notifications (excluding blocked users)
             sqlx::query_scalar::<_, i64>(
                 r#"
                 SELECT COUNT(*)
                 FROM k_mentions km
                 WHERE km.mentioned_pubkey = $1
+                  AND (
+                      (km.content_type = 'post' AND EXISTS (
+                          SELECT 1 FROM k_posts p
+                          WHERE p.transaction_id = km.content_id
+                            AND NOT EXISTS (
+                                SELECT 1 FROM k_blocks kb
+                                WHERE kb.sender_pubkey = $1 AND kb.blocked_user_pubkey = p.sender_pubkey
+                            )
+                      ))
+                      OR
+                      (km.content_type = 'reply' AND EXISTS (
+                          SELECT 1 FROM k_replies r
+                          WHERE r.transaction_id = km.content_id
+                            AND NOT EXISTS (
+                                SELECT 1 FROM k_blocks kb
+                                WHERE kb.sender_pubkey = $1 AND kb.blocked_user_pubkey = r.sender_pubkey
+                            )
+                      ))
+                  )
                 "#,
             )
             .bind(&requester_pubkey_bytes)
