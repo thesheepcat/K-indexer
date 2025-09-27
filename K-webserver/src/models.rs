@@ -119,6 +119,11 @@ pub struct KVoteRecord {
     pub sender_signature: String,
     pub post_id: String,
     pub vote: String,
+    // Optional enriched metadata fields for notifications
+    pub mention_block_time: Option<u64>,
+    pub voted_content: Option<String>,
+    pub user_nickname: Option<String>,
+    pub user_profile_image: Option<String>,
 }
 
 // Merged content record for unified content retrieval
@@ -126,6 +131,7 @@ pub struct KVoteRecord {
 pub enum ContentRecord {
     Post(KPostRecord),
     Reply(KReplyRecord),
+    Vote(KVoteRecord),
 }
 
 // API Response models
@@ -313,6 +319,12 @@ pub struct NotificationPost {
     pub timestamp: u64,
     pub user_nickname: Option<String>,
     pub user_profile_image: Option<String>,
+    // Vote-specific fields
+    pub vote_type: Option<String>,       // "upvote" or "downvote"
+    pub mention_block_time: Option<u64>, // block_time from k_mentions table
+    pub content_id: Option<String>,      // The ID of the content being voted on
+    pub post_id: Option<String>,         // The post ID that the vote refers to
+    pub voted_content: Option<String>,   // Content of the post/reply being voted on
 }
 
 impl NotificationPost {
@@ -321,9 +333,14 @@ impl NotificationPost {
             id: record.transaction_id.clone(),
             user_public_key: record.sender_pubkey.clone(),
             post_content: record.base64_encoded_message.clone(),
-            timestamp: record.block_time,
+            timestamp: record.block_time, // This is now k_mentions.block_time from the query
             user_nickname: record.user_nickname.clone(),
             user_profile_image: record.user_profile_image.clone(),
+            vote_type: None,
+            mention_block_time: None,
+            content_id: None,
+            post_id: None,
+            voted_content: None,
         }
     }
 
@@ -332,9 +349,36 @@ impl NotificationPost {
             id: record.transaction_id.clone(),
             user_public_key: record.sender_pubkey.clone(),
             post_content: record.base64_encoded_message.clone(),
-            timestamp: record.block_time,
+            timestamp: record.block_time, // This is now k_mentions.block_time from the query
             user_nickname: record.user_nickname.clone(),
             user_profile_image: record.user_profile_image.clone(),
+            vote_type: None,
+            mention_block_time: None,
+            content_id: None,
+            post_id: None,
+            voted_content: None,
+        }
+    }
+
+    pub fn from_k_vote_record(
+        vote_record: &KVoteRecord,
+        mention_block_time: u64,
+        voted_content: String,
+        user_nickname: Option<String>,
+        user_profile_image: Option<String>,
+    ) -> Self {
+        Self {
+            id: vote_record.transaction_id.clone(),
+            user_public_key: vote_record.sender_pubkey.clone(),
+            post_content: String::new(),       // Votes don't have content
+            timestamp: vote_record.block_time, // This is now k_mentions.block_time from the query
+            user_nickname,
+            user_profile_image,
+            vote_type: Some(vote_record.vote.clone()),
+            mention_block_time: Some(mention_block_time), // Same as timestamp now
+            content_id: Some(vote_record.post_id.clone()),
+            post_id: Some(vote_record.post_id.clone()),
+            voted_content: Some(voted_content),
         }
     }
 }
