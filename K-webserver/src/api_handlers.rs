@@ -691,21 +691,21 @@ impl ApiHandlers {
             }
         };
 
-        // Convert enriched ContentRecords (posts, replies, votes) to ServerPosts with blocking awareness
+        // Convert enriched ContentRecords (posts, replies) to ServerPosts (blocked users excluded)
         let all_notifications: Vec<ServerPost> = notifications_result
             .items
             .iter()
-            .map(|(content_record, is_blocked)| match content_record {
+            .map(|content_record| match content_record {
                 ContentRecord::Post(post_record) => {
                     ServerPost::from_enriched_k_post_record_with_block_status(
                         &post_record,
-                        *is_blocked,
+                        false, // blocked users are excluded from results
                     )
                 }
                 ContentRecord::Reply(reply_record) => {
                     ServerReply::from_enriched_k_reply_record_with_block_status(
                         &reply_record,
-                        *is_blocked,
+                        false, // blocked users are excluded from results
                     )
                 }
             })
