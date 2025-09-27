@@ -1,7 +1,8 @@
 use crate::database_trait::{DatabaseInterface, QueryOptions};
 use crate::models::{
-    ApiError, ContentRecord, PaginatedPostsResponse, PaginatedRepliesResponse,
-    PaginatedUsersResponse, PostDetailsResponse, ServerPost, ServerReply, ServerUserPost,
+    ApiError, ContentRecord, NotificationPost, PaginatedNotificationsResponse,
+    PaginatedPostsResponse, PaginatedRepliesResponse, PaginatedUsersResponse, PostDetailsResponse,
+    ServerPost, ServerReply, ServerUserPost,
 };
 use serde_json;
 use std::sync::Arc;
@@ -691,29 +692,23 @@ impl ApiHandlers {
             }
         };
 
-        // Convert enriched ContentRecords (posts, replies) to ServerPosts (blocked users excluded)
-        let all_notifications: Vec<ServerPost> = notifications_result
+        // Convert ContentRecords (posts, replies) to simplified NotificationPost for notifications
+        let all_notifications: Vec<NotificationPost> = notifications_result
             .items
             .iter()
             .map(|content_record| match content_record {
                 ContentRecord::Post(post_record) => {
-                    ServerPost::from_enriched_k_post_record_with_block_status(
-                        &post_record,
-                        false, // blocked users are excluded from results
-                    )
+                    NotificationPost::from_k_post_record(&post_record)
                 }
                 ContentRecord::Reply(reply_record) => {
-                    ServerReply::from_enriched_k_reply_record_with_block_status(
-                        &reply_record,
-                        false, // blocked users are excluded from results
-                    )
+                    NotificationPost::from_k_reply_record(&reply_record)
                 }
             })
             .collect();
 
         let pagination = notifications_result.pagination;
 
-        let response = PaginatedPostsResponse {
+        let response = PaginatedNotificationsResponse {
             posts: all_notifications,
             pagination,
         };
