@@ -319,6 +319,7 @@ pub struct NotificationPost {
     pub timestamp: u64,
     pub user_nickname: Option<String>,
     pub user_profile_image: Option<String>,
+    pub content_type: String, // "post", "reply", or "vote" from k_mentions table
     // Vote-specific fields
     pub vote_type: Option<String>,       // "upvote" or "downvote"
     pub mention_block_time: Option<u64>, // block_time from k_mentions table
@@ -336,6 +337,7 @@ impl NotificationPost {
             timestamp: record.block_time, // This is now k_mentions.block_time from the query
             user_nickname: record.user_nickname.clone(),
             user_profile_image: record.user_profile_image.clone(),
+            content_type: "post".to_string(),
             vote_type: None,
             mention_block_time: None,
             content_id: None,
@@ -352,6 +354,7 @@ impl NotificationPost {
             timestamp: record.block_time, // This is now k_mentions.block_time from the query
             user_nickname: record.user_nickname.clone(),
             user_profile_image: record.user_profile_image.clone(),
+            content_type: "reply".to_string(),
             vote_type: None,
             mention_block_time: None,
             content_id: None,
@@ -374,6 +377,7 @@ impl NotificationPost {
             timestamp: vote_record.block_time, // This is now k_mentions.block_time from the query
             user_nickname,
             user_profile_image,
+            content_type: "vote".to_string(),
             vote_type: Some(vote_record.vote.clone()),
             mention_block_time: Some(mention_block_time), // Same as timestamp now
             content_id: Some(vote_record.post_id.clone()),

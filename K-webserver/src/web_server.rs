@@ -167,9 +167,7 @@ impl WebServer {
                 get(handle_get_notifications_count),
             )
             .route("/get-notifications", get(handle_get_notifications))
-            .layer(prometheus_layer)
-            .layer(TimeoutLayer::new(timeout_duration))
-            .layer(RequestBodyLimitLayer::new(1024 * 1024)) // 1MB limit
+            .layer(prometheus_layer(RequestBodyLimitLayer::new(1024 * 1024)) // 1MB limit
             .layer(
                 CorsLayer::new()
                     .allow_origin(Any)
