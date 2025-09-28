@@ -543,14 +543,14 @@ impl KProtocolProcessor {
                 r#"
                 WITH post_insert AS (
                     INSERT INTO k_posts (
-                        transaction_id, block_time, sender_pubkey, sender_signature, 
+                        transaction_id, block_time, sender_pubkey, sender_signature,
                         base64_encoded_message
                     ) VALUES ($1, $2, $3, $4, $5)
                     ON CONFLICT (sender_signature) DO NOTHING
-                    RETURNING transaction_id, block_time
+                    RETURNING transaction_id, block_time, sender_pubkey
                 )
-                INSERT INTO k_mentions (content_id, content_type, mentioned_pubkey, block_time)
-                SELECT pi.transaction_id, 'post', unnest($6::bytea[]), pi.block_time
+                INSERT INTO k_mentions (content_id, content_type, mentioned_pubkey, block_time, sender_pubkey)
+                SELECT pi.transaction_id, 'post', unnest($6::bytea[]), pi.block_time, pi.sender_pubkey
                 FROM post_insert pi
                 "#,
             )
@@ -656,14 +656,14 @@ impl KProtocolProcessor {
                 r#"
                 WITH reply_insert AS (
                     INSERT INTO k_replies (
-                        transaction_id, block_time, sender_pubkey, sender_signature, 
+                        transaction_id, block_time, sender_pubkey, sender_signature,
                         post_id, base64_encoded_message
                     ) VALUES ($1, $2, $3, $4, $5, $6)
                     ON CONFLICT (sender_signature) DO NOTHING
-                    RETURNING transaction_id, block_time
+                    RETURNING transaction_id, block_time, sender_pubkey
                 )
-                INSERT INTO k_mentions (content_id, content_type, mentioned_pubkey, block_time)
-                SELECT ri.transaction_id, 'reply', unnest($7::bytea[]), ri.block_time
+                INSERT INTO k_mentions (content_id, content_type, mentioned_pubkey, block_time, sender_pubkey)
+                SELECT ri.transaction_id, 'reply', unnest($7::bytea[]), ri.block_time, ri.sender_pubkey
                 FROM reply_insert ri
                 "#,
             )
@@ -809,14 +809,14 @@ impl KProtocolProcessor {
             r#"
             WITH vote_insert AS (
                 INSERT INTO k_votes (
-                    transaction_id, block_time, sender_pubkey, sender_signature, 
+                    transaction_id, block_time, sender_pubkey, sender_signature,
                     post_id, vote
                 ) VALUES ($1, $2, $3, $4, $5, $6)
                 ON CONFLICT (sender_signature) DO NOTHING
-                RETURNING transaction_id, block_time
+                RETURNING transaction_id, block_time, sender_pubkey
             )
-            INSERT INTO k_mentions (content_id, content_type, mentioned_pubkey, block_time)
-            SELECT vi.transaction_id, 'vote', $7, vi.block_time
+            INSERT INTO k_mentions (content_id, content_type, mentioned_pubkey, block_time, sender_pubkey)
+            SELECT vi.transaction_id, 'vote', $7, vi.block_time, vi.sender_pubkey
             FROM vote_insert vi
             "#,
         )
