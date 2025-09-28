@@ -2016,10 +2016,16 @@ impl DatabaseInterface for PostgresDbManager {
             }
         }
 
-        let order_clause = if options.sort_descending {
+        let mentions_order_clause = if options.sort_descending {
             "ORDER BY km.block_time DESC, km.id DESC"
         } else {
             "ORDER BY km.block_time ASC, km.id ASC"
+        };
+
+        let final_order_clause = if options.sort_descending {
+            "ORDER BY block_time DESC, mention_id DESC"
+        } else {
+            "ORDER BY block_time ASC, mention_id ASC"
         };
         let final_limit = format!("LIMIT ${}", bind_count + 1);
 
@@ -2037,7 +2043,7 @@ impl DatabaseInterface for PostgresDbManager {
                       WHERE kb.sender_pubkey = $1 AND kb.blocked_user_pubkey = km.sender_pubkey
                   )
                 {cursor_conditions}
-                {order_clause}
+                {mentions_order_clause}
                 {final_limit}
             ),
             notifications_with_content AS (
@@ -2079,12 +2085,13 @@ impl DatabaseInterface for PostgresDbManager {
                 -- For votes, get the content being voted on
                 LEFT JOIN k_posts vp ON fm.content_type = 'vote' AND v.post_id = vp.transaction_id
                 LEFT JOIN k_replies vr ON fm.content_type = 'vote' AND v.post_id = vr.transaction_id
-                {order_clause}
+                {final_order_clause}
             )
             SELECT * FROM notifications_with_content
             "#,
             cursor_conditions = cursor_conditions,
-            order_clause = order_clause,
+            mentions_order_clause = mentions_order_clause,
+            final_order_clause = final_order_clause,
             final_limit = final_limit
         );
 
