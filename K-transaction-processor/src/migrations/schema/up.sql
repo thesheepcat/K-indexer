@@ -10,8 +10,8 @@ CREATE TABLE IF NOT EXISTS k_vars (
     value TEXT NOT NULL
 );
 
--- Insert initial schema version (v2 = complete schema with indexes and signature deduplication)
-INSERT INTO k_vars (key, value) VALUES ('schema_version', '2') ON CONFLICT (key) DO NOTHING;
+-- Insert initial schema version (v3 = complete schema with indexes, signature deduplication, and optimized k_mentions)
+INSERT INTO k_vars (key, value) VALUES ('schema_version', '3') ON CONFLICT (key) DO NOTHING;
 
 -- Create K protocol tables
 CREATE TABLE IF NOT EXISTS k_posts (
@@ -59,7 +59,8 @@ CREATE TABLE IF NOT EXISTS k_mentions (
     content_id BYTEA NOT NULL,
     content_type VARCHAR(10) NOT NULL,
     mentioned_pubkey BYTEA NOT NULL,
-    block_time BIGINT NOT NULL
+    block_time BIGINT NOT NULL,
+    sender_pubkey BYTEA
 );
 
 -- Create indexes for K protocol tables
@@ -109,5 +110,8 @@ CREATE INDEX IF NOT EXISTS idx_k_blocks_sender_pubkey ON k_blocks(sender_pubkey)
 CREATE INDEX IF NOT EXISTS idx_k_blocks_blocked_user_pubkey ON k_blocks(blocked_user_pubkey);
 CREATE INDEX IF NOT EXISTS idx_k_blocks_block_time ON k_blocks(block_time);
 
--- Create optimal composite index for k_mentions get-mentions API performance
-CREATE INDEX IF NOT EXISTS idx_k_mentions_optimal ON k_mentions(mentioned_pubkey, content_type, content_id);
+-- Create comprehensive index that efficiently serves both get-notifications and get-mentions queries
+-- This index supports:
+-- 1. get-notifications: WHERE mentioned_pubkey = ? AND sender_pubkey NOT IN (blocked_users) ORDER BY block_time DESC, id DESC
+-- 2. get-mentions: WHERE mentioned_pubkey = ? AND content_type = ? AND content_id = ?
+CREATE INDEX IF NOT EXISTS idx_k_mentions_comprehensive ON k_mentions(mentioned_pubkey, sender_pubkey, content_type, content_id, block_time DESC, id DESC);
