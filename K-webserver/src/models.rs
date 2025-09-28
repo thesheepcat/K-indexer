@@ -333,7 +333,8 @@ pub struct NotificationPost {
     pub vote_type: Option<String>,       // "upvote" or "downvote"
     pub mention_block_time: Option<u64>, // block_time from k_mentions table
     pub content_id: Option<String>,      // The ID of the content being voted on
-    pub post_id: Option<String>,         // The post ID that the vote refers to
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub post_id: Option<String>, // The post ID that the vote refers to
     pub voted_content: Option<String>,   // Content of the post/reply being voted on
 }
 

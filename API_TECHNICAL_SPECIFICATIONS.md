@@ -1017,7 +1017,6 @@ curl "http://localhost:3000/get-notifications?requesterPubkey=02218b3732df235397
       "voteType": "downvote",
       "mentionBlockTime": 1758996519522,
       "contentId": "d2ed33d371322d9033ec27e93a7cbdb47613d703465f0f7a9b58f5a1afa01c4d",
-      "postId": "d2ed33d371322d9033ec27e93a7cbdb47613d703465f0f7a9b58f5a1afa01c4d",
       "votedContent": "R29vZCBtb3JuaW5nIEthc3BhIGZhbWlseSEgIPCfmoDwn5qA8J+agPCfmoDwn5qA"
     },
     {
@@ -1032,7 +1031,6 @@ curl "http://localhost:3000/get-notifications?requesterPubkey=02218b3732df235397
       "voteType": null,
       "mentionBlockTime": null,
       "contentId": null,
-      "postId": null,
       "votedContent": null
     },
     {
@@ -1047,7 +1045,6 @@ curl "http://localhost:3000/get-notifications?requesterPubkey=02218b3732df235397
       "voteType": null,
       "mentionBlockTime": null,
       "contentId": null,
-      "postId": null,
       "votedContent": null
     }
   ],
@@ -1077,7 +1074,6 @@ curl "http://localhost:3000/get-notifications?requesterPubkey=02218b3732df235397
    - Additional vote fields:
      - `voteType`: "upvote" or "downvote"
      - `contentId`: ID of the content being voted on
-     - `postId`: ID of the post the vote refers to
      - `votedContent`: Base64 encoded content of the post/reply being voted on
 
 **Common Fields for All Notification Types:**
@@ -1093,7 +1089,6 @@ curl "http://localhost:3000/get-notifications?requesterPubkey=02218b3732df235397
 - `voteType`: "upvote" or "downvote"
 - `mentionBlockTime`: Timestamp from k_mentions table (same as timestamp)
 - `contentId`: ID of the content being voted on
-- `postId`: ID of the post the vote refers to
 - `votedContent`: Base64 encoded content of the post/reply being voted on
 
 **Database Implementation:**
