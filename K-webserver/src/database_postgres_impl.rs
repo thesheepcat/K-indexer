@@ -1922,37 +1922,19 @@ impl DatabaseInterface for PostgresDbManager {
                 sqlx::query_scalar::<_, i64>(
                     r#"
                     SELECT COUNT(*)
-                    FROM k_mentions km
-                    WHERE km.mentioned_pubkey = $1
-                      AND (km.block_time > $2 OR (km.block_time = $2 AND km.id > $3))
-                      AND (
-                          (km.content_type = 'post' AND EXISTS (
-                              SELECT 1 FROM k_posts p
-                              WHERE p.transaction_id = km.content_id
-                                AND NOT EXISTS (
-                                    SELECT 1 FROM k_blocks kb
-                                    WHERE kb.sender_pubkey = $1 AND kb.blocked_user_pubkey = p.sender_pubkey
-                                )
-                          ))
-                          OR
-                          (km.content_type = 'reply' AND EXISTS (
-                              SELECT 1 FROM k_replies r
-                              WHERE r.transaction_id = km.content_id
-                                AND NOT EXISTS (
-                                    SELECT 1 FROM k_blocks kb
-                                    WHERE kb.sender_pubkey = $1 AND kb.blocked_user_pubkey = r.sender_pubkey
-                                )
-                          ))
-                          OR
-                          (km.content_type = 'vote' AND EXISTS (
-                              SELECT 1 FROM k_votes v
-                              WHERE v.transaction_id = km.content_id
-                                AND NOT EXISTS (
-                                    SELECT 1 FROM k_blocks kb
-                                    WHERE kb.sender_pubkey = $1 AND kb.blocked_user_pubkey = v.sender_pubkey
-                                )
-                          ))
-                      )
+                    FROM (
+                        SELECT 1
+                        FROM k_mentions km
+                        WHERE km.mentioned_pubkey = $1
+                          AND km.sender_pubkey IS NOT NULL
+                          AND (km.block_time > $2 OR (km.block_time = $2 AND km.id > $3))
+                          AND NOT EXISTS (
+                              SELECT 1 FROM k_blocks kb
+                              WHERE kb.sender_pubkey = $1 AND kb.blocked_user_pubkey = km.sender_pubkey
+                          )
+                        ORDER BY km.block_time DESC, km.id DESC
+                        LIMIT 31
+                    ) recent_notifications
                     "#,
                 )
                 .bind(&requester_pubkey_bytes)
@@ -1970,36 +1952,18 @@ impl DatabaseInterface for PostgresDbManager {
             sqlx::query_scalar::<_, i64>(
                 r#"
                 SELECT COUNT(*)
-                FROM k_mentions km
-                WHERE km.mentioned_pubkey = $1
-                  AND (
-                      (km.content_type = 'post' AND EXISTS (
-                          SELECT 1 FROM k_posts p
-                          WHERE p.transaction_id = km.content_id
-                            AND NOT EXISTS (
-                                SELECT 1 FROM k_blocks kb
-                                WHERE kb.sender_pubkey = $1 AND kb.blocked_user_pubkey = p.sender_pubkey
-                            )
-                      ))
-                      OR
-                      (km.content_type = 'reply' AND EXISTS (
-                          SELECT 1 FROM k_replies r
-                          WHERE r.transaction_id = km.content_id
-                            AND NOT EXISTS (
-                                SELECT 1 FROM k_blocks kb
-                                WHERE kb.sender_pubkey = $1 AND kb.blocked_user_pubkey = r.sender_pubkey
-                            )
-                      ))
-                      OR
-                      (km.content_type = 'vote' AND EXISTS (
-                          SELECT 1 FROM k_votes v
-                          WHERE v.transaction_id = km.content_id
-                            AND NOT EXISTS (
-                                SELECT 1 FROM k_blocks kb
-                                WHERE kb.sender_pubkey = $1 AND kb.blocked_user_pubkey = v.sender_pubkey
-                            )
-                      ))
-                  )
+                FROM (
+                    SELECT 1
+                    FROM k_mentions km
+                    WHERE km.mentioned_pubkey = $1
+                      AND km.sender_pubkey IS NOT NULL
+                      AND NOT EXISTS (
+                          SELECT 1 FROM k_blocks kb
+                          WHERE kb.sender_pubkey = $1 AND kb.blocked_user_pubkey = km.sender_pubkey
+                      )
+                    ORDER BY km.block_time DESC, km.id DESC
+                    LIMIT 31
+                ) recent_notifications
                 "#,
             )
             .bind(&requester_pubkey_bytes)
@@ -2025,53 +1989,26 @@ impl DatabaseInterface for PostgresDbManager {
         let limit = options.limit.unwrap_or(20) as i64;
         let offset_limit = limit + 1; // Get one extra to check if there are more
 
+        // Build cursor conditions for optimized k_mentions filtering
+        let mut cursor_conditions = String::new();
         let mut bind_count = 1;
-        let mut post_cursor_conditions = String::new();
-        let mut reply_cursor_conditions = String::new();
-        let mut vote_cursor_conditions = String::new();
 
-        // Add cursor logic for posts, replies, and votes
         if let Some(before_cursor) = &options.before {
             if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
                 bind_count += 2;
-                post_cursor_conditions.push_str(&format!(
-                    " AND (km.block_time < ${} OR (km.block_time = ${} AND p.id < ${}))",
-                    bind_count - 1,
-                    bind_count - 1,
-                    bind_count
-                ));
-                reply_cursor_conditions.push_str(&format!(
-                    " AND (km.block_time < ${} OR (km.block_time = ${} AND r.id < ${}))",
-                    bind_count - 1,
-                    bind_count - 1,
-                    bind_count
-                ));
-                vote_cursor_conditions.push_str(&format!(
-                    " AND (km.block_time < ${} OR (km.block_time = ${} AND v.id < ${}))",
+                cursor_conditions.push_str(&format!(
+                    " AND (km.block_time < ${} OR (km.block_time = ${} AND km.id < ${}))",
                     bind_count - 1,
                     bind_count - 1,
                     bind_count
                 ));
             }
         }
-
         if let Some(after_cursor) = &options.after {
             if let Ok((after_timestamp, after_id)) = Self::parse_compound_cursor(after_cursor) {
                 bind_count += 2;
-                post_cursor_conditions.push_str(&format!(
-                    " AND (km.block_time > ${} OR (km.block_time = ${} AND p.id > ${}))",
-                    bind_count - 1,
-                    bind_count - 1,
-                    bind_count
-                ));
-                reply_cursor_conditions.push_str(&format!(
-                    " AND (km.block_time > ${} OR (km.block_time = ${} AND r.id > ${}))",
-                    bind_count - 1,
-                    bind_count - 1,
-                    bind_count
-                ));
-                vote_cursor_conditions.push_str(&format!(
-                    " AND (km.block_time > ${} OR (km.block_time = ${} AND v.id > ${}))",
+                cursor_conditions.push_str(&format!(
+                    " AND (km.block_time > ${} OR (km.block_time = ${} AND km.id > ${}))",
                     bind_count - 1,
                     bind_count - 1,
                     bind_count
@@ -2080,137 +2017,75 @@ impl DatabaseInterface for PostgresDbManager {
         }
 
         let order_clause = if options.sort_descending {
-            "ORDER BY block_time DESC, id DESC"
+            "ORDER BY km.block_time DESC, km.id DESC"
         } else {
-            "ORDER BY block_time ASC, id ASC"
+            "ORDER BY km.block_time ASC, km.id ASC"
         };
+        let final_limit = format!("LIMIT ${}", bind_count + 1);
 
-        let final_order_clause = format!("{} LIMIT ${}", order_clause, bind_count + 1);
-        let requester_param = bind_count + 2;
-
-        // Combined query to get notifications with detailed content information
+        // Optimized query: filter k_mentions first, then join with content details
         let query = format!(
             r#"
-            WITH notification_posts AS (
-                SELECT DISTINCT
-                    p.id, p.transaction_id, km.block_time, p.sender_pubkey,
-                    p.base64_encoded_message,
-                    km.id as mention_id,
-
-                    -- User profile lookup
+            WITH filtered_mentions AS (
+                -- Step 1: Get recent mentions from non-blocked users (leverages comprehensive index)
+                SELECT km.id as mention_id, km.content_id, km.content_type, km.block_time, km.sender_pubkey
+                FROM k_mentions km
+                WHERE km.mentioned_pubkey = $1
+                  AND km.sender_pubkey IS NOT NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM k_blocks kb
+                      WHERE kb.sender_pubkey = $1 AND kb.blocked_user_pubkey = km.sender_pubkey
+                  )
+                {cursor_conditions}
+                {order_clause}
+                {final_limit}
+            ),
+            notifications_with_content AS (
+                -- Step 2: Get content details only for filtered mentions
+                SELECT
+                    CASE fm.content_type
+                        WHEN 'post' THEN p.id
+                        WHEN 'reply' THEN r.id
+                        WHEN 'vote' THEN v.id
+                    END as id,
+                    fm.content_id as transaction_id,
+                    fm.block_time,
+                    fm.sender_pubkey,
+                    CASE fm.content_type
+                        WHEN 'post' THEN p.base64_encoded_message
+                        WHEN 'reply' THEN r.base64_encoded_message
+                        WHEN 'vote' THEN ''
+                    END as base64_encoded_message,
+                    fm.mention_id,
                     COALESCE(b.base64_encoded_nickname, '') as user_nickname,
                     b.base64_encoded_profile_image as user_profile_image,
-
-                    'post' as content_type
-                FROM k_mentions km
-                JOIN k_posts p ON km.content_id = p.transaction_id AND km.content_type = 'post'
+                    fm.content_type,
+                    -- Vote-specific fields
+                    CASE WHEN fm.content_type = 'vote' THEN v.vote ELSE NULL END as vote_type,
+                    CASE WHEN fm.content_type = 'vote' THEN v.block_time ELSE NULL END as vote_block_time,
+                    CASE WHEN fm.content_type = 'vote' THEN encode(v.post_id, 'hex') ELSE NULL END as content_id,
+                    CASE WHEN fm.content_type = 'vote' THEN COALESCE(vp.base64_encoded_message, vr.base64_encoded_message, '') ELSE NULL END as voted_content
+                FROM filtered_mentions fm
+                LEFT JOIN k_posts p ON fm.content_type = 'post' AND fm.content_id = p.transaction_id
+                LEFT JOIN k_replies r ON fm.content_type = 'reply' AND fm.content_id = r.transaction_id
+                LEFT JOIN k_votes v ON fm.content_type = 'vote' AND fm.content_id = v.transaction_id
+                -- Get user profile for sender
                 LEFT JOIN LATERAL (
                     SELECT base64_encoded_nickname, base64_encoded_profile_image
                     FROM k_broadcasts b
-                    WHERE b.sender_pubkey = p.sender_pubkey
-                    ORDER BY b.block_time DESC
-                    LIMIT 1
+                    WHERE b.sender_pubkey = fm.sender_pubkey
+                    ORDER BY b.block_time DESC LIMIT 1
                 ) b ON true
-                WHERE km.mentioned_pubkey = $1
-                  AND NOT EXISTS (
-                      SELECT 1 FROM k_blocks kb
-                      WHERE kb.sender_pubkey = ${requester_param} AND kb.blocked_user_pubkey = p.sender_pubkey
-                  )
-                {post_cursor_conditions}
-            ),
-            notification_replies AS (
-                SELECT DISTINCT
-                    r.id, r.transaction_id, km.block_time, r.sender_pubkey,
-                    r.base64_encoded_message,
-                    km.id as mention_id,
-
-                    -- User profile lookup
-                    COALESCE(b.base64_encoded_nickname, '') as user_nickname,
-                    b.base64_encoded_profile_image as user_profile_image,
-
-                    'reply' as content_type
-                FROM k_mentions km
-                JOIN k_replies r ON km.content_id = r.transaction_id AND km.content_type = 'reply'
-                LEFT JOIN LATERAL (
-                    SELECT base64_encoded_nickname, base64_encoded_profile_image
-                    FROM k_broadcasts b
-                    WHERE b.sender_pubkey = r.sender_pubkey
-                    ORDER BY b.block_time DESC
-                    LIMIT 1
-                ) b ON true
-                WHERE km.mentioned_pubkey = $1
-                  AND NOT EXISTS (
-                      SELECT 1 FROM k_blocks kb
-                      WHERE kb.sender_pubkey = ${requester_param} AND kb.blocked_user_pubkey = r.sender_pubkey
-                  )
-                {reply_cursor_conditions}
-            ),
-            notification_votes AS (
-                SELECT DISTINCT
-                    v.id, v.transaction_id, km.block_time, v.sender_pubkey,
-                    '' as base64_encoded_message, -- Votes don't have content
-                    km.id as mention_id,
-
-                    -- User profile lookup for voter
-                    COALESCE(b.base64_encoded_nickname, '') as user_nickname,
-                    b.base64_encoded_profile_image as user_profile_image,
-
-                    'vote' as content_type,
-                    v.vote as vote_type,
-                    v.block_time as vote_block_time,
-                    encode(v.post_id, 'hex') as content_id,
-                    encode(v.post_id, 'hex') as post_id,
-                    -- Get the content of the post/reply being voted on
-                    COALESCE(vp.base64_encoded_message, vr.base64_encoded_message, '') as voted_content
-                FROM k_mentions km
-                JOIN k_votes v ON km.content_id = v.transaction_id AND km.content_type = 'vote'
-                LEFT JOIN LATERAL (
-                    SELECT base64_encoded_nickname, base64_encoded_profile_image
-                    FROM k_broadcasts b
-                    WHERE b.sender_pubkey = v.sender_pubkey
-                    ORDER BY b.block_time DESC
-                    LIMIT 1
-                ) b ON true
-                -- Join with the post or reply being voted on
-                LEFT JOIN k_posts vp ON v.post_id = vp.transaction_id
-                LEFT JOIN k_replies vr ON v.post_id = vr.transaction_id
-                WHERE km.mentioned_pubkey = $1
-                  AND NOT EXISTS (
-                      SELECT 1 FROM k_blocks kb
-                      WHERE kb.sender_pubkey = ${requester_param} AND kb.blocked_user_pubkey = v.sender_pubkey
-                  )
-                {vote_cursor_conditions}
-            ),
-            all_notifications AS (
-                SELECT
-                    id, transaction_id, block_time, sender_pubkey,
-                    base64_encoded_message, mention_id, user_nickname, user_profile_image,
-                    content_type,
-                    NULL::text as vote_type, NULL::bigint as vote_block_time, NULL::text as content_id, NULL::text as post_id, NULL::text as voted_content
-                FROM notification_posts
-                UNION ALL
-                SELECT
-                    id, transaction_id, block_time, sender_pubkey,
-                    base64_encoded_message, mention_id, user_nickname, user_profile_image,
-                    content_type,
-                    NULL::text as vote_type, NULL::bigint as vote_block_time, NULL::text as content_id, NULL::text as post_id, NULL::text as voted_content
-                FROM notification_replies
-                UNION ALL
-                SELECT
-                    id, transaction_id, block_time, sender_pubkey,
-                    base64_encoded_message, mention_id, user_nickname, user_profile_image,
-                    content_type,
-                    vote_type, vote_block_time, content_id, post_id, voted_content
-                FROM notification_votes
+                -- For votes, get the content being voted on
+                LEFT JOIN k_posts vp ON fm.content_type = 'vote' AND v.post_id = vp.transaction_id
+                LEFT JOIN k_replies vr ON fm.content_type = 'vote' AND v.post_id = vr.transaction_id
+                {order_clause}
             )
-            SELECT * FROM all_notifications
-            {final_order_clause}
+            SELECT * FROM notifications_with_content
             "#,
-            post_cursor_conditions = post_cursor_conditions,
-            reply_cursor_conditions = reply_cursor_conditions,
-            vote_cursor_conditions = vote_cursor_conditions,
-            final_order_clause = final_order_clause,
-            requester_param = requester_param
+            cursor_conditions = cursor_conditions,
+            order_clause = order_clause,
+            final_limit = final_limit
         );
 
         // Build query with parameter binding
