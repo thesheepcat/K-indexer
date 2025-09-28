@@ -402,7 +402,7 @@ impl NotificationPost {
             vote_type: Some(vote_record.vote.clone()),
             mention_block_time: Some(mention_block_time),
             content_id: Some(vote_record.post_id.clone()),
-            post_id: Some(vote_record.post_id.clone()),
+            post_id: None,
             voted_content: Some(voted_content),
         }
     }
