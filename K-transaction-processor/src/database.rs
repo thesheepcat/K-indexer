@@ -1,12 +1,12 @@
 use crate::config::AppConfig;
 use anyhow::Result;
-use sqlx::{postgres::PgPoolOptions, PgPool, Row};
+use sqlx::{PgPool, Row, postgres::PgPoolOptions};
 use tracing::{error, info, warn};
 
 pub type DbPool = PgPool;
 
 // Schema version management
-const SCHEMA_VERSION: i32 = 2;
+const SCHEMA_VERSION: i32 = 3;
 
 /// K-transaction-processor Database Client
 /// Similar to KaspaDbClient in Simply Kaspa Indexer
@@ -35,10 +35,14 @@ impl KDbClient {
             .get::<bool, _>(0);
 
             if table_exists {
-                info!("✓ Transactions table found - proceeding with K-transaction-processor schema setup");
+                info!(
+                    "✓ Transactions table found - proceeding with K-transaction-processor schema setup"
+                );
                 return Ok(());
             } else {
-                warn!("⚠️  Transactions table not found - K-transaction-processor requires the main Kaspa indexer to be running first");
+                warn!(
+                    "⚠️  Transactions table not found - K-transaction-processor requires the main Kaspa indexer to be running first"
+                );
                 warn!("   Waiting 10 seconds before checking again...");
                 tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
             }
@@ -84,10 +88,22 @@ impl KDbClient {
 
                         // v1 -> v2: Add signature deduplication and k_blocks table
                         if current_version == 1 {
-                            info!("Applying migration v1 -> v2 (signature deduplication and blocking)");
+                            info!(
+                                "Applying migration v1 -> v2 (signature deduplication and blocking)"
+                            );
                             execute_ddl(MIGRATION_V1_TO_V2_SQL, &self.pool).await?;
                             current_version = 2;
                             info!("Migration v1 -> v2 completed successfully");
+                        }
+
+                        // v2 -> v3: Add sender_pubkey to k_mentions for optimized notifications
+                        if current_version == 2 {
+                            info!(
+                                "Applying migration v2 -> v3 (optimized k_mentions for notifications)"
+                            );
+                            execute_ddl(MIGRATION_V2_TO_V3_SQL, &self.pool).await?;
+                            current_version = 3;
+                            info!("Migration v2 -> v3 completed successfully");
                         }
 
                         info!(
@@ -103,7 +119,8 @@ impl KDbClient {
                 } else if version > SCHEMA_VERSION {
                     return Err(anyhow::anyhow!(
                         "Found newer & unsupported schema version {}. Current supported version is {}",
-                        version, SCHEMA_VERSION
+                        version,
+                        SCHEMA_VERSION
                     ));
                 } else {
                     info!("Schema version {} is up to date", version);
@@ -171,6 +188,7 @@ const SCHEMA_UP_SQL: &str = include_str!("migrations/schema/up.sql");
 const SCHEMA_DOWN_SQL: &str = include_str!("migrations/schema/down.sql");
 const MIGRATION_V0_TO_V1_SQL: &str = include_str!("migrations/schema/v0_to_v1.sql");
 const MIGRATION_V1_TO_V2_SQL: &str = include_str!("migrations/schema/v1_to_v2.sql");
+const MIGRATION_V2_TO_V3_SQL: &str = include_str!("migrations/schema/v2_to_v3.sql");
 
 pub async fn create_pool(config: &AppConfig) -> Result<DbPool> {
     let connection_string = config.connection_string();
@@ -359,13 +377,82 @@ async fn verify_schema_setup(pool: &DbPool) -> Result<()> {
         all_verified = false;
     }
 
-    // Check indexes
+    // Explicit verification of all 31 expected K protocol indexes
+    let expected_indexes = vec![
+        // v0_to_v1 indexes (22 total)
+        "idx_k_posts_transaction_id",
+        "idx_k_posts_sender_pubkey",
+        "idx_k_posts_block_time",
+        "idx_k_replies_transaction_id",
+        "idx_k_replies_sender_pubkey",
+        "idx_k_replies_post_id",
+        "idx_k_replies_block_time",
+        "idx_k_broadcasts_transaction_id",
+        "idx_k_broadcasts_sender_pubkey",
+        "idx_k_broadcasts_block_time",
+        "idx_k_votes_transaction_id",
+        "idx_k_votes_sender_pubkey",
+        "idx_k_votes_post_id",
+        "idx_k_votes_vote",
+        "idx_k_votes_block_time",
+        "idx_k_mentions_content_id",
+        "idx_k_mentions_mentioned_pubkey",
+        "idx_k_mentions_content_type",
+        "idx_k_votes_post_id_sender",
+        "idx_k_replies_post_id_block_time",
+        "idx_k_posts_block_time_id_covering",
+        "idx_k_mentions_content_type_id",
+        // v1_to_v2 indexes (9 total)
+        "idx_k_posts_sender_signature_unique",
+        "idx_k_replies_sender_signature_unique",
+        "idx_k_votes_sender_signature_unique",
+        "idx_k_blocks_sender_signature_unique",
+        "idx_k_blocks_sender_blocked_user_unique",
+        "idx_k_blocks_sender_pubkey",
+        "idx_k_blocks_blocked_user_pubkey",
+        "idx_k_blocks_block_time",
+        // v2_to_v3 replacement (net 0: drops idx_k_mentions_optimal, adds idx_k_mentions_comprehensive)
+        "idx_k_mentions_comprehensive",
+    ];
+
+    let mut missing_indexes = Vec::new();
+
+    for index_name in &expected_indexes {
+        let index_exists =
+            sqlx::query("SELECT EXISTS(SELECT 1 FROM pg_indexes WHERE indexname = $1)")
+                .bind(index_name)
+                .fetch_one(pool)
+                .await?
+                .get::<bool, _>(0);
+
+        if index_exists {
+            info!("  ✓ Index '{}' verified", index_name);
+        } else {
+            error!("  ✗ Index '{}' NOT found", index_name);
+            missing_indexes.push(index_name);
+            all_verified = false;
+        }
+    }
+
+    // Verify total count matches expected (31 indexes)
     let index_count = sqlx::query("SELECT COUNT(*) FROM pg_indexes WHERE indexname LIKE 'idx_k_%'")
         .fetch_one(pool)
         .await?
         .get::<i64, _>(0);
 
-    info!("  ✓ {} K protocol indexes verified", index_count);
+    if index_count == 31 {
+        info!(
+            "  ✓ Expected 31 K protocol indexes verified (found {})",
+            index_count
+        );
+    } else {
+        error!("  ✗ Expected 31 K protocol indexes, found {}", index_count);
+        all_verified = false;
+    }
+
+    if !missing_indexes.is_empty() {
+        error!("  ✗ Missing indexes: {:?}", missing_indexes);
+    }
 
     if all_verified {
         info!("✓ Schema setup verification PASSED");

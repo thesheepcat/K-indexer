@@ -1,13 +1,14 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use sqlx::{postgres::PgPoolOptions, PgPool, Row};
+use sqlx::{PgPool, Row, postgres::PgPoolOptions};
 use tracing::{info, warn};
 
 use crate::database_trait::{
     DatabaseError, DatabaseInterface, DatabaseResult, PaginatedResult, QueryOptions,
 };
 use crate::models::{
-    ContentRecord, KBroadcastRecord, KPostRecord, KReplyRecord, KVoteRecord, PaginationMetadata,
+    ContentRecord, KBroadcastRecord, KPostRecord, KReplyRecord, KVoteRecord,
+    NotificationContentRecord, PaginationMetadata,
 };
 
 pub struct PostgresDbManager {
@@ -169,6 +170,7 @@ impl HasCompoundCursor for ContentRecord {
         match self {
             ContentRecord::Post(post) => post.block_time,
             ContentRecord::Reply(reply) => reply.block_time,
+            ContentRecord::Vote(vote) => vote.block_time,
         }
     }
 
@@ -176,6 +178,7 @@ impl HasCompoundCursor for ContentRecord {
         match self {
             ContentRecord::Post(post) => post.id,
             ContentRecord::Reply(reply) => reply.id,
+            ContentRecord::Vote(vote) => vote.id,
         }
     }
 }
@@ -958,7 +961,7 @@ impl DatabaseInterface for PostgresDbManager {
                         None => {
                             return Err(DatabaseError::QueryError(
                                 "Missing post_id for reply".to_string(),
-                            ))
+                            ));
                         }
                     };
 
@@ -985,7 +988,7 @@ impl DatabaseInterface for PostgresDbManager {
                     return Err(DatabaseError::QueryError(format!(
                         "Unknown content type: {}",
                         content_type
-                    )))
+                    )));
                 }
             };
 
@@ -1229,7 +1232,7 @@ impl DatabaseInterface for PostgresDbManager {
                 return Err(DatabaseError::QueryError(format!(
                     "Unknown content type: {}",
                     content_type
-                )))
+                )));
             }
         };
 
@@ -1902,6 +1905,338 @@ impl DatabaseInterface for PostgresDbManager {
 
         Ok(PaginatedResult {
             items: posts_with_block_status,
+            pagination,
+        })
+    }
+
+    async fn get_notification_count(
+        &self,
+        requester_pubkey: &str,
+        after: Option<String>,
+    ) -> DatabaseResult<u64> {
+        let requester_pubkey_bytes = Self::decode_hex_to_bytes(requester_pubkey)?;
+
+        let count_result = if let Some(cursor_str) = after {
+            // If after cursor is provided, count notifications since that cursor (excluding blocked users)
+            if let Ok((cursor_timestamp, cursor_id)) = Self::parse_compound_cursor(&cursor_str) {
+                sqlx::query_scalar::<_, i64>(
+                    r#"
+                    SELECT COUNT(*)
+                    FROM (
+                        SELECT 1
+                        FROM k_mentions km
+                        WHERE km.mentioned_pubkey = $1
+                          AND km.sender_pubkey IS NOT NULL
+                          AND km.sender_pubkey != $1
+                          AND (km.block_time > $2 OR (km.block_time = $2 AND km.id > $3))
+                          AND NOT EXISTS (
+                              SELECT 1 FROM k_blocks kb
+                              WHERE kb.sender_pubkey = $1 AND kb.blocked_user_pubkey = km.sender_pubkey
+                          )
+                        ORDER BY km.block_time DESC, km.id DESC
+                        LIMIT 31
+                    ) recent_notifications
+                    "#,
+                )
+                .bind(&requester_pubkey_bytes)
+                .bind(cursor_timestamp as i64)
+                .bind(cursor_id)
+                .fetch_one(&self.pool)
+                .await
+            } else {
+                return Err(DatabaseError::InvalidInput(
+                    "Invalid cursor format".to_string(),
+                ));
+            }
+        } else {
+            // If no cursor is provided, count all notifications (excluding blocked users)
+            sqlx::query_scalar::<_, i64>(
+                r#"
+                SELECT COUNT(*)
+                FROM (
+                    SELECT 1
+                    FROM k_mentions km
+                    WHERE km.mentioned_pubkey = $1
+                      AND km.sender_pubkey IS NOT NULL
+                      AND km.sender_pubkey != $1
+                      AND NOT EXISTS (
+                          SELECT 1 FROM k_blocks kb
+                          WHERE kb.sender_pubkey = $1 AND kb.blocked_user_pubkey = km.sender_pubkey
+                      )
+                    ORDER BY km.block_time DESC, km.id DESC
+                    LIMIT 31
+                ) recent_notifications
+                "#,
+            )
+            .bind(&requester_pubkey_bytes)
+            .fetch_one(&self.pool)
+            .await
+        };
+
+        match count_result {
+            Ok(count) => Ok(count as u64),
+            Err(e) => Err(DatabaseError::QueryError(format!(
+                "Failed to count notifications: {}",
+                e
+            ))),
+        }
+    }
+
+    async fn get_notifications_with_content_details(
+        &self,
+        requester_pubkey: &str,
+        options: QueryOptions,
+    ) -> DatabaseResult<PaginatedResult<NotificationContentRecord>> {
+        let requester_pubkey_bytes = Self::decode_hex_to_bytes(requester_pubkey)?;
+        let limit = options.limit.unwrap_or(20) as i64;
+        let offset_limit = limit + 1; // Get one extra to check if there are more
+
+        // Build cursor conditions for optimized k_mentions filtering
+        let mut cursor_conditions = String::new();
+        let mut bind_count = 1;
+
+        if let Some(before_cursor) = &options.before {
+            if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
+                bind_count += 2;
+                cursor_conditions.push_str(&format!(
+                    " AND (km.block_time < ${} OR (km.block_time = ${} AND km.id < ${}))",
+                    bind_count - 1,
+                    bind_count - 1,
+                    bind_count
+                ));
+            }
+        }
+        if let Some(after_cursor) = &options.after {
+            if let Ok((after_timestamp, after_id)) = Self::parse_compound_cursor(after_cursor) {
+                bind_count += 2;
+                cursor_conditions.push_str(&format!(
+                    " AND (km.block_time > ${} OR (km.block_time = ${} AND km.id > ${}))",
+                    bind_count - 1,
+                    bind_count - 1,
+                    bind_count
+                ));
+            }
+        }
+
+        let mentions_order_clause = if options.sort_descending {
+            "ORDER BY km.block_time DESC, km.id DESC"
+        } else {
+            "ORDER BY km.block_time ASC, km.id ASC"
+        };
+
+        let final_order_clause = if options.sort_descending {
+            "ORDER BY block_time DESC, mention_id DESC"
+        } else {
+            "ORDER BY block_time ASC, mention_id ASC"
+        };
+        let final_limit = format!("LIMIT ${}", bind_count + 1);
+
+        // Optimized query: filter k_mentions first, then join with content details
+        let query = format!(
+            r#"
+            WITH filtered_mentions AS (
+                -- Step 1: Get recent mentions from non-blocked users (leverages comprehensive index)
+                SELECT km.id as mention_id, km.content_id, km.content_type, km.block_time, km.sender_pubkey
+                FROM k_mentions km
+                WHERE km.mentioned_pubkey = $1
+                  AND km.sender_pubkey IS NOT NULL
+                  AND km.sender_pubkey != $1
+                  AND NOT EXISTS (
+                      SELECT 1 FROM k_blocks kb
+                      WHERE kb.sender_pubkey = $1 AND kb.blocked_user_pubkey = km.sender_pubkey
+                  )
+                {cursor_conditions}
+                {mentions_order_clause}
+                {final_limit}
+            ),
+            notifications_with_content AS (
+                -- Step 2: Get content details only for filtered mentions
+                SELECT
+                    CASE fm.content_type
+                        WHEN 'post' THEN p.id
+                        WHEN 'reply' THEN r.id
+                        WHEN 'vote' THEN v.id
+                    END as id,
+                    fm.content_id as transaction_id,
+                    fm.block_time,
+                    fm.sender_pubkey,
+                    CASE fm.content_type
+                        WHEN 'post' THEN p.base64_encoded_message
+                        WHEN 'reply' THEN r.base64_encoded_message
+                        WHEN 'vote' THEN ''
+                    END as base64_encoded_message,
+                    fm.mention_id,
+                    COALESCE(b.base64_encoded_nickname, '') as user_nickname,
+                    b.base64_encoded_profile_image as user_profile_image,
+                    fm.content_type,
+                    -- Vote-specific fields
+                    CASE WHEN fm.content_type = 'vote' THEN v.vote ELSE NULL END as vote_type,
+                    CASE WHEN fm.content_type = 'vote' THEN v.block_time ELSE NULL END as vote_block_time,
+                    CASE WHEN fm.content_type = 'vote' THEN encode(v.post_id, 'hex') ELSE NULL END as content_id,
+                    CASE WHEN fm.content_type = 'vote' THEN COALESCE(vp.base64_encoded_message, vr.base64_encoded_message, '') ELSE NULL END as voted_content
+                FROM filtered_mentions fm
+                LEFT JOIN k_posts p ON fm.content_type = 'post' AND fm.content_id = p.transaction_id
+                LEFT JOIN k_replies r ON fm.content_type = 'reply' AND fm.content_id = r.transaction_id
+                LEFT JOIN k_votes v ON fm.content_type = 'vote' AND fm.content_id = v.transaction_id
+                -- Get user profile for sender
+                LEFT JOIN LATERAL (
+                    SELECT base64_encoded_nickname, base64_encoded_profile_image
+                    FROM k_broadcasts b
+                    WHERE b.sender_pubkey = fm.sender_pubkey
+                    ORDER BY b.block_time DESC LIMIT 1
+                ) b ON true
+                -- For votes, get the content being voted on
+                LEFT JOIN k_posts vp ON fm.content_type = 'vote' AND v.post_id = vp.transaction_id
+                LEFT JOIN k_replies vr ON fm.content_type = 'vote' AND v.post_id = vr.transaction_id
+                {final_order_clause}
+            )
+            SELECT * FROM notifications_with_content
+            "#,
+            cursor_conditions = cursor_conditions,
+            mentions_order_clause = mentions_order_clause,
+            final_order_clause = final_order_clause,
+            final_limit = final_limit
+        );
+
+        // Build query with parameter binding
+        let mut query_builder = sqlx::query(&query).bind(&requester_pubkey_bytes);
+
+        // Add cursor parameters if present
+        if let Some(before_cursor) = &options.before {
+            if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
+                query_builder = query_builder.bind(before_timestamp as i64).bind(before_id);
+            }
+        }
+
+        if let Some(after_cursor) = &options.after {
+            if let Ok((after_timestamp, after_id)) = Self::parse_compound_cursor(after_cursor) {
+                query_builder = query_builder.bind(after_timestamp as i64).bind(after_id);
+            }
+        }
+
+        query_builder = query_builder
+            .bind(offset_limit)
+            .bind(&requester_pubkey_bytes);
+
+        let rows = query_builder
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
+
+        let has_more = rows.len() > limit as usize;
+        let actual_items = if has_more {
+            rows.into_iter().take(limit as usize).collect::<Vec<_>>()
+        } else {
+            rows.into_iter().collect::<Vec<_>>()
+        };
+
+        let mut notifications = Vec::new();
+        for row in actual_items {
+            let transaction_id: Vec<u8> = row.get("transaction_id");
+            let sender_pubkey: Vec<u8> = row.get("sender_pubkey");
+            let content_type: String = row.get("content_type");
+            let mention_id: i64 = row.get("mention_id");
+            let block_time: i64 = row.get("block_time");
+
+            if content_type == "post" {
+                let post_record = KPostRecord {
+                    id: row.get::<i64, _>("id"),
+                    transaction_id: Self::encode_bytes_to_hex(&transaction_id),
+                    block_time: row.get::<i64, _>("block_time") as u64,
+                    sender_pubkey: Self::encode_bytes_to_hex(&sender_pubkey),
+                    sender_signature: String::new(),
+                    base64_encoded_message: row.get("base64_encoded_message"),
+                    mentioned_pubkeys: Vec::new(),
+                    up_votes_count: None,
+                    down_votes_count: None,
+                    is_upvoted: None,
+                    is_downvoted: None,
+                    replies_count: None,
+                    user_nickname: Some(row.get("user_nickname")),
+                    user_profile_image: row.get("user_profile_image"),
+                };
+
+                notifications.push(NotificationContentRecord {
+                    content: ContentRecord::Post(post_record),
+                    mention_id,
+                    mention_block_time: block_time as u64,
+                });
+            } else if content_type == "reply" {
+                let reply_record = KReplyRecord {
+                    id: row.get::<i64, _>("id"),
+                    transaction_id: Self::encode_bytes_to_hex(&transaction_id),
+                    block_time: row.get::<i64, _>("block_time") as u64,
+                    sender_pubkey: Self::encode_bytes_to_hex(&sender_pubkey),
+                    sender_signature: String::new(),
+                    post_id: String::new(),
+                    base64_encoded_message: row.get("base64_encoded_message"),
+                    mentioned_pubkeys: Vec::new(),
+                    replies_count: None,
+                    up_votes_count: None,
+                    down_votes_count: None,
+                    is_upvoted: None,
+                    is_downvoted: None,
+                    user_nickname: Some(row.get("user_nickname")),
+                    user_profile_image: row.get("user_profile_image"),
+                };
+
+                notifications.push(NotificationContentRecord {
+                    content: ContentRecord::Reply(reply_record),
+                    mention_id,
+                    mention_block_time: block_time as u64,
+                });
+            } else if content_type == "vote" {
+                let vote_record = KVoteRecord {
+                    id: row.get::<i64, _>("id"),
+                    transaction_id: Self::encode_bytes_to_hex(&transaction_id),
+                    block_time: row.get::<i64, _>("block_time") as u64,
+                    sender_pubkey: Self::encode_bytes_to_hex(&sender_pubkey),
+                    sender_signature: String::new(),
+                    post_id: row
+                        .get::<Option<String>, _>("content_id")
+                        .unwrap_or_default(),
+                    vote: row
+                        .get::<Option<String>, _>("vote_type")
+                        .unwrap_or_default(),
+                    mention_block_time: Some(row.get::<i64, _>("block_time") as u64), // Now k_mentions.block_time
+                    voted_content: row.get::<Option<String>, _>("voted_content"),
+                    user_nickname: Some(row.get("user_nickname")),
+                    user_profile_image: row.get("user_profile_image"),
+                };
+
+                notifications.push(NotificationContentRecord {
+                    content: ContentRecord::Vote(vote_record),
+                    mention_id,
+                    mention_block_time: block_time as u64,
+                });
+            }
+        }
+
+        // Generate pagination info
+        let mut pagination = PaginationMetadata {
+            has_more,
+            next_cursor: None,
+            prev_cursor: None,
+        };
+
+        if !notifications.is_empty() {
+            let first_item = &notifications[0];
+            let last_item = &notifications[notifications.len() - 1];
+
+            // Use mention data for cursor generation
+            pagination.prev_cursor = Some(Self::create_compound_cursor(
+                first_item.mention_block_time,
+                first_item.mention_id,
+            ));
+
+            pagination.next_cursor = Some(Self::create_compound_cursor(
+                last_item.mention_block_time,
+                last_item.mention_id,
+            ));
+        }
+
+        Ok(PaginatedResult {
+            items: notifications,
             pagination,
         })
     }

@@ -1,7 +1,8 @@
 use crate::database_trait::{DatabaseInterface, QueryOptions};
 use crate::models::{
-    ApiError, ContentRecord, PaginatedPostsResponse, PaginatedRepliesResponse,
-    PaginatedUsersResponse, PostDetailsResponse, ServerPost, ServerReply, ServerUserPost,
+    ApiError, ContentRecord, NotificationPost, PaginatedNotificationsResponse,
+    PaginatedPostsResponse, PaginatedRepliesResponse, PaginatedUsersResponse, PostDetailsResponse,
+    ServerPost, ServerReply, ServerUserPost,
 };
 use serde_json;
 use std::sync::Arc;
@@ -612,6 +613,28 @@ impl ApiHandlers {
                         *is_blocked,
                     )
                 }
+                ContentRecord::Vote(_vote_record) => {
+                    // For get-mentions, votes are returned as ServerReply (same structure as ServerPost)
+                    // but with minimal content since votes don't have message content
+                    ServerPost {
+                        id: _vote_record.transaction_id.clone(),
+                        user_public_key: _vote_record.sender_pubkey.clone(),
+                        post_content: String::new(), // Votes don't have content in mentions
+                        signature: _vote_record.sender_signature.clone(),
+                        timestamp: _vote_record.block_time,
+                        replies_count: 0,
+                        up_votes_count: 0,
+                        down_votes_count: 0,
+                        reposts_count: 0,
+                        parent_post_id: Some(_vote_record.post_id.clone()),
+                        mentioned_pubkeys: Vec::new(),
+                        is_upvoted: None,
+                        is_downvoted: None,
+                        user_nickname: _vote_record.user_nickname.clone(),
+                        user_profile_image: _vote_record.user_profile_image.clone(),
+                        blocked_user: Some(*is_blocked),
+                    }
+                }
             })
             .collect();
 
@@ -626,6 +649,118 @@ impl ApiHandlers {
             Ok(json) => Ok(json),
             Err(err) => {
                 log_error!("Failed to serialize paginated mentions response: {}", err);
+                Err(self.create_error_response(
+                    "Internal server error during serialization",
+                    "SERIALIZATION_ERROR",
+                ))
+            }
+        }
+    }
+
+    /// GET /get-notifications?requesterPubkey={requesterPubkey}&limit={limit}&before={before}&after={after}
+    /// Fetch notifications for a user based on mentions in k_mentions table with detailed content information
+    pub async fn get_notifications_paginated(
+        &self,
+        requester_pubkey: &str,
+        limit: u32,
+        before: Option<String>,
+        after: Option<String>,
+    ) -> Result<String, String> {
+        // Validate requester public key format (66 hex characters for compressed public key)
+        if requester_pubkey.len() != 66 {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Must be 66 hex characters.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        if !requester_pubkey.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Must contain only hex characters.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        // Validate compressed public key prefix (should start with 02 or 03)
+        if !requester_pubkey.starts_with("02") && !requester_pubkey.starts_with("03") {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Compressed public key must start with 02 or 03.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        // Fetch limit + 1 to check if there are more results
+        let fetch_limit = limit + 1;
+        let options = QueryOptions {
+            limit: Some(fetch_limit as u64),
+            before,
+            after,
+            sort_descending: true,
+        };
+
+        // Use the database method to get notifications with content details
+        let notifications_result = match self
+            .db
+            .get_notifications_with_content_details(requester_pubkey, options)
+            .await
+        {
+            Ok(result) => result,
+            Err(err) => {
+                log_error!("Error getting notifications for user: {}", err);
+                return Err(self.create_error_response(
+                    "Internal server error during database query",
+                    "DATABASE_ERROR",
+                ));
+            }
+        };
+
+        // Convert NotificationContentRecords to NotificationPost with correct mention cursors
+        let all_notifications: Vec<NotificationPost> = notifications_result
+            .items
+            .iter()
+            .map(|notification_record| match &notification_record.content {
+                ContentRecord::Post(post_record) => {
+                    NotificationPost::from_k_post_record_with_mention_cursor(
+                        &post_record,
+                        notification_record.mention_id,
+                        notification_record.mention_block_time,
+                    )
+                }
+                ContentRecord::Reply(reply_record) => {
+                    NotificationPost::from_k_reply_record_with_mention_cursor(
+                        &reply_record,
+                        notification_record.mention_id,
+                        notification_record.mention_block_time,
+                    )
+                }
+                ContentRecord::Vote(vote_record) => {
+                    // For votes, we now have enriched vote record with all necessary data
+                    NotificationPost::from_k_vote_record_with_mention_cursor(
+                        &vote_record,
+                        notification_record.mention_id,
+                        notification_record.mention_block_time,
+                        vote_record.voted_content.clone().unwrap_or_default(),
+                        vote_record.user_nickname.clone(),
+                        vote_record.user_profile_image.clone(),
+                    )
+                }
+            })
+            .collect();
+
+        let pagination = notifications_result.pagination;
+
+        let response = PaginatedNotificationsResponse {
+            notifications: all_notifications,
+            pagination,
+        };
+
+        match serde_json::to_string(&response) {
+            Ok(json) => Ok(json),
+            Err(err) => {
+                log_error!(
+                    "Failed to serialize paginated notifications response: {}",
+                    err
+                );
                 Err(self.create_error_response(
                     "Internal server error during serialization",
                     "SERIALIZATION_ERROR",
@@ -704,6 +839,28 @@ impl ApiHandlers {
                                 is_blocked,
                             );
                         PostDetailsResponse { post: server_reply }
+                    }
+                    ContentRecord::Vote(k_vote_record) => {
+                        // For get-post-details, votes are returned as ServerPost with vote-specific info
+                        let server_vote = ServerPost {
+                            id: k_vote_record.transaction_id.clone(),
+                            user_public_key: k_vote_record.sender_pubkey.clone(),
+                            post_content: String::new(), // Votes don't have content
+                            signature: k_vote_record.sender_signature.clone(),
+                            timestamp: k_vote_record.block_time,
+                            replies_count: 0,
+                            up_votes_count: 0,
+                            down_votes_count: 0,
+                            reposts_count: 0,
+                            parent_post_id: Some(k_vote_record.post_id.clone()),
+                            mentioned_pubkeys: Vec::new(),
+                            is_upvoted: None,
+                            is_downvoted: None,
+                            user_nickname: k_vote_record.user_nickname.clone(),
+                            user_profile_image: k_vote_record.user_profile_image.clone(),
+                            blocked_user: Some(is_blocked),
+                        };
+                        PostDetailsResponse { post: server_vote }
                     }
                 };
 
@@ -952,6 +1109,71 @@ impl ApiHandlers {
                 Err(self.create_error_response(
                     "Internal server error during serialization",
                     "SERIALIZATION_ERROR",
+                ))
+            }
+        }
+    }
+
+    /// GET /get-notifications-amount
+    /// Get count of notifications for a specific user, optionally with cursor
+    pub async fn get_notification_count(
+        &self,
+        requester_pubkey: &str,
+        after: Option<String>,
+    ) -> Result<String, String> {
+        // Validate requester public key format (66 hex characters for compressed public key)
+        if requester_pubkey.len() != 66 {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Must be 66 hex characters.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        if !requester_pubkey.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Must contain only hex characters.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        // Validate compressed public key prefix (should start with 02 or 03)
+        if !requester_pubkey.starts_with("02") && !requester_pubkey.starts_with("03") {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Compressed public key must start with 02 or 03.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        // Get notification count from database
+        match self
+            .db
+            .get_notification_count(requester_pubkey, after)
+            .await
+        {
+            Ok(count) => {
+                let response = serde_json::json!({
+                    "count": count
+                });
+                match serde_json::to_string(&response) {
+                    Ok(json_response) => Ok(json_response),
+                    Err(err) => {
+                        log_error!("Failed to serialize notification count response: {}", err);
+                        Err(self.create_error_response(
+                            "Internal server error during serialization",
+                            "SERIALIZATION_ERROR",
+                        ))
+                    }
+                }
+            }
+            Err(err) => {
+                log_error!(
+                    "Database error while getting notification count for user {}: {}",
+                    requester_pubkey,
+                    err
+                );
+                Err(self.create_error_response(
+                    "Internal server error during database query",
+                    "DATABASE_ERROR",
                 ))
             }
         }

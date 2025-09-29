@@ -1,5 +1,6 @@
 use crate::models::{
-    ContentRecord, KBroadcastRecord, KPostRecord, KReplyRecord, PaginationMetadata,
+    ContentRecord, KBroadcastRecord, KPostRecord, KReplyRecord, NotificationContentRecord,
+    PaginationMetadata,
 };
 use async_trait::async_trait;
 use std::result::Result as StdResult;
@@ -118,10 +119,24 @@ pub trait DatabaseInterface: Send + Sync {
         options: QueryOptions,
     ) -> DatabaseResult<PaginatedResult<(ContentRecord, bool)>>;
 
+    // Optimized single-query method for get-notifications API with content details (blocked users excluded)
+    async fn get_notifications_with_content_details(
+        &self,
+        requester_pubkey: &str,
+        options: QueryOptions,
+    ) -> DatabaseResult<PaginatedResult<NotificationContentRecord>>;
+
     // Merged optimized single-query method for get-post-details API with blocking awareness
     async fn get_content_by_id_with_metadata_and_block_status(
         &self,
         content_id: &str,
         requester_pubkey: &str,
     ) -> DatabaseResult<Option<(ContentRecord, bool)>>;
+
+    // Get count of notifications (mentions) for a user
+    async fn get_notification_count(
+        &self,
+        requester_pubkey: &str,
+        after: Option<String>,
+    ) -> DatabaseResult<u64>;
 }

@@ -119,6 +119,11 @@ pub struct KVoteRecord {
     pub sender_signature: String,
     pub post_id: String,
     pub vote: String,
+    // Optional enriched metadata fields for notifications
+    pub mention_block_time: Option<u64>,
+    pub voted_content: Option<String>,
+    pub user_nickname: Option<String>,
+    pub user_profile_image: Option<String>,
 }
 
 // Merged content record for unified content retrieval
@@ -126,6 +131,15 @@ pub struct KVoteRecord {
 pub enum ContentRecord {
     Post(KPostRecord),
     Reply(KReplyRecord),
+    Vote(KVoteRecord),
+}
+
+// Content record with mention metadata for notifications
+#[derive(Debug, Clone)]
+pub struct NotificationContentRecord {
+    pub content: ContentRecord,
+    pub mention_id: i64,
+    pub mention_block_time: u64,
 }
 
 // API Response models
@@ -180,6 +194,12 @@ pub struct PaginationMetadata {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PaginatedPostsResponse {
     pub posts: Vec<ServerPost>,
+    pub pagination: PaginationMetadata,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PaginatedNotificationsResponse {
+    pub notifications: Vec<NotificationPost>,
     pub pagination: PaginationMetadata,
 }
 
@@ -297,6 +317,97 @@ impl ServerPost {
 }
 
 pub type ServerReply = ServerPost;
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationPost {
+    pub id: String,
+    pub user_public_key: String,
+    pub post_content: String,
+    pub timestamp: u64,
+    pub user_nickname: Option<String>,
+    pub user_profile_image: Option<String>,
+    pub content_type: String, // "post", "reply", or "vote" from k_mentions table
+    pub cursor: String,       // Compound cursor combining block_time and k_mentions.id
+    // Vote-specific fields
+    pub vote_type: Option<String>,       // "upvote" or "downvote"
+    pub mention_block_time: Option<u64>, // block_time from k_mentions table
+    pub content_id: Option<String>,      // The ID of the content being voted on
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub post_id: Option<String>, // The post ID that the vote refers to
+    pub voted_content: Option<String>,   // Content of the post/reply being voted on
+}
+
+impl NotificationPost {
+    pub fn from_k_post_record_with_mention_cursor(
+        record: &KPostRecord,
+        mention_id: i64,
+        mention_block_time: u64,
+    ) -> Self {
+        Self {
+            id: record.transaction_id.clone(),
+            user_public_key: record.sender_pubkey.clone(),
+            post_content: record.base64_encoded_message.clone(),
+            timestamp: mention_block_time,
+            user_nickname: record.user_nickname.clone(),
+            user_profile_image: record.user_profile_image.clone(),
+            content_type: "post".to_string(),
+            cursor: format!("{}_{}", mention_block_time, mention_id),
+            vote_type: None,
+            mention_block_time: None,
+            content_id: None,
+            post_id: None,
+            voted_content: None,
+        }
+    }
+
+    pub fn from_k_reply_record_with_mention_cursor(
+        record: &KReplyRecord,
+        mention_id: i64,
+        mention_block_time: u64,
+    ) -> Self {
+        Self {
+            id: record.transaction_id.clone(),
+            user_public_key: record.sender_pubkey.clone(),
+            post_content: record.base64_encoded_message.clone(),
+            timestamp: mention_block_time,
+            user_nickname: record.user_nickname.clone(),
+            user_profile_image: record.user_profile_image.clone(),
+            content_type: "reply".to_string(),
+            cursor: format!("{}_{}", mention_block_time, mention_id),
+            vote_type: None,
+            mention_block_time: None,
+            content_id: None,
+            post_id: None,
+            voted_content: None,
+        }
+    }
+
+    pub fn from_k_vote_record_with_mention_cursor(
+        vote_record: &KVoteRecord,
+        mention_id: i64,
+        mention_block_time: u64,
+        voted_content: String,
+        user_nickname: Option<String>,
+        user_profile_image: Option<String>,
+    ) -> Self {
+        Self {
+            id: vote_record.transaction_id.clone(),
+            user_public_key: vote_record.sender_pubkey.clone(),
+            post_content: String::new(), // Votes don't have content
+            timestamp: mention_block_time,
+            user_nickname,
+            user_profile_image,
+            content_type: "vote".to_string(),
+            cursor: format!("{}_{}", mention_block_time, mention_id),
+            vote_type: Some(vote_record.vote.clone()),
+            mention_block_time: Some(mention_block_time),
+            content_id: Some(vote_record.post_id.clone()),
+            post_id: None,
+            voted_content: Some(voted_content),
+        }
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RepliesResponse {
