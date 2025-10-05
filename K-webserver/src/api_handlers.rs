@@ -80,14 +80,10 @@ impl ApiHandlers {
             sort_descending: true,
         };
 
-        // Use the new optimized single-query method with blocking awareness
+        // Use the new k_contents table method with blocking awareness
         let posts_result = match self
             .db
-            .get_posts_by_user_with_metadata_and_block_status(
-                user_public_key,
-                requester_pubkey,
-                options,
-            )
+            .get_posts_by_user(user_public_key, requester_pubkey, options)
             .await
         {
             Ok(result) => result,
@@ -170,12 +166,8 @@ impl ApiHandlers {
             sort_descending: true,
         };
 
-        // Use the new optimized single-query method with blocking awareness
-        let posts_result = match self
-            .db
-            .get_all_posts_with_metadata_and_block_status(requester_pubkey, options)
-            .await
-        {
+        // Use the new k_contents table query method with blocking awareness
+        let posts_result = match self.db.get_all_posts(requester_pubkey, options).await {
             Ok(result) => result,
             Err(err) => {
                 log_error!(
@@ -339,14 +331,10 @@ impl ApiHandlers {
             sort_descending: true,
         };
 
-        // Use the new optimized single-query method with blocking awareness
+        // Use the new k_contents table method with blocking awareness
         let replies_result = match self
             .db
-            .get_replies_by_post_id_with_metadata_and_block_status(
-                post_id,
-                requester_pubkey,
-                options,
-            )
+            .get_replies_by_post_id(post_id, requester_pubkey, options)
             .await
         {
             Ok(result) => result,
@@ -455,14 +443,10 @@ impl ApiHandlers {
             sort_descending: true,
         };
 
-        // Use the new optimized single-query method with blocking awareness
+        // Use the new k_contents table method with blocking awareness
         let replies_result = match self
             .db
-            .get_replies_by_user_with_metadata_and_block_status(
-                user_public_key,
-                requester_pubkey,
-                options,
-            )
+            .get_replies_by_user(user_public_key, requester_pubkey, options)
             .await
         {
             Ok(result) => result,
@@ -576,14 +560,10 @@ impl ApiHandlers {
             sort_descending: true,
         };
 
-        // Use the new optimized single-query method with blocking awareness
+        // Use the new k_contents table method with blocking awareness
         let mentions_result = match self
             .db
-            .get_contents_mentioning_user_with_metadata_and_block_status(
-                user_public_key,
-                requester_pubkey,
-                options,
-            )
+            .get_contents_mentioning_user(user_public_key, requester_pubkey, options)
             .await
         {
             Ok(result) => result,
@@ -698,11 +678,8 @@ impl ApiHandlers {
             sort_descending: true,
         };
 
-        // Use the database method to get notifications with content details
-        let notifications_result = match self
-            .db
-            .get_notifications_with_content_details(requester_pubkey, options)
-            .await
+        // Use the new k_contents table method to get notifications with content details
+        let notifications_result = match self.db.get_notifications(requester_pubkey, options).await
         {
             Ok(result) => result,
             Err(err) => {
@@ -817,10 +794,10 @@ impl ApiHandlers {
             ));
         }
 
-        // Use the new blocking-aware function to get content with metadata and block status
+        // Use the new k_contents table function to get content with metadata and block status
         match self
             .db
-            .get_content_by_id_with_metadata_and_block_status(content_id, requester_pubkey)
+            .get_content_by_id(content_id, requester_pubkey)
             .await
         {
             Ok(Some((content_record, is_blocked))) => {

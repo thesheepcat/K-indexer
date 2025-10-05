@@ -506,10 +506,10 @@ impl KProtocolProcessor {
             // If no mentions, just insert the post (skip if already exists)
             let result = sqlx::query(
                 r#"
-                INSERT INTO k_posts (
-                    transaction_id, block_time, sender_pubkey, sender_signature, 
-                    base64_encoded_message
-                ) VALUES ($1, $2, $3, $4, $5)
+                INSERT INTO k_contents (
+                    transaction_id, block_time, sender_pubkey, sender_signature,
+                    base64_encoded_message, content_type, referenced_content_id
+                ) VALUES ($1, $2, $3, $4, $5, 'post', NULL)
                 ON CONFLICT (sender_signature) DO NOTHING
                 "#,
             )
@@ -542,10 +542,10 @@ impl KProtocolProcessor {
             let result = sqlx::query(
                 r#"
                 WITH post_insert AS (
-                    INSERT INTO k_posts (
+                    INSERT INTO k_contents (
                         transaction_id, block_time, sender_pubkey, sender_signature,
-                        base64_encoded_message
-                    ) VALUES ($1, $2, $3, $4, $5)
+                        base64_encoded_message, content_type, referenced_content_id
+                    ) VALUES ($1, $2, $3, $4, $5, 'post', NULL)
                     ON CONFLICT (sender_signature) DO NOTHING
                     RETURNING transaction_id, block_time, sender_pubkey
                 )
@@ -618,10 +618,10 @@ impl KProtocolProcessor {
             // If no mentions, just insert the reply (skip if already exists)
             let result = sqlx::query(
                 r#"
-                INSERT INTO k_replies (
-                    transaction_id, block_time, sender_pubkey, sender_signature, 
-                    post_id, base64_encoded_message
-                ) VALUES ($1, $2, $3, $4, $5, $6)
+                INSERT INTO k_contents (
+                    transaction_id, block_time, sender_pubkey, sender_signature,
+                    base64_encoded_message, content_type, referenced_content_id
+                ) VALUES ($1, $2, $3, $4, $5, 'reply', $6)
                 ON CONFLICT (sender_signature) DO NOTHING
                 "#,
             )
@@ -629,8 +629,8 @@ impl KProtocolProcessor {
             .bind(block_time)
             .bind(&sender_pubkey_bytes)
             .bind(&sender_signature_bytes)
-            .bind(&post_id_bytes)
             .bind(k_reply.base64_encoded_message)
+            .bind(&post_id_bytes)
             .execute(&self.db_pool)
             .await?;
 
@@ -655,10 +655,10 @@ impl KProtocolProcessor {
             let result = sqlx::query(
                 r#"
                 WITH reply_insert AS (
-                    INSERT INTO k_replies (
+                    INSERT INTO k_contents (
                         transaction_id, block_time, sender_pubkey, sender_signature,
-                        post_id, base64_encoded_message
-                    ) VALUES ($1, $2, $3, $4, $5, $6)
+                        base64_encoded_message, content_type, referenced_content_id
+                    ) VALUES ($1, $2, $3, $4, $5, 'reply', $6)
                     ON CONFLICT (sender_signature) DO NOTHING
                     RETURNING transaction_id, block_time, sender_pubkey
                 )
@@ -671,8 +671,8 @@ impl KProtocolProcessor {
             .bind(block_time)
             .bind(&sender_pubkey_bytes)
             .bind(&sender_signature_bytes)
-            .bind(&post_id_bytes)
             .bind(k_reply.base64_encoded_message)
+            .bind(&post_id_bytes)
             .bind(&mentioned_pubkeys_bytes)
             .execute(&self.db_pool)
             .await?;
