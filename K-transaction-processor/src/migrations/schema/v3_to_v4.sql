@@ -57,29 +57,7 @@ CREATE INDEX IF NOT EXISTS idx_k_contents_content_type ON k_contents(content_typ
 CREATE INDEX IF NOT EXISTS idx_k_contents_sender_content_type ON k_contents(sender_pubkey, content_type, block_time DESC);
 
 -- ============================================================================
--- Step 3: Update k_mentions to support new content types
--- ============================================================================
-
--- Drop old constraint if exists
-ALTER TABLE k_mentions DROP CONSTRAINT IF EXISTS k_mentions_content_type_check;
-
--- Add new constraint supporting repost and quote
--- Note: k_mentions already has content_type column, just updating allowed values
-DO $$
-BEGIN
-    -- Try to add constraint, ignore if it already exists with correct definition
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint
-        WHERE conname = 'k_mentions_content_type_check'
-        AND conrelid = 'k_mentions'::regclass
-    ) THEN
-        ALTER TABLE k_mentions ADD CONSTRAINT k_mentions_content_type_check
-            CHECK (content_type IN ('post', 'reply', 'vote', 'repost', 'quote'));
-    END IF;
-END $$;
-
--- ============================================================================
--- Step 4: Update schema version to v4
+-- Step 3: Update schema version to v4
 -- ============================================================================
 
 UPDATE k_vars SET value = '4' WHERE key = 'schema_version';
