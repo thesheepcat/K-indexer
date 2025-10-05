@@ -10,8 +10,8 @@ CREATE TABLE IF NOT EXISTS k_vars (
     value TEXT NOT NULL
 );
 
--- Insert initial schema version (v3 = complete schema with indexes, signature deduplication, and optimized k_mentions)
-INSERT INTO k_vars (key, value) VALUES ('schema_version', '3') ON CONFLICT (key) DO NOTHING;
+-- Insert initial schema version (v4 = unified k_contents table for posts, replies, reposts, and quotes)
+INSERT INTO k_vars (key, value) VALUES ('schema_version', '4') ON CONFLICT (key) DO NOTHING;
 
 -- Create K protocol tables
 CREATE TABLE IF NOT EXISTS k_posts (
@@ -115,3 +115,51 @@ CREATE INDEX IF NOT EXISTS idx_k_blocks_block_time ON k_blocks(block_time);
 -- 1. get-notifications: WHERE mentioned_pubkey = ? AND sender_pubkey NOT IN (blocked_users) ORDER BY block_time DESC, id DESC
 -- 2. get-mentions: WHERE mentioned_pubkey = ? AND content_type = ? AND content_id = ?
 CREATE INDEX IF NOT EXISTS idx_k_mentions_comprehensive ON k_mentions(mentioned_pubkey, sender_pubkey, content_type, content_id, block_time DESC, id DESC);
+
+-- ============================================================================
+-- NEW in v4: Unified k_contents table for posts, replies, reposts, and quotes
+-- ============================================================================
+
+-- Create unified contents table (posts, replies, reposts, quotes)
+CREATE TABLE IF NOT EXISTS k_contents (
+    id BIGSERIAL PRIMARY KEY,
+    transaction_id BYTEA UNIQUE NOT NULL,
+    block_time BIGINT NOT NULL,
+    sender_pubkey BYTEA NOT NULL,
+    sender_signature BYTEA NOT NULL,
+    base64_encoded_message TEXT NOT NULL,
+    -- Content type discriminator: 'post', 'reply', 'repost', 'quote'
+    content_type VARCHAR(10) NOT NULL CHECK (content_type IN ('post', 'reply', 'repost', 'quote')),
+    -- Optional reference to parent content (NULL for posts, NOT NULL for replies/reposts/quotes)
+    referenced_content_id BYTEA
+);
+
+-- Primary indexes for k_contents
+CREATE UNIQUE INDEX IF NOT EXISTS idx_k_contents_transaction_id ON k_contents(transaction_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_k_contents_sender_signature_unique ON k_contents(sender_signature);
+CREATE INDEX IF NOT EXISTS idx_k_contents_sender_pubkey ON k_contents(sender_pubkey, block_time DESC);
+CREATE INDEX IF NOT EXISTS idx_k_contents_block_time ON k_contents(block_time DESC, id DESC);
+
+-- Partial index for replies: optimized for "get replies for content X"
+CREATE INDEX IF NOT EXISTS idx_k_contents_replies ON k_contents(referenced_content_id, block_time DESC)
+    WHERE content_type = 'reply';
+
+-- Partial index for reposts: optimized for "get reposts of content X"
+CREATE INDEX IF NOT EXISTS idx_k_contents_reposts ON k_contents(referenced_content_id, block_time DESC)
+    WHERE content_type = 'repost';
+
+-- Partial index for quotes: optimized for "get quotes of content X"
+CREATE INDEX IF NOT EXISTS idx_k_contents_quotes ON k_contents(referenced_content_id, block_time DESC)
+    WHERE content_type = 'quote';
+
+-- Covering index for feed queries (posts + reposts + quotes, exclude replies)
+-- This index is used for main feed and user timeline queries
+CREATE INDEX IF NOT EXISTS idx_k_contents_feed_covering ON k_contents(block_time DESC, id DESC)
+    INCLUDE (transaction_id, sender_pubkey, sender_signature, base64_encoded_message, content_type, referenced_content_id)
+    WHERE content_type IN ('post', 'repost', 'quote');
+
+-- Content type filtering index
+CREATE INDEX IF NOT EXISTS idx_k_contents_content_type ON k_contents(content_type, block_time DESC);
+
+-- User content index (all content types by user)
+CREATE INDEX IF NOT EXISTS idx_k_contents_sender_content_type ON k_contents(sender_pubkey, content_type, block_time DESC);

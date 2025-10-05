@@ -6,7 +6,7 @@ use tracing::{error, info, warn};
 pub type DbPool = PgPool;
 
 // Schema version management
-const SCHEMA_VERSION: i32 = 3;
+const SCHEMA_VERSION: i32 = 4;
 
 /// K-transaction-processor Database Client
 /// Similar to KaspaDbClient in Simply Kaspa Indexer
@@ -106,6 +106,14 @@ impl KDbClient {
                             info!("Migration v2 -> v3 completed successfully");
                         }
 
+                        // v3 -> v4: Add unified k_contents table
+                        if current_version == 3 {
+                            info!("Applying migration v3 -> v4 (unified k_contents table)");
+                            execute_ddl(MIGRATION_V3_TO_V4_SQL, &self.pool).await?;
+                            current_version = 4;
+                            info!("Migration v3 -> v4 completed successfully");
+                        }
+
                         info!(
                             "Schema upgrade completed successfully (final version: {})",
                             current_version
@@ -189,6 +197,7 @@ const SCHEMA_DOWN_SQL: &str = include_str!("migrations/schema/down.sql");
 const MIGRATION_V0_TO_V1_SQL: &str = include_str!("migrations/schema/v0_to_v1.sql");
 const MIGRATION_V1_TO_V2_SQL: &str = include_str!("migrations/schema/v1_to_v2.sql");
 const MIGRATION_V2_TO_V3_SQL: &str = include_str!("migrations/schema/v2_to_v3.sql");
+const MIGRATION_V3_TO_V4_SQL: &str = include_str!("migrations/schema/v3_to_v4.sql");
 
 pub async fn create_pool(config: &AppConfig) -> Result<DbPool> {
     let connection_string = config.connection_string();
@@ -332,6 +341,7 @@ async fn verify_schema_setup(pool: &DbPool) -> Result<()> {
     let tables = vec![
         "k_posts",
         "k_replies",
+        "k_contents", // NEW in v4
         "k_broadcasts",
         "k_votes",
         "k_mentions",
@@ -377,7 +387,7 @@ async fn verify_schema_setup(pool: &DbPool) -> Result<()> {
         all_verified = false;
     }
 
-    // Explicit verification of all 31 expected K protocol indexes
+    // Explicit verification of all 42 expected K protocol indexes (31 old + 11 new in v4)
     let expected_indexes = vec![
         // v0_to_v1 indexes (22 total)
         "idx_k_posts_transaction_id",
@@ -413,6 +423,17 @@ async fn verify_schema_setup(pool: &DbPool) -> Result<()> {
         "idx_k_blocks_block_time",
         // v2_to_v3 replacement (net 0: drops idx_k_mentions_optimal, adds idx_k_mentions_comprehensive)
         "idx_k_mentions_comprehensive",
+        // v3_to_v4 new indexes for k_contents (11 total)
+        "idx_k_contents_transaction_id",
+        "idx_k_contents_sender_signature_unique",
+        "idx_k_contents_sender_pubkey",
+        "idx_k_contents_block_time",
+        "idx_k_contents_replies",
+        "idx_k_contents_reposts",
+        "idx_k_contents_quotes",
+        "idx_k_contents_feed_covering",
+        "idx_k_contents_content_type",
+        "idx_k_contents_sender_content_type",
     ];
 
     let mut missing_indexes = Vec::new();
@@ -434,19 +455,19 @@ async fn verify_schema_setup(pool: &DbPool) -> Result<()> {
         }
     }
 
-    // Verify total count matches expected (31 indexes)
+    // Verify total count matches expected (42 indexes: 31 old + 11 new in v4)
     let index_count = sqlx::query("SELECT COUNT(*) FROM pg_indexes WHERE indexname LIKE 'idx_k_%'")
         .fetch_one(pool)
         .await?
         .get::<i64, _>(0);
 
-    if index_count == 31 {
+    if index_count == 42 {
         info!(
-            "  ✓ Expected 31 K protocol indexes verified (found {})",
+            "  ✓ Expected 42 K protocol indexes verified (found {})",
             index_count
         );
     } else {
-        error!("  ✗ Expected 31 K protocol indexes, found {}", index_count);
+        error!("  ✗ Expected 42 K protocol indexes, found {}", index_count);
         all_verified = false;
     }
 
