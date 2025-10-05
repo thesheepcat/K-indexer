@@ -387,7 +387,7 @@ async fn verify_schema_setup(pool: &DbPool) -> Result<()> {
         all_verified = false;
     }
 
-    // Explicit verification of all 42 expected K protocol indexes (31 old + 11 new in v4)
+    // Explicit verification of all 41 expected K protocol indexes (31 old + 10 new in v4)
     let expected_indexes = vec![
         // v0_to_v1 indexes (22 total)
         "idx_k_posts_transaction_id",
@@ -423,7 +423,7 @@ async fn verify_schema_setup(pool: &DbPool) -> Result<()> {
         "idx_k_blocks_block_time",
         // v2_to_v3 replacement (net 0: drops idx_k_mentions_optimal, adds idx_k_mentions_comprehensive)
         "idx_k_mentions_comprehensive",
-        // v3_to_v4 new indexes for k_contents (11 total)
+        // v3_to_v4 new indexes for k_contents (10 total)
         "idx_k_contents_transaction_id",
         "idx_k_contents_sender_signature_unique",
         "idx_k_contents_sender_pubkey",
@@ -455,19 +455,19 @@ async fn verify_schema_setup(pool: &DbPool) -> Result<()> {
         }
     }
 
-    // Verify total count matches expected (42 indexes: 31 old + 11 new in v4)
+    // Verify total count matches expected (41 indexes: 31 old + 10 new in v4)
     let index_count = sqlx::query("SELECT COUNT(*) FROM pg_indexes WHERE indexname LIKE 'idx_k_%'")
         .fetch_one(pool)
         .await?
         .get::<i64, _>(0);
 
-    if index_count == 42 {
+    if index_count == 41 {
         info!(
-            "  ✓ Expected 42 K protocol indexes verified (found {})",
+            "  ✓ Expected 41 K protocol indexes verified (found {})",
             index_count
         );
     } else {
-        error!("  ✗ Expected 42 K protocol indexes, found {}", index_count);
+        error!("  ✗ Expected 41 K protocol indexes, found {}", index_count);
         all_verified = false;
     }
 
