@@ -475,6 +475,48 @@ async fn verify_schema_setup(pool: &DbPool) -> Result<()> {
         error!("  ✗ Missing indexes: {:?}", missing_indexes);
     }
 
+    // Verify k_contents data migration (v4+)
+    if version.unwrap_or(0) >= 4 {
+        info!("Verifying k_contents data migration");
+
+        let k_posts_count: i64 = sqlx::query("SELECT COUNT(*) FROM k_posts")
+            .fetch_one(pool)
+            .await?
+            .get(0);
+
+        let k_replies_count: i64 = sqlx::query("SELECT COUNT(*) FROM k_replies")
+            .fetch_one(pool)
+            .await?
+            .get(0);
+
+        let k_contents_count: i64 = sqlx::query("SELECT COUNT(*) FROM k_contents")
+            .fetch_one(pool)
+            .await?
+            .get(0);
+
+        let old_tables_total = k_posts_count + k_replies_count;
+
+        info!("  k_posts records: {}", k_posts_count);
+        info!("  k_replies records: {}", k_replies_count);
+        info!("  Old tables total: {}", old_tables_total);
+        info!("  k_contents records: {}", k_contents_count);
+
+        if k_contents_count >= old_tables_total {
+            info!(
+                "  ✓ k_contents has {} records (>= {} from old tables)",
+                k_contents_count, old_tables_total
+            );
+        } else {
+            warn!(
+                "  ⚠ k_contents has {} records (expected >= {} from old tables)",
+                k_contents_count, old_tables_total
+            );
+            warn!(
+                "  This may indicate incomplete migration. New records will be written to k_contents."
+            );
+        }
+    }
+
     if all_verified {
         info!("✓ Schema setup verification PASSED");
     } else {
