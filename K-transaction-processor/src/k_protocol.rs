@@ -18,6 +18,7 @@ pub enum KActionType {
     Reply(KReply),
     Vote(KVote),
     Block(KBlock),
+    Quote(KQuote),
     Unknown(String),
 }
 
@@ -63,6 +64,15 @@ pub struct KBlock {
     pub sender_signature: String,
     pub blocking_action: String, // "block" or "unblock"
     pub blocked_user_pubkey: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct KQuote {
+    pub sender_pubkey: String,
+    pub sender_signature: String,
+    pub content_id: String,
+    pub base64_encoded_message: String,
+    pub mentioned_pubkey: String,
 }
 
 // Database record structures for PostgreSQL
@@ -383,6 +393,29 @@ impl KProtocolProcessor {
                     blocked_user_pubkey,
                 }))
             }
+            "quote" => {
+                // Expected format: quote:sender_pubkey:sender_signature:content_id:base64_encoded_message:mentioned_pubkey
+                if parts.len() < 6 {
+                    return Err(anyhow::anyhow!(
+                        "Invalid quote format: expected 6 parts, got {}",
+                        parts.len()
+                    ));
+                }
+
+                let sender_pubkey = parts[1].to_string();
+                let sender_signature = parts[2].to_string();
+                let content_id = parts[3].to_string();
+                let base64_encoded_message = parts[4].to_string();
+                let mentioned_pubkey = parts[5].to_string();
+
+                Ok(KActionType::Quote(KQuote {
+                    sender_pubkey,
+                    sender_signature,
+                    content_id,
+                    base64_encoded_message,
+                    mentioned_pubkey,
+                }))
+            }
             _ => Ok(KActionType::Unknown(action.to_string())),
         }
     }
@@ -448,6 +481,9 @@ impl KProtocolProcessor {
                 KActionType::Block(k_block) => {
                     self.process_k_block_in_database(transaction, k_block)
                         .await?;
+                }
+                KActionType::Quote(k_quote) => {
+                    self.save_k_quote_to_database(transaction, k_quote).await?;
                 }
                 KActionType::Unknown(action) => {
                     warn!(
@@ -685,6 +721,84 @@ impl KProtocolProcessor {
             } else {
                 info!("Saved K reply: {} -> {}", transaction_id, post_id_for_log);
             }
+        }
+        Ok(())
+    }
+
+    /// Save K quote to database
+    pub async fn save_k_quote_to_database(
+        &self,
+        transaction: &Transaction,
+        k_quote: KQuote,
+    ) -> Result<()> {
+        let transaction_id = &transaction.transaction_id;
+
+        // Construct the message to verify - it's content_id + base64_message + mentioned_pubkey
+        let message_to_verify = format!(
+            "{}:{}:{}",
+            k_quote.content_id, k_quote.base64_encoded_message, k_quote.mentioned_pubkey
+        );
+
+        // Verify the signature
+        if !self.verify_kaspa_signature(
+            &message_to_verify,
+            &k_quote.sender_signature,
+            &k_quote.sender_pubkey,
+        ) {
+            error!("Invalid signature for quote {}, skipping", transaction_id);
+            return Ok(()); // Skip quotes with invalid signatures
+        }
+
+        // Store values we need for logging before they're moved
+        let content_id_for_log = k_quote.content_id.clone();
+        let mentioned_pubkey_for_log = k_quote.mentioned_pubkey.clone();
+
+        // Extract block time
+        let block_time = transaction.block_time.unwrap_or(0);
+
+        // Convert hex strings to bytea for database storage
+        let transaction_id_bytes = hex::decode(transaction_id)?;
+        let sender_pubkey_bytes = hex::decode(&k_quote.sender_pubkey)?;
+        let sender_signature_bytes = hex::decode(&k_quote.sender_signature)?;
+        let content_id_bytes = hex::decode(&k_quote.content_id)?;
+        let mentioned_pubkey_bytes = hex::decode(&k_quote.mentioned_pubkey)?;
+
+        // Single query to insert quote and mention using CTE (skip if already exists)
+        let result = sqlx::query(
+            r#"
+            WITH quote_insert AS (
+                INSERT INTO k_contents (
+                    transaction_id, block_time, sender_pubkey, sender_signature,
+                    base64_encoded_message, content_type, referenced_content_id
+                ) VALUES ($1, $2, $3, $4, $5, 'quote', $6)
+                ON CONFLICT (sender_signature) DO NOTHING
+                RETURNING transaction_id, block_time, sender_pubkey
+            )
+            INSERT INTO k_mentions (content_id, content_type, mentioned_pubkey, block_time, sender_pubkey)
+            SELECT qi.transaction_id, 'quote', $7, qi.block_time, qi.sender_pubkey
+            FROM quote_insert qi
+            "#,
+        )
+        .bind(&transaction_id_bytes)
+        .bind(block_time)
+        .bind(&sender_pubkey_bytes)
+        .bind(&sender_signature_bytes)
+        .bind(k_quote.base64_encoded_message)
+        .bind(&content_id_bytes)
+        .bind(&mentioned_pubkey_bytes)
+        .execute(&self.db_pool)
+        .await?;
+
+        if result.rows_affected() == 0 {
+            info!(
+                "Quote transaction {} already exists, skipping",
+                transaction_id
+            );
+        } else {
+            info!(
+                "Saved K quote: {} -> {} (mentioned: {})",
+                transaction_id, content_id_for_log, mentioned_pubkey_for_log
+            );
         }
         Ok(())
     }
