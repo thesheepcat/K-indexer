@@ -603,6 +603,7 @@ impl ApiHandlers {
                         signature: _vote_record.sender_signature.clone(),
                         timestamp: _vote_record.block_time,
                         replies_count: 0,
+                        quotes_count: 0,
                         up_votes_count: 0,
                         down_votes_count: 0,
                         reposts_count: 0,
@@ -613,6 +614,8 @@ impl ApiHandlers {
                         user_nickname: _vote_record.user_nickname.clone(),
                         user_profile_image: _vote_record.user_profile_image.clone(),
                         blocked_user: Some(*is_blocked),
+                        is_quote: false,
+                        quote: None,
                     }
                 }
             })
@@ -826,6 +829,7 @@ impl ApiHandlers {
                             signature: k_vote_record.sender_signature.clone(),
                             timestamp: k_vote_record.block_time,
                             replies_count: 0,
+                            quotes_count: 0,
                             up_votes_count: 0,
                             down_votes_count: 0,
                             reposts_count: 0,
@@ -836,6 +840,8 @@ impl ApiHandlers {
                             user_nickname: k_vote_record.user_nickname.clone(),
                             user_profile_image: k_vote_record.user_profile_image.clone(),
                             blocked_user: Some(is_blocked),
+                            is_quote: false,
+                            quote: None,
                         };
                         PostDetailsResponse { post: server_vote }
                     }
