@@ -80,13 +80,6 @@ pub trait DatabaseInterface: Send + Sync {
         options: QueryOptions,
     ) -> DatabaseResult<PaginatedResult<KBroadcastRecord>>;
 
-    // Optimized single-query method for get-posts-watching API with blocking awareness
-    async fn get_all_posts_with_metadata_and_block_status(
-        &self,
-        requester_pubkey: &str,
-        options: QueryOptions,
-    ) -> DatabaseResult<PaginatedResult<(KPostRecord, bool)>>;
-
     // NEW: k_contents table - Get all posts using unified content table
     async fn get_all_posts(
         &self,
@@ -102,26 +95,10 @@ pub trait DatabaseInterface: Send + Sync {
         options: QueryOptions,
     ) -> DatabaseResult<PaginatedResult<(ContentRecord, bool)>>;
 
-    // Optimized single-query method for get-replies API with blocking awareness
-    async fn get_replies_by_post_id_with_metadata_and_block_status(
-        &self,
-        post_id: &str,
-        requester_pubkey: &str,
-        options: QueryOptions,
-    ) -> DatabaseResult<PaginatedResult<(KReplyRecord, bool)>>;
-
     // NEW: k_contents table - Get replies by post ID using unified content table
     async fn get_replies_by_post_id(
         &self,
         post_id: &str,
-        requester_pubkey: &str,
-        options: QueryOptions,
-    ) -> DatabaseResult<PaginatedResult<(KReplyRecord, bool)>>;
-
-    // Optimized single-query method for get-user-replies API with blocking awareness
-    async fn get_replies_by_user_with_metadata_and_block_status(
-        &self,
-        user_public_key: &str,
         requester_pubkey: &str,
         options: QueryOptions,
     ) -> DatabaseResult<PaginatedResult<(KReplyRecord, bool)>>;
@@ -134,14 +111,6 @@ pub trait DatabaseInterface: Send + Sync {
         options: QueryOptions,
     ) -> DatabaseResult<PaginatedResult<(KReplyRecord, bool)>>;
 
-    // Optimized single-query method for get-posts API with blocking awareness
-    async fn get_posts_by_user_with_metadata_and_block_status(
-        &self,
-        user_public_key: &str,
-        requester_pubkey: &str,
-        options: QueryOptions,
-    ) -> DatabaseResult<PaginatedResult<(KPostRecord, bool)>>;
-
     // NEW: k_contents table - Get posts by user using unified content table
     async fn get_posts_by_user(
         &self,
@@ -150,34 +119,12 @@ pub trait DatabaseInterface: Send + Sync {
         options: QueryOptions,
     ) -> DatabaseResult<PaginatedResult<(KPostRecord, bool)>>;
 
-    // Optimized single-query method for get-mentions API with blocking awareness
-    async fn get_contents_mentioning_user_with_metadata_and_block_status(
-        &self,
-        user_public_key: &str,
-        requester_pubkey: &str,
-        options: QueryOptions,
-    ) -> DatabaseResult<PaginatedResult<(ContentRecord, bool)>>;
-
-    // Optimized single-query method for get-notifications API with content details (blocked users excluded)
-    async fn get_notifications_with_content_details(
-        &self,
-        requester_pubkey: &str,
-        options: QueryOptions,
-    ) -> DatabaseResult<PaginatedResult<NotificationContentRecord>>;
-
     // NEW: k_contents table - Get notifications using unified content table
     async fn get_notifications(
         &self,
         requester_pubkey: &str,
         options: QueryOptions,
     ) -> DatabaseResult<PaginatedResult<NotificationContentRecord>>;
-
-    // Merged optimized single-query method for get-post-details API with blocking awareness
-    async fn get_content_by_id_with_metadata_and_block_status(
-        &self,
-        content_id: &str,
-        requester_pubkey: &str,
-    ) -> DatabaseResult<Option<(ContentRecord, bool)>>;
 
     // NEW: k_contents table - Get content by ID using unified content table
     async fn get_content_by_id(
