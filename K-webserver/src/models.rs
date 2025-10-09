@@ -65,10 +65,17 @@ pub struct KPostRecord {
     pub replies_count: Option<u64>,
     pub up_votes_count: Option<u64>,
     pub down_votes_count: Option<u64>,
+    pub quotes_count: Option<u64>,
     pub is_upvoted: Option<bool>,
     pub is_downvoted: Option<bool>,
     pub user_nickname: Option<String>,
     pub user_profile_image: Option<String>,
+    // Quote fields - only populated if this is a quote
+    pub referenced_content_id: Option<String>,
+    pub referenced_message: Option<String>,
+    pub referenced_sender_pubkey: Option<String>,
+    pub referenced_nickname: Option<String>,
+    pub referenced_profile_image: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -95,6 +102,7 @@ pub struct KReplyRecord {
     pub replies_count: Option<u64>,
     pub up_votes_count: Option<u64>,
     pub down_votes_count: Option<u64>,
+    pub quotes_count: Option<u64>,
     pub is_upvoted: Option<bool>,
     pub is_downvoted: Option<bool>,
     pub user_nickname: Option<String>,
@@ -142,6 +150,24 @@ pub struct NotificationContentRecord {
     pub mention_block_time: u64,
 }
 
+// Referenced content data for quotes (only the original content being quoted)
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct QuoteData {
+    #[serde(rename = "referencedContentId")]
+    pub referenced_content_id: String,
+    #[serde(rename = "referencedMessage")]
+    pub referenced_message: String,
+    #[serde(rename = "referencedSenderPubkey")]
+    pub referenced_sender_pubkey: String,
+    #[serde(rename = "referencedNickname", skip_serializing_if = "Option::is_none")]
+    pub referenced_nickname: Option<String>,
+    #[serde(
+        rename = "referencedProfileImage",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub referenced_profile_image: Option<String>,
+}
+
 // API Response models
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ServerPost {
@@ -158,6 +184,8 @@ pub struct ServerPost {
     pub up_votes_count: u64,
     #[serde(rename = "downVotesCount")]
     pub down_votes_count: u64,
+    #[serde(rename = "quotesCount")]
+    pub quotes_count: u64,
     #[serde(rename = "repostsCount")]
     pub reposts_count: u64,
     #[serde(rename = "parentPostId")]
@@ -174,6 +202,10 @@ pub struct ServerPost {
     pub user_profile_image: Option<String>,
     #[serde(rename = "blockedUser", skip_serializing_if = "Option::is_none")]
     pub blocked_user: Option<bool>,
+    #[serde(rename = "isQuote")]
+    pub is_quote: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quote: Option<QuoteData>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -295,6 +327,25 @@ impl ServerPost {
             record.base64_encoded_message.clone()
         };
 
+        // Build quote data if this is a quote and we have referenced content
+        let quote = if let (Some(ref_id), Some(ref_msg), Some(ref_pubkey)) = (
+            record.referenced_content_id.as_ref(),
+            record.referenced_message.as_ref(),
+            record.referenced_sender_pubkey.as_ref(),
+        ) {
+            Some(QuoteData {
+                referenced_content_id: ref_id.clone(),
+                referenced_message: ref_msg.clone(),
+                referenced_sender_pubkey: ref_pubkey.clone(),
+                referenced_nickname: record.referenced_nickname.clone(),
+                referenced_profile_image: record.referenced_profile_image.clone(),
+            })
+        } else {
+            None
+        };
+
+        let is_quote = quote.is_some();
+
         Self {
             id: record.transaction_id.clone(),
             user_public_key: record.sender_pubkey.clone(),
@@ -304,6 +355,7 @@ impl ServerPost {
             replies_count: record.replies_count.unwrap_or(0),
             up_votes_count: record.up_votes_count.unwrap_or(0),
             down_votes_count: record.down_votes_count.unwrap_or(0),
+            quotes_count: record.quotes_count.unwrap_or(0),
             reposts_count: 0,
             parent_post_id: None,
             mentioned_pubkeys: record.mentioned_pubkeys.clone(),
@@ -312,6 +364,8 @@ impl ServerPost {
             user_nickname: record.user_nickname.clone(),
             user_profile_image: record.user_profile_image.clone(),
             blocked_user: Some(is_blocked),
+            is_quote,
+            quote,
         }
     }
 }
@@ -344,6 +398,13 @@ impl NotificationPost {
         mention_id: i64,
         mention_block_time: u64,
     ) -> Self {
+        // Determine content type - if referenced_content_id is set, it's a quote
+        let content_type = if record.referenced_content_id.is_some() {
+            "quote".to_string()
+        } else {
+            "post".to_string()
+        };
+
         Self {
             id: record.transaction_id.clone(),
             user_public_key: record.sender_pubkey.clone(),
@@ -351,7 +412,7 @@ impl NotificationPost {
             timestamp: mention_block_time,
             user_nickname: record.user_nickname.clone(),
             user_profile_image: record.user_profile_image.clone(),
-            content_type: "post".to_string(),
+            content_type,
             cursor: format!("{}_{}", mention_block_time, mention_id),
             vote_type: None,
             mention_block_time: None,
@@ -443,6 +504,7 @@ impl ServerReply {
             replies_count: record.replies_count.unwrap_or(0),
             up_votes_count: record.up_votes_count.unwrap_or(0),
             down_votes_count: record.down_votes_count.unwrap_or(0),
+            quotes_count: record.quotes_count.unwrap_or(0),
             reposts_count: 0,
             parent_post_id: Some(record.post_id.clone()),
             mentioned_pubkeys: record.mentioned_pubkeys.clone(),
@@ -451,6 +513,8 @@ impl ServerReply {
             user_nickname: record.user_nickname.clone(),
             user_profile_image: record.user_profile_image.clone(),
             blocked_user: Some(is_blocked),
+            is_quote: false,
+            quote: None,
         }
     }
 }
