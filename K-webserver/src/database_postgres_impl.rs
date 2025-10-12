@@ -188,7 +188,7 @@ impl HasCompoundCursor for ContentRecord {
 impl DatabaseInterface for PostgresDbManager {
     // Broadcast operations
 
-    async fn get_all_broadcasts_with_block_status(
+    async fn get_all_users(
         &self,
         requester_pubkey: &str,
         options: QueryOptions,
@@ -310,38 +310,33 @@ impl DatabaseInterface for PostgresDbManager {
         })
     }
 
-    async fn get_broadcast_by_user_with_block_status(
+    async fn get_user_details(
         &self,
         user_public_key: &str,
         requester_pubkey: &str,
-    ) -> DatabaseResult<Option<(KBroadcastRecord, bool)>> {
+    ) -> DatabaseResult<Option<(KBroadcastRecord, bool, bool)>> {
         let user_pubkey_bytes = Self::decode_hex_to_bytes(user_public_key)?;
         let requester_pubkey_bytes = Self::decode_hex_to_bytes(requester_pubkey)?;
 
-        // First, always check if user is blocked
-        let blocking_query = r#"
-            SELECT EXISTS (
-                SELECT 1 FROM k_blocks kb
-                WHERE kb.sender_pubkey = $2 AND kb.blocked_user_pubkey = $1
-            ) as is_blocked
-        "#;
-
-        let blocking_row = sqlx::query(blocking_query)
-            .bind(&user_pubkey_bytes)
-            .bind(&requester_pubkey_bytes)
-            .fetch_one(&self.pool)
-            .await
-            .map_err(|e| {
-                DatabaseError::QueryError(format!("Failed to check blocking status: {}", e))
-            })?;
-
-        let is_blocked: bool = blocking_row.get("is_blocked");
-
-        // Then check for broadcast data
+        // Single query to get broadcast data + block/follow status
         let query = r#"
             SELECT
-                b.id, b.transaction_id, b.block_time, b.sender_pubkey, b.sender_signature,
-                b.base64_encoded_nickname, b.base64_encoded_profile_image, b.base64_encoded_message
+                b.id,
+                b.transaction_id,
+                b.block_time,
+                b.sender_pubkey,
+                b.sender_signature,
+                b.base64_encoded_nickname,
+                b.base64_encoded_profile_image,
+                b.base64_encoded_message,
+                EXISTS (
+                    SELECT 1 FROM k_blocks kb
+                    WHERE kb.sender_pubkey = $2 AND kb.blocked_user_pubkey = $1
+                ) as is_blocked,
+                EXISTS (
+                    SELECT 1 FROM k_follows kf
+                    WHERE kf.sender_pubkey = $2 AND kf.followed_user_pubkey = $1
+                ) as is_followed
             FROM k_broadcasts b
             WHERE b.sender_pubkey = $1
             ORDER BY b.block_time DESC
@@ -350,6 +345,7 @@ impl DatabaseInterface for PostgresDbManager {
 
         let row_opt = sqlx::query(query)
             .bind(&user_pubkey_bytes)
+            .bind(&requester_pubkey_bytes)
             .fetch_optional(&self.pool)
             .await
             .map_err(|e| {
@@ -361,6 +357,8 @@ impl DatabaseInterface for PostgresDbManager {
             let transaction_id: Vec<u8> = row.get("transaction_id");
             let sender_pubkey: Vec<u8> = row.get("sender_pubkey");
             let sender_signature: Vec<u8> = row.get("sender_signature");
+            let is_blocked: bool = row.get("is_blocked");
+            let is_followed: bool = row.get("is_followed");
 
             let broadcast_record = KBroadcastRecord {
                 id: row.get::<i64, _>("id"),
@@ -373,10 +371,34 @@ impl DatabaseInterface for PostgresDbManager {
                 base64_encoded_message: row.get("base64_encoded_message"),
             };
 
-            Ok(Some((broadcast_record, is_blocked)))
+            Ok(Some((broadcast_record, is_blocked, is_followed)))
         } else {
-            // No broadcast data found, but we have blocking status
-            // Create a minimal broadcast record with empty fields and the blocking status
+            // No broadcast data found, need separate query for block/follow status
+            let status_query = r#"
+                SELECT
+                    EXISTS (
+                        SELECT 1 FROM k_blocks kb
+                        WHERE kb.sender_pubkey = $2 AND kb.blocked_user_pubkey = $1
+                    ) as is_blocked,
+                    EXISTS (
+                        SELECT 1 FROM k_follows kf
+                        WHERE kf.sender_pubkey = $2 AND kf.followed_user_pubkey = $1
+                    ) as is_followed
+            "#;
+
+            let status_row = sqlx::query(status_query)
+                .bind(&user_pubkey_bytes)
+                .bind(&requester_pubkey_bytes)
+                .fetch_one(&self.pool)
+                .await
+                .map_err(|e| {
+                    DatabaseError::QueryError(format!("Failed to check block/follow status: {}", e))
+                })?;
+
+            let is_blocked: bool = status_row.get("is_blocked");
+            let is_followed: bool = status_row.get("is_followed");
+
+            // Create a minimal broadcast record with empty fields and the status
             let broadcast_record = KBroadcastRecord {
                 id: 0, // Dummy ID
                 transaction_id: String::new(),
@@ -388,7 +410,7 @@ impl DatabaseInterface for PostgresDbManager {
                 base64_encoded_message: String::new(),
             };
 
-            Ok(Some((broadcast_record, is_blocked)))
+            Ok(Some((broadcast_record, is_blocked, is_followed)))
         }
     }
 
