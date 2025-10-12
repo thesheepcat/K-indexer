@@ -19,6 +19,7 @@ pub enum KActionType {
     Vote(KVote),
     Block(KBlock),
     Quote(KQuote),
+    Follow(KFollow),
     Unknown(String),
 }
 
@@ -75,6 +76,14 @@ pub struct KQuote {
     pub mentioned_pubkey: String,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct KFollow {
+    pub sender_pubkey: String,
+    pub sender_signature: String,
+    pub following_action: String, // "follow" or "unfollow"
+    pub followed_user_pubkey: String,
+}
+
 // Database record structures for PostgreSQL
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct KPostRecord {
@@ -126,6 +135,16 @@ pub struct KBlockRecord {
     pub sender_signature: String,
     pub blocking_action: String,
     pub blocked_user_pubkey: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct KFollowRecord {
+    pub transaction_id: String,
+    pub block_time: i64,
+    pub sender_pubkey: String,
+    pub sender_signature: String,
+    pub following_action: String,
+    pub followed_user_pubkey: String,
 }
 
 pub struct KProtocolProcessor {
@@ -416,6 +435,35 @@ impl KProtocolProcessor {
                     mentioned_pubkey,
                 }))
             }
+            "follow" => {
+                // Expected format: follow:sender_pubkey:sender_signature:following_action:followed_user_pubkey
+                if parts.len() < 5 {
+                    return Err(anyhow::anyhow!(
+                        "Invalid follow format: expected 5 parts, got {}",
+                        parts.len()
+                    ));
+                }
+
+                let sender_pubkey = parts[1].to_string();
+                let sender_signature = parts[2].to_string();
+                let following_action = parts[3].to_string();
+                let followed_user_pubkey = parts[4].to_string();
+
+                // Validate following_action value
+                if following_action != "follow" && following_action != "unfollow" {
+                    return Err(anyhow::anyhow!(
+                        "Invalid following_action value: expected 'follow' or 'unfollow', got '{}'",
+                        following_action
+                    ));
+                }
+
+                Ok(KActionType::Follow(KFollow {
+                    sender_pubkey,
+                    sender_signature,
+                    following_action,
+                    followed_user_pubkey,
+                }))
+            }
             _ => Ok(KActionType::Unknown(action.to_string())),
         }
     }
@@ -484,6 +532,10 @@ impl KProtocolProcessor {
                 }
                 KActionType::Quote(k_quote) => {
                     self.save_k_quote_to_database(transaction, k_quote).await?;
+                }
+                KActionType::Follow(k_follow) => {
+                    self.process_k_follow_in_database(transaction, k_follow)
+                        .await?;
                 }
                 KActionType::Unknown(action) => {
                     warn!(
@@ -997,7 +1049,7 @@ impl KProtocolProcessor {
                 let transaction_id_bytes = hex::decode(transaction_id)?;
                 let sender_signature_bytes = hex::decode(&k_block.sender_signature)?;
 
-                // Insert block record (update if same sender blocks same user again)
+                // Insert block record (skip if same sender already blocked this user)
                 let result = sqlx::query(
                     r#"
                     INSERT INTO k_blocks (
@@ -1005,10 +1057,7 @@ impl KProtocolProcessor {
                         blocking_action, blocked_user_pubkey
                     ) VALUES ($1, $2, $3, $4, $5, $6)
                     ON CONFLICT (sender_pubkey, blocked_user_pubkey)
-                    DO UPDATE SET
-                        transaction_id = EXCLUDED.transaction_id,
-                        block_time = EXCLUDED.block_time,
-                        sender_signature = EXCLUDED.sender_signature
+                    DO NOTHING
                     "#,
                 )
                 .bind(&transaction_id_bytes)
@@ -1022,8 +1071,9 @@ impl KProtocolProcessor {
 
                 if result.rows_affected() == 0 {
                     info!(
-                        "Block transaction {} already exists, skipping",
-                        transaction_id
+                        "Block already exists: {} already blocked {} (keeping original), skipping",
+                        hex::encode(&sender_pubkey_bytes),
+                        hex::encode(&blocked_user_pubkey_bytes)
                     );
                 } else {
                     info!(
@@ -1060,6 +1110,113 @@ impl KProtocolProcessor {
                 return Err(anyhow::anyhow!(
                     "Invalid blocking_action: {}",
                     k_block.blocking_action
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Process K follow action (follow/unfollow) in database
+    pub async fn process_k_follow_in_database(
+        &self,
+        transaction: &Transaction,
+        k_follow: KFollow,
+    ) -> Result<()> {
+        let transaction_id = &transaction.transaction_id;
+
+        // Construct the message to verify - it's following_action + followed_user_pubkey
+        let message_to_verify = format!(
+            "{}:{}",
+            k_follow.following_action, k_follow.followed_user_pubkey
+        );
+
+        // Verify the signature
+        if !self.verify_kaspa_signature(
+            &message_to_verify,
+            &k_follow.sender_signature,
+            &k_follow.sender_pubkey,
+        ) {
+            error!(
+                "Invalid signature for follow action {}, skipping",
+                transaction_id
+            );
+            return Ok(()); // Skip follow actions with invalid signatures
+        }
+
+        // Extract block time
+        let block_time = transaction.block_time.unwrap_or(0);
+
+        // Convert hex strings to bytea for database storage
+        let sender_pubkey_bytes = hex::decode(&k_follow.sender_pubkey)?;
+        let followed_user_pubkey_bytes = hex::decode(&k_follow.followed_user_pubkey)?;
+
+        match k_follow.following_action.as_str() {
+            "follow" => {
+                let transaction_id_bytes = hex::decode(transaction_id)?;
+                let sender_signature_bytes = hex::decode(&k_follow.sender_signature)?;
+
+                // Insert follow record (skip if same sender already follows this user)
+                let result = sqlx::query(
+                    r#"
+                    INSERT INTO k_follows (
+                        transaction_id, block_time, sender_pubkey, sender_signature,
+                        following_action, followed_user_pubkey
+                    ) VALUES ($1, $2, $3, $4, $5, $6)
+                    ON CONFLICT (sender_pubkey, followed_user_pubkey)
+                    DO NOTHING
+                    "#,
+                )
+                .bind(&transaction_id_bytes)
+                .bind(block_time)
+                .bind(&sender_pubkey_bytes)
+                .bind(&sender_signature_bytes)
+                .bind(&k_follow.following_action)
+                .bind(&followed_user_pubkey_bytes)
+                .execute(&self.db_pool)
+                .await?;
+
+                if result.rows_affected() == 0 {
+                    info!(
+                        "Follow already exists: {} already follows {} (keeping original), skipping",
+                        hex::encode(&sender_pubkey_bytes),
+                        hex::encode(&followed_user_pubkey_bytes)
+                    );
+                } else {
+                    info!(
+                        "Saved K follow: {} followed {}",
+                        hex::encode(&sender_pubkey_bytes),
+                        hex::encode(&followed_user_pubkey_bytes)
+                    );
+                }
+            }
+            "unfollow" => {
+                // Delete any existing "follow" record for the same sender and followed user
+                let delete_result = sqlx::query(
+                    r#"
+                    DELETE FROM k_follows
+                    WHERE sender_pubkey = $1
+                    AND followed_user_pubkey = $2
+                    AND following_action = 'follow'
+                    "#,
+                )
+                .bind(&sender_pubkey_bytes)
+                .bind(&followed_user_pubkey_bytes)
+                .execute(&self.db_pool)
+                .await?;
+
+                info!(
+                    "Processed K unfollow: {} unfollowed {} (deleted {} existing follow records)",
+                    hex::encode(&sender_pubkey_bytes),
+                    hex::encode(&followed_user_pubkey_bytes),
+                    delete_result.rows_affected()
+                );
+            }
+            _ => {
+                error!("Invalid following_action: {}", k_follow.following_action);
+                return Err(anyhow::anyhow!(
+                    "Invalid following_action: {}",
+                    k_follow.following_action
                 ));
             }
         }
