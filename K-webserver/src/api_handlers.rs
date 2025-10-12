@@ -207,6 +207,90 @@ impl ApiHandlers {
         }
     }
 
+    /// GET /get-content-following with pagination
+    /// Fetch paginated content (posts, replies, quotes) from followed users
+    pub async fn get_content_following_paginated(
+        &self,
+        requester_pubkey: &str,
+        limit: u32,
+        before: Option<String>,
+        after: Option<String>,
+    ) -> Result<String, String> {
+        // Validate requester public key format (66 hex characters for compressed public key)
+        if requester_pubkey.len() != 66 {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Must be 66 hex characters.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        if !requester_pubkey.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Must contain only hex characters.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        // Validate compressed public key prefix (should start with 02 or 03)
+        if !requester_pubkey.starts_with("02") && !requester_pubkey.starts_with("03") {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Compressed public key must start with 02 or 03.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        let options = QueryOptions {
+            limit: Some(limit as u64),
+            before,
+            after,
+            sort_descending: true,
+        };
+
+        // Get content from followed users
+        let content_result = match self
+            .db
+            .get_content_following(requester_pubkey, options)
+            .await
+        {
+            Ok(result) => result,
+            Err(err) => {
+                log_error!(
+                    "Database error while querying content from followed users: {}",
+                    err
+                );
+                return Err(self.create_error_response(
+                    "Internal server error during database query",
+                    "DATABASE_ERROR",
+                ));
+            }
+        };
+
+        // Convert enriched KPostRecords to ServerPosts with blocking awareness
+        let all_posts: Vec<ServerPost> = content_result
+            .items
+            .iter()
+            .map(|(post_record, is_blocked)| {
+                ServerPost::from_enriched_k_post_record_with_block_status(post_record, *is_blocked)
+            })
+            .collect();
+
+        let response = PaginatedPostsResponse {
+            posts: all_posts,
+            pagination: content_result.pagination,
+        };
+
+        match serde_json::to_string(&response) {
+            Ok(json) => Ok(json),
+            Err(err) => {
+                log_error!("Failed to serialize paginated content response: {}", err);
+                Err(self.create_error_response(
+                    "Internal server error during serialization",
+                    "SERIALIZATION_ERROR",
+                ))
+            }
+        }
+    }
+
     /// GET /get-users with pagination and blocked users awareness
     /// Fetch paginated user introduction posts with cursor-based pagination and blocking status
     pub async fn get_users_paginated(
@@ -1087,6 +1171,100 @@ impl ApiHandlers {
             Err(err) => {
                 log_error!(
                     "Failed to serialize paginated blocked users response: {}",
+                    err
+                );
+                Err(self.create_error_response(
+                    "Internal server error during serialization",
+                    "SERIALIZATION_ERROR",
+                ))
+            }
+        }
+    }
+
+    pub async fn get_followed_users_paginated(
+        &self,
+        requester_pubkey: &str,
+        limit: u32,
+        before: Option<String>,
+        after: Option<String>,
+    ) -> Result<String, String> {
+        // Validate requester public key format (66 hex characters for compressed public key)
+        if requester_pubkey.len() != 66 {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Must be 66 hex characters.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        if !requester_pubkey.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Must contain only hex characters.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        // Validate compressed public key prefix (should start with 02 or 03)
+        if !requester_pubkey.starts_with("02") && !requester_pubkey.starts_with("03") {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Compressed public key must start with 02 or 03.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        let options = QueryOptions {
+            limit: Some(limit as u64),
+            before,
+            after,
+            sort_descending: true,
+        };
+
+        let broadcasts_result = match self
+            .db
+            .get_followed_users_by_requester(requester_pubkey, options)
+            .await
+        {
+            Ok(result) => result,
+            Err(err) => {
+                log_error!(
+                    "Database error while querying followed users for requester {}: {}",
+                    requester_pubkey,
+                    err
+                );
+                return Err(self.create_error_response(
+                    "Internal server error during database query",
+                    "DATABASE_ERROR",
+                ));
+            }
+        };
+
+        let mut all_posts = Vec::new();
+
+        for k_broadcast_record in broadcasts_result.items {
+            let mut server_user_post = ServerUserPost::from_k_broadcast_record(&k_broadcast_record);
+
+            // Enrich with user profile data from broadcasts (self-enrichment)
+            server_user_post.user_nickname = Some(k_broadcast_record.base64_encoded_nickname);
+            server_user_post.user_profile_image = k_broadcast_record.base64_encoded_profile_image;
+
+            // Since these are followed users, set followed_user to true
+            server_user_post.followed_user = Some(true);
+
+            // Remove post content for followed users
+            server_user_post.post_content = String::new();
+
+            all_posts.push(server_user_post);
+        }
+
+        let response = PaginatedUsersResponse {
+            posts: all_posts,
+            pagination: broadcasts_result.pagination,
+        };
+
+        match serde_json::to_string(&response) {
+            Ok(json) => Ok(json),
+            Err(err) => {
+                log_error!(
+                    "Failed to serialize paginated followed users response: {}",
                     err
                 );
                 Err(self.create_error_response(
