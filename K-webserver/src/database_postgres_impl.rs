@@ -523,6 +523,118 @@ impl DatabaseInterface for PostgresDbManager {
         })
     }
 
+    async fn get_followed_users_by_requester(
+        &self,
+        requester_pubkey: &str,
+        options: QueryOptions,
+    ) -> DatabaseResult<PaginatedResult<KBroadcastRecord>> {
+        let requester_pubkey_bytes = Self::decode_hex_to_bytes(requester_pubkey)?;
+        let limit = options.limit.unwrap_or(20) as i64;
+        let offset_limit = limit + 1;
+
+        let mut query = String::from(
+            r#"
+            SELECT kf.id, kf.transaction_id, kf.block_time, kf.followed_user_pubkey as sender_pubkey, kf.sender_signature,
+                   COALESCE(b.base64_encoded_nickname, '') as base64_encoded_nickname,
+                   b.base64_encoded_profile_image,
+                   COALESCE(b.base64_encoded_message, '') as base64_encoded_message
+            FROM k_follows kf
+            LEFT JOIN k_broadcasts b ON b.sender_pubkey = kf.followed_user_pubkey
+            WHERE kf.sender_pubkey = $1
+            "#,
+        );
+
+        let mut bind_count = 1;
+
+        if let Some(before_cursor) = &options.before {
+            if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
+                bind_count += 2;
+                query.push_str(&format!(
+                    " AND (kf.block_time < ${} OR (kf.block_time = ${} AND kf.id < ${}))",
+                    bind_count - 1,
+                    bind_count - 1,
+                    bind_count
+                ));
+            }
+        }
+
+        if let Some(after_cursor) = &options.after {
+            if let Ok((after_timestamp, after_id)) = Self::parse_compound_cursor(after_cursor) {
+                bind_count += 2;
+                query.push_str(&format!(
+                    " AND (kf.block_time > ${} OR (kf.block_time = ${} AND kf.id > ${}))",
+                    bind_count - 1,
+                    bind_count - 1,
+                    bind_count
+                ));
+            }
+        }
+
+        if options.sort_descending {
+            query.push_str(" ORDER BY kf.block_time DESC, kf.id DESC");
+        } else {
+            query.push_str(" ORDER BY kf.block_time ASC, kf.id ASC");
+        }
+
+        bind_count += 1;
+        query.push_str(&format!(" LIMIT ${}", bind_count));
+
+        let mut query_builder = sqlx::query(&query);
+        query_builder = query_builder.bind(&requester_pubkey_bytes);
+
+        if let Some(before_cursor) = &options.before {
+            if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
+                query_builder = query_builder.bind(before_timestamp as i64).bind(before_id);
+            }
+        }
+
+        if let Some(after_cursor) = &options.after {
+            if let Ok((after_timestamp, after_id)) = Self::parse_compound_cursor(after_cursor) {
+                query_builder = query_builder.bind(after_timestamp as i64).bind(after_id);
+            }
+        }
+
+        query_builder = query_builder.bind(offset_limit);
+
+        let rows = query_builder.fetch_all(&self.pool).await.map_err(|e| {
+            DatabaseError::QueryError(format!(
+                "Failed to fetch followed users by requester: {}",
+                e
+            ))
+        })?;
+
+        let mut broadcasts = Vec::new();
+        for row in &rows {
+            let transaction_id: Vec<u8> = row.get("transaction_id");
+            let sender_pubkey: Vec<u8> = row.get("sender_pubkey");
+            let sender_signature: Vec<u8> = row.get("sender_signature");
+
+            broadcasts.push(KBroadcastRecord {
+                id: row.get::<i64, _>("id"),
+                transaction_id: Self::encode_bytes_to_hex(&transaction_id),
+                block_time: row.get::<i64, _>("block_time") as u64,
+                sender_pubkey: Self::encode_bytes_to_hex(&sender_pubkey),
+                sender_signature: Self::encode_bytes_to_hex(&sender_signature),
+                base64_encoded_nickname: row.get("base64_encoded_nickname"),
+                base64_encoded_profile_image: row.get("base64_encoded_profile_image"),
+                base64_encoded_message: row.get("base64_encoded_message"),
+            });
+        }
+
+        let has_more = broadcasts.len() > limit as usize;
+        if has_more {
+            broadcasts.pop();
+        }
+
+        let pagination =
+            self.create_compound_pagination_metadata(&broadcasts, limit as u32, has_more);
+
+        Ok(PaginatedResult {
+            items: broadcasts,
+            pagination,
+        })
+    }
+
     // Optimized single-query method for get-posts-watching API with blocking awareness
 
     async fn get_all_posts(
@@ -744,6 +856,259 @@ impl DatabaseInterface for PostgresDbManager {
             items: posts_with_block_status,
             pagination,
         })
+    }
+
+    async fn get_content_following(
+        &self,
+        requester_pubkey: &str,
+        options: QueryOptions,
+    ) -> DatabaseResult<PaginatedResult<(KPostRecord, bool)>> {
+        let requester_pubkey_bytes = Self::decode_hex_to_bytes(requester_pubkey)?;
+        let limit = options.limit.unwrap_or(20) as i64;
+        let offset_limit = limit + 1; // Get one extra to check if there are more
+
+        let mut bind_count = 1;
+        let mut cursor_conditions = String::new();
+
+        // Add cursor logic
+        if let Some(before_cursor) = &options.before {
+            if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
+                bind_count += 2;
+                cursor_conditions.push_str(&format!(
+                    " AND (c.block_time < ${} OR (c.block_time = ${} AND c.id < ${}))",
+                    bind_count - 1,
+                    bind_count - 1,
+                    bind_count
+                ));
+            }
+        }
+
+        if let Some(after_cursor) = &options.after {
+            if let Ok((after_timestamp, after_id)) = Self::parse_compound_cursor(after_cursor) {
+                bind_count += 2;
+                cursor_conditions.push_str(&format!(
+                    " AND (c.block_time > ${} OR (c.block_time = ${} AND c.id > ${}))",
+                    bind_count - 1,
+                    bind_count - 1,
+                    bind_count
+                ));
+            }
+        }
+
+        let order_clause = if options.sort_descending {
+            " ORDER BY c.block_time DESC, c.id DESC"
+        } else {
+            " ORDER BY c.block_time ASC, c.id ASC"
+        };
+
+        let final_order_clause = if options.sort_descending {
+            " ORDER BY ps.block_time DESC, ps.id DESC"
+        } else {
+            " ORDER BY ps.block_time ASC, ps.id ASC"
+        };
+
+        let query = format!(
+            r#"
+            WITH followed_content AS (
+                SELECT c.id, c.transaction_id, c.block_time, c.sender_pubkey,
+                       c.sender_signature, c.base64_encoded_message, c.content_type,
+                       c.referenced_content_id
+                FROM k_contents c
+                INNER JOIN k_follows kf ON kf.followed_user_pubkey = c.sender_pubkey
+                WHERE kf.sender_pubkey = $1
+                  AND c.content_type IN ('post', 'reply', 'quote'){cursor_conditions}
+                {order_clause}
+                LIMIT ${limit_param}
+            ), content_stats AS (
+                SELECT fc.id, fc.transaction_id, fc.block_time, fc.sender_pubkey,
+                       fc.sender_signature, fc.base64_encoded_message, fc.content_type,
+                       fc.referenced_content_id,
+                       COALESCE(r.replies_count, 0) as replies_count,
+                       COALESCE(q.quotes_count, 0) as quotes_count,
+                       COALESCE(v.up_votes_count, 0) as up_votes_count,
+                       COALESCE(v.down_votes_count, 0) as down_votes_count,
+                       COALESCE(v.user_upvoted, false) as is_upvoted,
+                       COALESCE(v.user_downvoted, false) as is_downvoted
+                FROM followed_content fc
+                LEFT JOIN (
+                    SELECT referenced_content_id, COUNT(*) as replies_count
+                    FROM k_contents r
+                    WHERE r.content_type = 'reply'
+                      AND EXISTS (SELECT 1 FROM followed_content fc WHERE fc.transaction_id = r.referenced_content_id)
+                    GROUP BY referenced_content_id
+                ) r ON fc.transaction_id = r.referenced_content_id AND fc.content_type IN ('post', 'quote')
+                LEFT JOIN (
+                    SELECT referenced_content_id, COUNT(*) as quotes_count
+                    FROM k_contents qt
+                    WHERE qt.content_type = 'quote'
+                      AND EXISTS (SELECT 1 FROM followed_content fc WHERE fc.transaction_id = qt.referenced_content_id)
+                    GROUP BY referenced_content_id
+                ) q ON fc.transaction_id = q.referenced_content_id AND fc.content_type IN ('post', 'quote')
+                LEFT JOIN (
+                    SELECT post_id,
+                           COUNT(*) FILTER (WHERE vote = 'upvote') as up_votes_count,
+                           COUNT(*) FILTER (WHERE vote = 'downvote') as down_votes_count,
+                           bool_or(vote = 'upvote' AND sender_pubkey = $1) as user_upvoted,
+                           bool_or(vote = 'downvote' AND sender_pubkey = $1) as user_downvoted
+                    FROM k_votes v
+                    WHERE EXISTS (SELECT 1 FROM followed_content fc WHERE fc.transaction_id = v.post_id)
+                    GROUP BY post_id
+                ) v ON fc.transaction_id = v.post_id AND fc.content_type IN ('post', 'quote')
+            )
+            SELECT ps.id, ps.transaction_id, ps.block_time, ps.sender_pubkey,
+                   ps.sender_signature, ps.base64_encoded_message,
+                   COALESCE(ARRAY(SELECT encode(m.mentioned_pubkey, 'hex') FROM k_mentions m
+                                  WHERE m.content_id = ps.transaction_id AND m.content_type = ps.content_type), '{{}}') as mentioned_pubkeys,
+                   ps.replies_count, ps.quotes_count, ps.up_votes_count, ps.down_votes_count,
+                   ps.is_upvoted, ps.is_downvoted,
+                   COALESCE(b.base64_encoded_nickname, '') as user_nickname,
+                   b.base64_encoded_profile_image as user_profile_image,
+                   encode(ps.referenced_content_id, 'hex') as referenced_content_id,
+                   ref_c.base64_encoded_message as referenced_message,
+                   encode(ref_c.sender_pubkey, 'hex') as referenced_sender_pubkey,
+                   COALESCE(ref_b.base64_encoded_nickname, '') as referenced_nickname,
+                   ref_b.base64_encoded_profile_image as referenced_profile_image,
+                   CASE
+                       WHEN kb.blocked_user_pubkey IS NOT NULL THEN true
+                       ELSE false
+                   END as is_blocked
+            FROM content_stats ps
+            LEFT JOIN LATERAL (
+                SELECT base64_encoded_nickname, base64_encoded_profile_image
+                FROM k_broadcasts b
+                WHERE b.sender_pubkey = ps.sender_pubkey
+                ORDER BY b.block_time DESC
+                LIMIT 1
+            ) b ON true
+            LEFT JOIN LATERAL (
+                SELECT base64_encoded_message, sender_pubkey
+                FROM k_contents
+                WHERE transaction_id = ps.referenced_content_id
+                  AND ps.content_type IN ('reply', 'quote')
+                LIMIT 1
+            ) ref_c ON true
+            LEFT JOIN LATERAL (
+                SELECT base64_encoded_nickname, base64_encoded_profile_image
+                FROM k_broadcasts
+                WHERE sender_pubkey = ref_c.sender_pubkey
+                ORDER BY block_time DESC
+                LIMIT 1
+            ) ref_b ON ref_c.sender_pubkey IS NOT NULL
+            LEFT JOIN k_blocks kb ON kb.sender_pubkey = $1 AND kb.blocked_user_pubkey = ps.sender_pubkey
+            WHERE 1=1
+            {final_order_clause}
+            "#,
+            cursor_conditions = cursor_conditions,
+            order_clause = order_clause,
+            final_order_clause = final_order_clause,
+            limit_param = bind_count + 1
+        );
+
+        // Build query with parameter binding
+        let mut query_builder = sqlx::query(&query).bind(&requester_pubkey_bytes);
+
+        // Add cursor parameters if present
+        if let Some(before_cursor) = &options.before {
+            if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
+                query_builder = query_builder.bind(before_timestamp as i64).bind(before_id);
+            }
+        }
+
+        if let Some(after_cursor) = &options.after {
+            if let Ok((after_timestamp, after_id)) = Self::parse_compound_cursor(after_cursor) {
+                query_builder = query_builder.bind(after_timestamp as i64).bind(after_id);
+            }
+        }
+
+        query_builder = query_builder.bind(offset_limit);
+
+        let rows = query_builder.fetch_all(&self.pool).await.map_err(|e| {
+            DatabaseError::QueryError(format!("Failed to fetch followed content: {}", e))
+        })?;
+
+        // Process results and build pagination
+        let mut items = Vec::new();
+        let mut has_more = false;
+
+        for (index, row) in rows.iter().enumerate() {
+            if index >= limit as usize {
+                has_more = true;
+                break;
+            }
+
+            let transaction_id: Vec<u8> = row.get("transaction_id");
+            let sender_pubkey: Vec<u8> = row.get("sender_pubkey");
+            let sender_signature: Vec<u8> = row.get("sender_signature");
+            let mentioned_pubkeys_raw: Vec<String> = row.get("mentioned_pubkeys");
+            let is_blocked: bool = row.get("is_blocked");
+
+            let referenced_content_id: Option<String> = row.try_get("referenced_content_id").ok();
+            let referenced_message: Option<String> = row.try_get("referenced_message").ok();
+            let referenced_sender_pubkey: Option<String> =
+                row.try_get("referenced_sender_pubkey").ok();
+            let referenced_nickname: Option<String> = row.try_get("referenced_nickname").ok();
+            let referenced_profile_image: Option<String> =
+                row.try_get("referenced_profile_image").ok();
+
+            let record = KPostRecord {
+                id: row.get::<i64, _>("id"),
+                transaction_id: Self::encode_bytes_to_hex(&transaction_id),
+                block_time: row.get::<i64, _>("block_time") as u64,
+                sender_pubkey: Self::encode_bytes_to_hex(&sender_pubkey),
+                sender_signature: Self::encode_bytes_to_hex(&sender_signature),
+                base64_encoded_message: row.get("base64_encoded_message"),
+                mentioned_pubkeys: mentioned_pubkeys_raw,
+                replies_count: Some(row.get::<i64, _>("replies_count") as u64),
+                up_votes_count: Some(row.get::<i64, _>("up_votes_count") as u64),
+                down_votes_count: Some(row.get::<i64, _>("down_votes_count") as u64),
+                quotes_count: Some(row.get::<i64, _>("quotes_count") as u64),
+                is_upvoted: Some(row.get("is_upvoted")),
+                is_downvoted: Some(row.get("is_downvoted")),
+                user_nickname: Some(row.get("user_nickname")),
+                user_profile_image: row.get("user_profile_image"),
+                referenced_content_id,
+                referenced_message,
+                referenced_sender_pubkey,
+                referenced_nickname,
+                referenced_profile_image,
+            };
+
+            items.push((record, is_blocked));
+        }
+
+        // Build pagination metadata
+        let pagination = if items.is_empty() {
+            PaginationMetadata {
+                has_more: false,
+                next_cursor: None,
+                prev_cursor: None,
+            }
+        } else {
+            let first_item = &items.first().unwrap().0;
+            let last_item = &items.last().unwrap().0;
+
+            let next_cursor = if has_more {
+                Some(Self::create_compound_cursor(
+                    last_item.block_time,
+                    last_item.id,
+                ))
+            } else {
+                None
+            };
+
+            let prev_cursor = Some(Self::create_compound_cursor(
+                first_item.block_time,
+                first_item.id,
+            ));
+
+            PaginationMetadata {
+                has_more,
+                next_cursor,
+                prev_cursor,
+            }
+        };
+
+        Ok(PaginatedResult { items, pagination })
     }
 
     async fn get_contents_mentioning_user(
