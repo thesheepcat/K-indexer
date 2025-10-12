@@ -61,18 +61,18 @@ pub struct PaginatedResult<T> {
 pub trait DatabaseInterface: Send + Sync {
     // Post operations (optimized versions with metadata)
 
-    // Broadcast operations
-    async fn get_all_broadcasts_with_block_status(
+    // User operations
+    async fn get_all_users(
         &self,
         requester_pubkey: &str,
         options: QueryOptions,
     ) -> DatabaseResult<PaginatedResult<(KBroadcastRecord, bool)>>;
 
-    async fn get_broadcast_by_user_with_block_status(
+    async fn get_user_details(
         &self,
         user_public_key: &str,
         requester_pubkey: &str,
-    ) -> DatabaseResult<Option<(KBroadcastRecord, bool)>>;
+    ) -> DatabaseResult<Option<(KBroadcastRecord, bool, bool)>>;
 
     async fn get_blocked_users_by_requester(
         &self,

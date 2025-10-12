@@ -223,11 +223,7 @@ impl ApiHandlers {
             sort_descending: true,
         };
 
-        let broadcasts_result = match self
-            .db
-            .get_all_broadcasts_with_block_status(requester_pubkey, options)
-            .await
-        {
+        let broadcasts_result = match self.db.get_all_users(requester_pubkey, options).await {
             Ok(result) => result,
             Err(err) => {
                 log_error!(
@@ -929,10 +925,10 @@ impl ApiHandlers {
             ));
         }
 
-        // Get the user's broadcast record from k_broadcast table with block status
+        // Get the user's broadcast record from k_broadcast table with block/follow status
         let broadcast_result = match self
             .db
-            .get_broadcast_by_user_with_block_status(user_public_key, requester_pubkey)
+            .get_user_details(user_public_key, requester_pubkey)
             .await
         {
             Ok(result) => result,
@@ -951,7 +947,7 @@ impl ApiHandlers {
 
         // Handle user data (even if no broadcast exists)
         let server_user_post = match broadcast_result {
-            Some((record, blocked)) => {
+            Some((record, blocked, followed)) => {
                 // Check if this is a dummy record (no real broadcast data)
                 if record.id == 0 && record.transaction_id.is_empty() {
                     // User has no broadcast data - create minimal response with empty fields
@@ -964,11 +960,14 @@ impl ApiHandlers {
                         user_nickname: None,
                         user_profile_image: None,
                         blocked_user: Some(blocked), // Use the actual blocking status from database
+                        followed_user: Some(followed), // Use the actual following status from database
                     }
                 } else {
                     // User has real broadcast data
                     let mut user_post =
-                        ServerUserPost::from_k_broadcast_record_with_block_status(&record, blocked);
+                        ServerUserPost::from_k_broadcast_record_with_block_and_follow_status(
+                            &record, blocked, followed,
+                        );
                     user_post.user_nickname = Some(record.base64_encoded_nickname);
                     user_post.user_profile_image = record.base64_encoded_profile_image;
                     user_post
@@ -985,6 +984,7 @@ impl ApiHandlers {
                     user_nickname: None,
                     user_profile_image: None,
                     blocked_user: Some(false),
+                    followed_user: Some(false),
                 }
             }
         };

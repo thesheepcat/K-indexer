@@ -250,6 +250,8 @@ pub struct ServerUserPost {
     pub user_profile_image: Option<String>,
     #[serde(rename = "blockedUser", skip_serializing_if = "Option::is_none")]
     pub blocked_user: Option<bool>,
+    #[serde(rename = "followedUser", skip_serializing_if = "Option::is_none")]
+    pub followed_user: Option<bool>,
 }
 
 impl ServerUserPost {
@@ -263,6 +265,7 @@ impl ServerUserPost {
             user_nickname: Some(record.base64_encoded_nickname.clone()),
             user_profile_image: record.base64_encoded_profile_image.clone(),
             blocked_user: None,
+            followed_user: None,
         }
     }
 
@@ -287,6 +290,33 @@ impl ServerUserPost {
             user_nickname: Some(record.base64_encoded_nickname.clone()),
             user_profile_image: record.base64_encoded_profile_image.clone(),
             blocked_user: Some(is_blocked),
+            followed_user: None,
+        }
+    }
+
+    pub fn from_k_broadcast_record_with_block_and_follow_status(
+        record: &KBroadcastRecord,
+        is_blocked: bool,
+        is_followed: bool,
+    ) -> Self {
+        // Use base64 encoded "**********" for blocked users, otherwise use original message
+        let post_content = if is_blocked {
+            // Base64 encoded version of "**********"
+            "KioqKioqKioqKg==".to_string()
+        } else {
+            record.base64_encoded_message.clone()
+        };
+
+        Self {
+            id: record.transaction_id.clone(),
+            user_public_key: record.sender_pubkey.clone(),
+            post_content,
+            signature: record.sender_signature.clone(),
+            timestamp: record.block_time,
+            user_nickname: Some(record.base64_encoded_nickname.clone()),
+            user_profile_image: record.base64_encoded_profile_image.clone(),
+            blocked_user: Some(is_blocked),
+            followed_user: Some(is_followed),
         }
     }
 }
