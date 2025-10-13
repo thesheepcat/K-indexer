@@ -314,11 +314,11 @@ impl DatabaseInterface for PostgresDbManager {
         &self,
         user_public_key: &str,
         requester_pubkey: &str,
-    ) -> DatabaseResult<Option<(KBroadcastRecord, bool, bool)>> {
+    ) -> DatabaseResult<Option<(KBroadcastRecord, bool, bool, i64, i64)>> {
         let user_pubkey_bytes = Self::decode_hex_to_bytes(user_public_key)?;
         let requester_pubkey_bytes = Self::decode_hex_to_bytes(requester_pubkey)?;
 
-        // Single query to get broadcast data + block/follow status
+        // Single query to get broadcast data + block/follow status + follower counts
         let query = r#"
             SELECT
                 b.id,
@@ -336,7 +336,9 @@ impl DatabaseInterface for PostgresDbManager {
                 EXISTS (
                     SELECT 1 FROM k_follows kf
                     WHERE kf.sender_pubkey = $2 AND kf.followed_user_pubkey = $1
-                ) as is_followed
+                ) as is_followed,
+                (SELECT COUNT(*) FROM k_follows WHERE followed_user_pubkey = $1) as followers_count,
+                (SELECT COUNT(*) FROM k_follows WHERE sender_pubkey = $1) as following_count
             FROM k_broadcasts b
             WHERE b.sender_pubkey = $1
             ORDER BY b.block_time DESC
@@ -359,6 +361,8 @@ impl DatabaseInterface for PostgresDbManager {
             let sender_signature: Vec<u8> = row.get("sender_signature");
             let is_blocked: bool = row.get("is_blocked");
             let is_followed: bool = row.get("is_followed");
+            let followers_count: i64 = row.get("followers_count");
+            let following_count: i64 = row.get("following_count");
 
             let broadcast_record = KBroadcastRecord {
                 id: row.get::<i64, _>("id"),
@@ -371,9 +375,15 @@ impl DatabaseInterface for PostgresDbManager {
                 base64_encoded_message: row.get("base64_encoded_message"),
             };
 
-            Ok(Some((broadcast_record, is_blocked, is_followed)))
+            Ok(Some((
+                broadcast_record,
+                is_blocked,
+                is_followed,
+                followers_count,
+                following_count,
+            )))
         } else {
-            // No broadcast data found, need separate query for block/follow status
+            // No broadcast data found, need separate query for block/follow status and counts
             let status_query = r#"
                 SELECT
                     EXISTS (
@@ -383,7 +393,9 @@ impl DatabaseInterface for PostgresDbManager {
                     EXISTS (
                         SELECT 1 FROM k_follows kf
                         WHERE kf.sender_pubkey = $2 AND kf.followed_user_pubkey = $1
-                    ) as is_followed
+                    ) as is_followed,
+                    (SELECT COUNT(*) FROM k_follows WHERE followed_user_pubkey = $1) as followers_count,
+                    (SELECT COUNT(*) FROM k_follows WHERE sender_pubkey = $1) as following_count
             "#;
 
             let status_row = sqlx::query(status_query)
@@ -397,6 +409,8 @@ impl DatabaseInterface for PostgresDbManager {
 
             let is_blocked: bool = status_row.get("is_blocked");
             let is_followed: bool = status_row.get("is_followed");
+            let followers_count: i64 = status_row.get("followers_count");
+            let following_count: i64 = status_row.get("following_count");
 
             // Create a minimal broadcast record with empty fields and the status
             let broadcast_record = KBroadcastRecord {
@@ -410,7 +424,13 @@ impl DatabaseInterface for PostgresDbManager {
                 base64_encoded_message: String::new(),
             };
 
-            Ok(Some((broadcast_record, is_blocked, is_followed)))
+            Ok(Some((
+                broadcast_record,
+                is_blocked,
+                is_followed,
+                followers_count,
+                following_count,
+            )))
         }
     }
 
@@ -761,7 +781,7 @@ impl DatabaseInterface for PostgresDbManager {
                 SELECT base64_encoded_message, sender_pubkey
                 FROM k_contents
                 WHERE transaction_id = ps.referenced_content_id
-                  AND ps.content_type = 'quote'
+                  AND ps.content_type IN ('reply', 'quote')
                 LIMIT 1
             ) ref_c ON true
             LEFT JOIN LATERAL (
@@ -827,6 +847,7 @@ impl DatabaseInterface for PostgresDbManager {
                 sender_signature: Self::encode_bytes_to_hex(&sender_signature),
                 base64_encoded_message: row.get("base64_encoded_message"),
                 mentioned_pubkeys: mentioned_pubkeys_array,
+                content_type: None,
                 replies_count: Some(row.get::<i64, _>("replies_count") as u64),
                 quotes_count: Some(row.get::<i64, _>("quotes_count") as u64),
                 up_votes_count: Some(row.get::<i64, _>("up_votes_count") as u64),
@@ -956,7 +977,7 @@ impl DatabaseInterface for PostgresDbManager {
                 ) v ON fc.transaction_id = v.post_id AND fc.content_type IN ('post', 'quote')
             )
             SELECT ps.id, ps.transaction_id, ps.block_time, ps.sender_pubkey,
-                   ps.sender_signature, ps.base64_encoded_message,
+                   ps.sender_signature, ps.base64_encoded_message, ps.content_type,
                    COALESCE(ARRAY(SELECT encode(m.mentioned_pubkey, 'hex') FROM k_mentions m
                                   WHERE m.content_id = ps.transaction_id AND m.content_type = ps.content_type), '{{}}') as mentioned_pubkeys,
                    ps.replies_count, ps.quotes_count, ps.up_votes_count, ps.down_votes_count,
@@ -1058,6 +1079,7 @@ impl DatabaseInterface for PostgresDbManager {
                 sender_signature: Self::encode_bytes_to_hex(&sender_signature),
                 base64_encoded_message: row.get("base64_encoded_message"),
                 mentioned_pubkeys: mentioned_pubkeys_raw,
+                content_type: row.try_get("content_type").ok(),
                 replies_count: Some(row.get::<i64, _>("replies_count") as u64),
                 up_votes_count: Some(row.get::<i64, _>("up_votes_count") as u64),
                 down_votes_count: Some(row.get::<i64, _>("down_votes_count") as u64),
@@ -1352,6 +1374,7 @@ impl DatabaseInterface for PostgresDbManager {
                         sender_signature: Self::encode_bytes_to_hex(&sender_signature),
                         base64_encoded_message: row.get("base64_encoded_message"),
                         mentioned_pubkeys: mentioned_pubkeys_array,
+                        content_type: None,
                         replies_count: Some(row.get::<i64, _>("replies_count") as u64),
                         quotes_count: Some(row.get::<i64, _>("quotes_count") as u64),
                         up_votes_count: Some(row.get::<i64, _>("up_votes_count") as u64),
@@ -1388,6 +1411,7 @@ impl DatabaseInterface for PostgresDbManager {
                         post_id: post_id_hex,
                         base64_encoded_message: row.get("base64_encoded_message"),
                         mentioned_pubkeys: mentioned_pubkeys_array,
+                        content_type: None,
                         replies_count: Some(0), // Replies don't have replies
                         quotes_count: None,
                         up_votes_count: Some(row.get::<i64, _>("up_votes_count") as u64),
@@ -1555,6 +1579,7 @@ impl DatabaseInterface for PostgresDbManager {
                     sender_signature: hex::encode(row.get::<Vec<u8>, _>("sender_signature")),
                     base64_encoded_message: row.get("base64_encoded_message"),
                     mentioned_pubkeys,
+                    content_type: None,
                     replies_count: Some(row.get::<i64, _>("replies_count") as u64),
                     quotes_count: Some(row.get::<i64, _>("quotes_count") as u64),
                     up_votes_count: Some(row.get::<i64, _>("up_votes_count") as u64),
@@ -1598,6 +1623,7 @@ impl DatabaseInterface for PostgresDbManager {
                     post_id,
                     base64_encoded_message: row.get("base64_encoded_message"),
                     mentioned_pubkeys,
+                    content_type: None,
                     replies_count: Some(row.get::<i64, _>("replies_count") as u64),
                     quotes_count: Some(row.get::<i64, _>("quotes_count") as u64),
                     up_votes_count: Some(row.get::<i64, _>("up_votes_count") as u64),
@@ -1834,6 +1860,7 @@ impl DatabaseInterface for PostgresDbManager {
                 post_id: Self::encode_bytes_to_hex(&referenced_content_id),
                 base64_encoded_message: row.get("base64_encoded_message"),
                 mentioned_pubkeys: mentioned_pubkeys_array,
+                content_type: None,
                 replies_count: Some(row.get::<i64, _>("replies_count") as u64),
                 quotes_count: Some(row.get::<i64, _>("quotes_count") as u64),
                 up_votes_count: Some(row.get::<i64, _>("up_votes_count") as u64),
@@ -2073,6 +2100,7 @@ impl DatabaseInterface for PostgresDbManager {
                 post_id: Self::encode_bytes_to_hex(&referenced_content_id),
                 base64_encoded_message: row.get("base64_encoded_message"),
                 mentioned_pubkeys: mentioned_pubkeys_array,
+                content_type: None,
                 replies_count: Some(row.get::<i64, _>("replies_count") as u64),
                 quotes_count: Some(row.get::<i64, _>("quotes_count") as u64),
                 up_votes_count: Some(row.get::<i64, _>("up_votes_count") as u64),
@@ -2264,7 +2292,7 @@ impl DatabaseInterface for PostgresDbManager {
                 SELECT base64_encoded_message, sender_pubkey
                 FROM k_contents
                 WHERE transaction_id = ps.referenced_content_id
-                  AND ps.content_type = 'quote'
+                  AND ps.content_type IN ('reply', 'quote')
                 LIMIT 1
             ) ref_c ON true
             LEFT JOIN LATERAL (
@@ -2333,6 +2361,7 @@ impl DatabaseInterface for PostgresDbManager {
                 sender_signature: Self::encode_bytes_to_hex(&sender_signature),
                 base64_encoded_message: row.get("base64_encoded_message"),
                 mentioned_pubkeys: mentioned_pubkeys_array,
+                content_type: None,
                 replies_count: Some(row.get::<i64, _>("replies_count") as u64),
                 quotes_count: Some(row.get::<i64, _>("quotes_count") as u64),
                 up_votes_count: Some(row.get::<i64, _>("up_votes_count") as u64),
@@ -2670,6 +2699,7 @@ impl DatabaseInterface for PostgresDbManager {
                     sender_signature: String::new(),
                     base64_encoded_message: row.get("base64_encoded_message"),
                     mentioned_pubkeys: Vec::new(),
+                    content_type: None,
                     up_votes_count: None,
                     down_votes_count: None,
                     is_upvoted: None,
@@ -2703,6 +2733,7 @@ impl DatabaseInterface for PostgresDbManager {
                     sender_signature: String::new(),
                     base64_encoded_message: row.get("base64_encoded_message"),
                     mentioned_pubkeys: Vec::new(),
+                    content_type: None,
                     up_votes_count: None,
                     down_votes_count: None,
                     is_upvoted: None,
@@ -2733,6 +2764,7 @@ impl DatabaseInterface for PostgresDbManager {
                     post_id: String::new(),
                     base64_encoded_message: row.get("base64_encoded_message"),
                     mentioned_pubkeys: Vec::new(),
+                    content_type: None,
                     replies_count: None,
                     quotes_count: None,
                     up_votes_count: None,

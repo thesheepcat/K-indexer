@@ -307,19 +307,28 @@ Each content item includes optional user profile fields:
 - `userNickname`: Base64 encoded nickname (optional) - When decoded, shows the user's display name
 - `userProfileImage`: Base64 encoded profile image (optional) - 48x48px image in PNG format
 
-**Quote Support:**
-Content items may be quotes with referenced content:
-- `isQuote`: Boolean field indicating if this is a quote (true) or regular content (false)
-- `quote`: Object containing referenced content data (only present when `isQuote` is true)
-  - `referencedContentId`: Transaction ID of the referenced content
-  - `referencedMessage`: Base64 encoded message of the referenced content
-  - `referencedSenderPubkey`: Public key of the referenced content's author
-  - `referencedNickname`: Base64 encoded nickname of referenced author (optional)
-  - `referencedProfileImage`: Base64 encoded profile image of referenced author (optional)
+**Content Type Support:**
 
-**Reply Support:**
-Content items may be replies with parent post reference:
-- `parentPostId`: Transaction ID of the parent post (for replies), null for regular posts and quotes
+1. **Regular Posts** (`contentType: "post"`):
+   - `isQuote`: false
+   - `quote`: null
+   - `parentPostId`: null
+
+2. **Quotes** (`contentType: "quote"`):
+   - `isQuote`: true
+   - `quote`: Object containing full referenced content data
+     - `referencedContentId`: Transaction ID of the quoted content
+     - `referencedMessage`: Base64 encoded message of the quoted content
+     - `referencedSenderPubkey`: Public key of the quoted content's author
+     - `referencedNickname`: Base64 encoded nickname of quoted author (optional)
+     - `referencedProfileImage`: Base64 encoded profile image of quoted author (optional)
+   - `parentPostId`: null
+
+3. **Replies** (`contentType: "reply"`):
+   - `isQuote`: false
+   - `quote`: null
+   - `parentPostId`: null
+   - Note: Replies are displayed as standalone content without parent post references
 
 **Response Example:**
 ```json
@@ -336,13 +345,35 @@ Content items may be replies with parent post reference:
       "downVotesCount": 0,
       "quotesCount": 0,
       "repostsCount": 0,
-      "parentPostId": "63488ae3f764fbb7302fc6ebebf8bea8b1c1f15bffd50e85a6ec757544d0e258",
+      "parentPostId": null,
       "mentionedPubkeys": ["02218b3732df2353978154ec5323b745bce9520a5ed506a96de4f4e3dad20dc44f"],
       "isUpvoted": false,
       "isDownvoted": false,
       "userNickname": "QWN1dGU=",
       "userProfileImage": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP...",
       "blockedUser": false,
+      "contentType": "reply",
+      "isQuote": false
+    },
+    {
+      "id": "fdc28c4f1566e0f1813007184d4f652c17536f479be8bb3ff8757c706dbcb93e",
+      "userPublicKey": "033d01709a02bf78f95e09cd00ba93ad8fb7c8ac11e6d3f871a11062eeb2aa8cd8",
+      "postContent": "R3JlYXQgYW5hbHlzaXMh",
+      "signature": "8a5c2e9f1a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d...",
+      "timestamp": 1759880000000,
+      "repliesCount": 2,
+      "upVotesCount": 3,
+      "downVotesCount": 0,
+      "quotesCount": 1,
+      "repostsCount": 0,
+      "parentPostId": null,
+      "mentionedPubkeys": [],
+      "isUpvoted": false,
+      "isDownvoted": false,
+      "userNickname": "S2FzcGEgU2lsdmVy",
+      "userProfileImage": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlE...",
+      "blockedUser": false,
+      "contentType": "quote",
       "isQuote": true,
       "quote": {
         "referencedContentId": "63488ae3f764fbb7302fc6ebebf8bea8b1c1f15bffd50e85a6ec757544d0e258",
@@ -370,6 +401,7 @@ Content items may be replies with parent post reference:
       "userNickname": "S2FzcGEgU2lsdmVy",
       "userProfileImage": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlE...",
       "blockedUser": false,
+      "contentType": "post",
       "isQuote": false
     }
   ],
@@ -562,7 +594,10 @@ curl "http://localhost:3000/get-user-details?user=02218b3732df2353978154ec5323b7
   "timestamp": 1703190000,
   "userNickname": "QWxpY2U=",
   "userProfileImage": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==",
-  "blockedUser": false
+  "blockedUser": false,
+  "followedUser": true,
+  "followersCount": 42,
+  "followingCount": 13
 }
 ```
 
@@ -575,11 +610,17 @@ curl "http://localhost:3000/get-user-details?user=02218b3732df2353978154ec5323b7
 - `userNickname`: Base64 encoded nickname (optional) - When decoded, shows the user's display name
 - `userProfileImage`: Base64 encoded profile image (optional) - 48x48px image in PNG format
 - `blockedUser`: Boolean indicating whether the requester has blocked this user
+- `followedUser`: Boolean indicating whether the requester is following this user
+- `followersCount`: Number of users following this user (how many followers they have)
+- `followingCount`: Number of users this user is following
 
-**Block Status Logic:**
-The `blockedUser` field indicates whether the requesting user (`requesterPubkey`) has blocked the target user (`user`). This is determined by checking the `k_blocks` table for records where:
-- `sender_pubkey` = `requesterPubkey` (the requester did the blocking)
-- `blocked_user_pubkey` = `user` (the target user was blocked)
+**Block and Follow Status Logic:**
+- The `blockedUser` field indicates whether the requesting user (`requesterPubkey`) has blocked the target user (`user`). This is determined by checking the `k_blocks` table for records where `sender_pubkey` = `requesterPubkey` and `blocked_user_pubkey` = `user`.
+- The `followedUser` field indicates whether the requesting user (`requesterPubkey`) is following the target user (`user`). This is determined by checking the `k_follows` table for records where `sender_pubkey` = `requesterPubkey` and `followed_user_pubkey` = `user`.
+
+**Follower Counts:**
+- `followersCount`: Total count from `k_follows` table where `followed_user_pubkey` = `user` (how many people follow this user)
+- `followingCount`: Total count from `k_follows` table where `sender_pubkey` = `user` (how many people this user follows)
 
 **Error Responses:**
 - `400 Bad Request`: Invalid or missing parameters
