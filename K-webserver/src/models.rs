@@ -61,6 +61,7 @@ pub struct KPostRecord {
     pub sender_signature: String,
     pub base64_encoded_message: String,
     pub mentioned_pubkeys: Vec<String>,
+    pub content_type: Option<String>,
     // Optional enriched metadata fields for optimized queries
     pub replies_count: Option<u64>,
     pub up_votes_count: Option<u64>,
@@ -98,6 +99,7 @@ pub struct KReplyRecord {
     pub post_id: String,
     pub base64_encoded_message: String,
     pub mentioned_pubkeys: Vec<String>,
+    pub content_type: Option<String>,
     // Optional enriched metadata fields for optimized queries
     pub replies_count: Option<u64>,
     pub up_votes_count: Option<u64>,
@@ -202,6 +204,8 @@ pub struct ServerPost {
     pub user_profile_image: Option<String>,
     #[serde(rename = "blockedUser", skip_serializing_if = "Option::is_none")]
     pub blocked_user: Option<bool>,
+    #[serde(rename = "contentType", skip_serializing_if = "Option::is_none")]
+    pub content_type: Option<String>,
     #[serde(rename = "isQuote")]
     pub is_quote: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -252,6 +256,10 @@ pub struct ServerUserPost {
     pub blocked_user: Option<bool>,
     #[serde(rename = "followedUser", skip_serializing_if = "Option::is_none")]
     pub followed_user: Option<bool>,
+    #[serde(rename = "followersCount", skip_serializing_if = "Option::is_none")]
+    pub followers_count: Option<i64>,
+    #[serde(rename = "followingCount", skip_serializing_if = "Option::is_none")]
+    pub following_count: Option<i64>,
 }
 
 impl ServerUserPost {
@@ -266,6 +274,8 @@ impl ServerUserPost {
             user_profile_image: record.base64_encoded_profile_image.clone(),
             blocked_user: None,
             followed_user: None,
+            followers_count: None,
+            following_count: None,
         }
     }
 
@@ -291,6 +301,8 @@ impl ServerUserPost {
             user_profile_image: record.base64_encoded_profile_image.clone(),
             blocked_user: Some(is_blocked),
             followed_user: None,
+            followers_count: None,
+            following_count: None,
         }
     }
 
@@ -317,6 +329,8 @@ impl ServerUserPost {
             user_profile_image: record.base64_encoded_profile_image.clone(),
             blocked_user: Some(is_blocked),
             followed_user: Some(is_followed),
+            followers_count: None,
+            following_count: None,
         }
     }
 }
@@ -394,6 +408,7 @@ impl ServerPost {
             user_nickname: record.user_nickname.clone(),
             user_profile_image: record.user_profile_image.clone(),
             blocked_user: Some(is_blocked),
+            content_type: record.content_type.clone(),
             is_quote,
             quote,
         }
@@ -543,6 +558,7 @@ impl ServerReply {
             user_nickname: record.user_nickname.clone(),
             user_profile_image: record.user_profile_image.clone(),
             blocked_user: Some(is_blocked),
+            content_type: record.content_type.clone(),
             is_quote: false,
             quote: None,
         }

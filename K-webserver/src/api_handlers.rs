@@ -694,6 +694,7 @@ impl ApiHandlers {
                         user_nickname: _vote_record.user_nickname.clone(),
                         user_profile_image: _vote_record.user_profile_image.clone(),
                         blocked_user: Some(*is_blocked),
+                        content_type: Some("vote".to_string()),
                         is_quote: false,
                         quote: None,
                     }
@@ -920,6 +921,7 @@ impl ApiHandlers {
                             user_nickname: k_vote_record.user_nickname.clone(),
                             user_profile_image: k_vote_record.user_profile_image.clone(),
                             blocked_user: Some(is_blocked),
+                            content_type: Some("vote".to_string()),
                             is_quote: false,
                             quote: None,
                         };
@@ -1031,7 +1033,7 @@ impl ApiHandlers {
 
         // Handle user data (even if no broadcast exists)
         let server_user_post = match broadcast_result {
-            Some((record, blocked, followed)) => {
+            Some((record, blocked, followed, followers_count, following_count)) => {
                 // Check if this is a dummy record (no real broadcast data)
                 if record.id == 0 && record.transaction_id.is_empty() {
                     // User has no broadcast data - create minimal response with empty fields
@@ -1045,6 +1047,8 @@ impl ApiHandlers {
                         user_profile_image: None,
                         blocked_user: Some(blocked), // Use the actual blocking status from database
                         followed_user: Some(followed), // Use the actual following status from database
+                        followers_count: Some(followers_count),
+                        following_count: Some(following_count),
                     }
                 } else {
                     // User has real broadcast data
@@ -1054,6 +1058,8 @@ impl ApiHandlers {
                         );
                     user_post.user_nickname = Some(record.base64_encoded_nickname);
                     user_post.user_profile_image = record.base64_encoded_profile_image;
+                    user_post.followers_count = Some(followers_count);
+                    user_post.following_count = Some(following_count);
                     user_post
                 }
             }
@@ -1069,6 +1075,8 @@ impl ApiHandlers {
                     user_profile_image: None,
                     blocked_user: Some(false),
                     followed_user: Some(false),
+                    followers_count: Some(0),
+                    following_count: Some(0),
                 }
             }
         };
