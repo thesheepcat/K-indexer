@@ -1005,7 +1005,7 @@ impl DatabaseInterface for PostgresDbManager {
                 SELECT base64_encoded_message, sender_pubkey
                 FROM k_contents
                 WHERE transaction_id = ps.referenced_content_id
-                  AND ps.content_type IN ('reply', 'quote')
+                  AND ps.content_type = 'quote'
                 LIMIT 1
             ) ref_c ON true
             LEFT JOIN LATERAL (
