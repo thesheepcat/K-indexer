@@ -61,6 +61,7 @@ pub struct KPostRecord {
     pub sender_signature: String,
     pub base64_encoded_message: String,
     pub mentioned_pubkeys: Vec<String>,
+    pub content_type: Option<String>,
     // Optional enriched metadata fields for optimized queries
     pub replies_count: Option<u64>,
     pub up_votes_count: Option<u64>,
@@ -98,6 +99,7 @@ pub struct KReplyRecord {
     pub post_id: String,
     pub base64_encoded_message: String,
     pub mentioned_pubkeys: Vec<String>,
+    pub content_type: Option<String>,
     // Optional enriched metadata fields for optimized queries
     pub replies_count: Option<u64>,
     pub up_votes_count: Option<u64>,
@@ -202,6 +204,8 @@ pub struct ServerPost {
     pub user_profile_image: Option<String>,
     #[serde(rename = "blockedUser", skip_serializing_if = "Option::is_none")]
     pub blocked_user: Option<bool>,
+    #[serde(rename = "contentType", skip_serializing_if = "Option::is_none")]
+    pub content_type: Option<String>,
     #[serde(rename = "isQuote")]
     pub is_quote: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -250,6 +254,12 @@ pub struct ServerUserPost {
     pub user_profile_image: Option<String>,
     #[serde(rename = "blockedUser", skip_serializing_if = "Option::is_none")]
     pub blocked_user: Option<bool>,
+    #[serde(rename = "followedUser", skip_serializing_if = "Option::is_none")]
+    pub followed_user: Option<bool>,
+    #[serde(rename = "followersCount", skip_serializing_if = "Option::is_none")]
+    pub followers_count: Option<i64>,
+    #[serde(rename = "followingCount", skip_serializing_if = "Option::is_none")]
+    pub following_count: Option<i64>,
 }
 
 impl ServerUserPost {
@@ -263,6 +273,9 @@ impl ServerUserPost {
             user_nickname: Some(record.base64_encoded_nickname.clone()),
             user_profile_image: record.base64_encoded_profile_image.clone(),
             blocked_user: None,
+            followed_user: None,
+            followers_count: None,
+            following_count: None,
         }
     }
 
@@ -287,6 +300,37 @@ impl ServerUserPost {
             user_nickname: Some(record.base64_encoded_nickname.clone()),
             user_profile_image: record.base64_encoded_profile_image.clone(),
             blocked_user: Some(is_blocked),
+            followed_user: None,
+            followers_count: None,
+            following_count: None,
+        }
+    }
+
+    pub fn from_k_broadcast_record_with_block_and_follow_status(
+        record: &KBroadcastRecord,
+        is_blocked: bool,
+        is_followed: bool,
+    ) -> Self {
+        // Use base64 encoded "**********" for blocked users, otherwise use original message
+        let post_content = if is_blocked {
+            // Base64 encoded version of "**********"
+            "KioqKioqKioqKg==".to_string()
+        } else {
+            record.base64_encoded_message.clone()
+        };
+
+        Self {
+            id: record.transaction_id.clone(),
+            user_public_key: record.sender_pubkey.clone(),
+            post_content,
+            signature: record.sender_signature.clone(),
+            timestamp: record.block_time,
+            user_nickname: Some(record.base64_encoded_nickname.clone()),
+            user_profile_image: record.base64_encoded_profile_image.clone(),
+            blocked_user: Some(is_blocked),
+            followed_user: Some(is_followed),
+            followers_count: None,
+            following_count: None,
         }
     }
 }
@@ -364,6 +408,7 @@ impl ServerPost {
             user_nickname: record.user_nickname.clone(),
             user_profile_image: record.user_profile_image.clone(),
             blocked_user: Some(is_blocked),
+            content_type: record.content_type.clone(),
             is_quote,
             quote,
         }
@@ -513,6 +558,7 @@ impl ServerReply {
             user_nickname: record.user_nickname.clone(),
             user_profile_image: record.user_profile_image.clone(),
             blocked_user: Some(is_blocked),
+            content_type: record.content_type.clone(),
             is_quote: false,
             quote: None,
         }

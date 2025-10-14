@@ -61,18 +61,18 @@ pub struct PaginatedResult<T> {
 pub trait DatabaseInterface: Send + Sync {
     // Post operations (optimized versions with metadata)
 
-    // Broadcast operations
-    async fn get_all_broadcasts_with_block_status(
+    // User operations
+    async fn get_all_users(
         &self,
         requester_pubkey: &str,
         options: QueryOptions,
     ) -> DatabaseResult<PaginatedResult<(KBroadcastRecord, bool)>>;
 
-    async fn get_broadcast_by_user_with_block_status(
+    async fn get_user_details(
         &self,
         user_public_key: &str,
         requester_pubkey: &str,
-    ) -> DatabaseResult<Option<(KBroadcastRecord, bool)>>;
+    ) -> DatabaseResult<Option<(KBroadcastRecord, bool, bool, i64, i64)>>;
 
     async fn get_blocked_users_by_requester(
         &self,
@@ -80,8 +80,21 @@ pub trait DatabaseInterface: Send + Sync {
         options: QueryOptions,
     ) -> DatabaseResult<PaginatedResult<KBroadcastRecord>>;
 
+    async fn get_followed_users_by_requester(
+        &self,
+        requester_pubkey: &str,
+        options: QueryOptions,
+    ) -> DatabaseResult<PaginatedResult<KBroadcastRecord>>;
+
     // NEW: k_contents table - Get all posts using unified content table
     async fn get_all_posts(
+        &self,
+        requester_pubkey: &str,
+        options: QueryOptions,
+    ) -> DatabaseResult<PaginatedResult<(KPostRecord, bool)>>;
+
+    // NEW: k_contents table - Get content (posts, replies, quotes) from followed users
+    async fn get_content_following(
         &self,
         requester_pubkey: &str,
         options: QueryOptions,

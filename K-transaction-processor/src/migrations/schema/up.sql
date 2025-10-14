@@ -10,8 +10,8 @@ CREATE TABLE IF NOT EXISTS k_vars (
     value TEXT NOT NULL
 );
 
--- Insert initial schema version (v4 = unified k_contents table for posts, replies, reposts, and quotes)
-INSERT INTO k_vars (key, value) VALUES ('schema_version', '4') ON CONFLICT (key) DO NOTHING;
+-- Insert initial schema version (v5 = adds k_follows table for following/unfollowing users)
+INSERT INTO k_vars (key, value) VALUES ('schema_version', '5') ON CONFLICT (key) DO NOTHING;
 
 -- Create K protocol tables
 CREATE TABLE IF NOT EXISTS k_posts (
@@ -115,6 +115,36 @@ CREATE INDEX IF NOT EXISTS idx_k_blocks_block_time ON k_blocks(block_time);
 -- 1. get-notifications: WHERE mentioned_pubkey = ? AND sender_pubkey NOT IN (blocked_users) ORDER BY block_time DESC, id DESC
 -- 2. get-mentions: WHERE mentioned_pubkey = ? AND content_type = ? AND content_id = ?
 CREATE INDEX IF NOT EXISTS idx_k_mentions_comprehensive ON k_mentions(mentioned_pubkey, sender_pubkey, content_type, content_id, block_time DESC, id DESC);
+
+-- ============================================================================
+-- NEW in v5: k_follows table for following/unfollowing users
+-- ============================================================================
+
+-- Create k_follows table for following/unfollowing users
+CREATE TABLE IF NOT EXISTS k_follows (
+    id BIGSERIAL PRIMARY KEY,
+    transaction_id BYTEA UNIQUE NOT NULL,
+    block_time BIGINT NOT NULL,
+    sender_pubkey BYTEA NOT NULL,
+    sender_signature BYTEA NOT NULL,
+    following_action VARCHAR(10) NOT NULL CHECK (following_action IN ('follow')),
+    followed_user_pubkey BYTEA NOT NULL
+);
+
+-- Signature-based deduplication index
+CREATE UNIQUE INDEX IF NOT EXISTS idx_k_follows_sender_signature_unique ON k_follows(sender_signature);
+
+-- Unique constraint: one follow record per sender-followed pair (prevents duplicates)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_k_follows_sender_followed_user_unique ON k_follows(sender_pubkey, followed_user_pubkey);
+
+-- Index for queries: "who is following user X?"
+CREATE INDEX IF NOT EXISTS idx_k_follows_followed_user_pubkey ON k_follows(followed_user_pubkey, block_time DESC);
+
+-- Index for queries: "who does user X follow?"
+CREATE INDEX IF NOT EXISTS idx_k_follows_sender_pubkey ON k_follows(sender_pubkey, block_time DESC);
+
+-- Index for time-based queries
+CREATE INDEX IF NOT EXISTS idx_k_follows_block_time ON k_follows(block_time DESC);
 
 -- ============================================================================
 -- NEW in v4: Unified k_contents table for posts, replies, reposts, and quotes
