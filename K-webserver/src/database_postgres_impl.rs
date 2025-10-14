@@ -2407,34 +2407,16 @@ impl DatabaseInterface for PostgresDbManager {
                     r#"
                     SELECT COUNT(*)
                     FROM (
-                        -- Mentions (exclude quotes as they're handled separately)
                         SELECT km.block_time, km.id
                         FROM k_mentions km
                         WHERE km.mentioned_pubkey = $1
                           AND km.sender_pubkey IS NOT NULL
                           AND km.sender_pubkey != $1
-                          AND km.content_type != 'quote'
                           AND (km.block_time > $2 OR (km.block_time = $2 AND km.id > $3))
                           AND NOT EXISTS (
                               SELECT 1 FROM k_blocks kb
                               WHERE kb.sender_pubkey = $1 AND kb.blocked_user_pubkey = km.sender_pubkey
                           )
-
-                        UNION ALL
-
-                        -- Quotes
-                        SELECT kc.block_time, kc.id
-                        FROM k_contents kc
-                        INNER JOIN k_contents original ON kc.referenced_content_id = original.transaction_id
-                        WHERE kc.content_type = 'quote'
-                          AND original.sender_pubkey = $1
-                          AND kc.sender_pubkey != $1
-                          AND (kc.block_time > $2 OR (kc.block_time = $2 AND kc.id > $3))
-                          AND NOT EXISTS (
-                              SELECT 1 FROM k_blocks kb
-                              WHERE kb.sender_pubkey = $1 AND kb.blocked_user_pubkey = kc.sender_pubkey
-                          )
-
                         ORDER BY block_time DESC, id DESC
                         LIMIT 31
                     ) recent_notifications
@@ -2456,32 +2438,15 @@ impl DatabaseInterface for PostgresDbManager {
                 r#"
                 SELECT COUNT(*)
                 FROM (
-                    -- Mentions (exclude quotes as they're handled separately)
                     SELECT km.block_time, km.id
                     FROM k_mentions km
                     WHERE km.mentioned_pubkey = $1
                       AND km.sender_pubkey IS NOT NULL
                       AND km.sender_pubkey != $1
-                      AND km.content_type != 'quote'
                       AND NOT EXISTS (
                           SELECT 1 FROM k_blocks kb
                           WHERE kb.sender_pubkey = $1 AND kb.blocked_user_pubkey = km.sender_pubkey
                       )
-
-                    UNION ALL
-
-                    -- Quotes
-                    SELECT kc.block_time, kc.id
-                    FROM k_contents kc
-                    INNER JOIN k_contents original ON kc.referenced_content_id = original.transaction_id
-                    WHERE kc.content_type = 'quote'
-                      AND original.sender_pubkey = $1
-                      AND kc.sender_pubkey != $1
-                      AND NOT EXISTS (
-                          SELECT 1 FROM k_blocks kb
-                          WHERE kb.sender_pubkey = $1 AND kb.blocked_user_pubkey = kc.sender_pubkey
-                      )
-
                     ORDER BY block_time DESC, id DESC
                     LIMIT 31
                 ) recent_notifications
@@ -2510,22 +2475,15 @@ impl DatabaseInterface for PostgresDbManager {
         let limit = options.limit.unwrap_or(20) as i64;
         let offset_limit = limit + 1; // Get one extra to check if there are more
 
-        // Build cursor conditions for filtering (will be applied separately to mentions and quotes)
-        let mut mention_cursor_conditions = String::new();
-        let mut quote_cursor_conditions = String::new();
+        // Build cursor conditions for filtering
+        let mut cursor_conditions = String::new();
         let mut bind_count = 1;
 
         if let Some(before_cursor) = &options.before {
             if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
                 bind_count += 2;
-                mention_cursor_conditions.push_str(&format!(
+                cursor_conditions.push_str(&format!(
                     " AND (km.block_time < ${} OR (km.block_time = ${} AND km.id < ${}))",
-                    bind_count - 1,
-                    bind_count - 1,
-                    bind_count
-                ));
-                quote_cursor_conditions.push_str(&format!(
-                    " AND (kc.block_time < ${} OR (kc.block_time = ${} AND kc.id < ${}))",
                     bind_count - 1,
                     bind_count - 1,
                     bind_count
@@ -2535,14 +2493,8 @@ impl DatabaseInterface for PostgresDbManager {
         if let Some(after_cursor) = &options.after {
             if let Ok((after_timestamp, after_id)) = Self::parse_compound_cursor(after_cursor) {
                 bind_count += 2;
-                mention_cursor_conditions.push_str(&format!(
+                cursor_conditions.push_str(&format!(
                     " AND (km.block_time > ${} OR (km.block_time = ${} AND km.id > ${}))",
-                    bind_count - 1,
-                    bind_count - 1,
-                    bind_count
-                ));
-                quote_cursor_conditions.push_str(&format!(
-                    " AND (kc.block_time > ${} OR (kc.block_time = ${} AND kc.id > ${}))",
                     bind_count - 1,
                     bind_count - 1,
                     bind_count
@@ -2557,41 +2509,23 @@ impl DatabaseInterface for PostgresDbManager {
         };
         let final_limit = format!("LIMIT ${}", bind_count + 1);
 
-        // Optimized query: combine mentions and quotes, then join with content details
+        // Optimized query: get all notifications from k_mentions table
         let query = format!(
             r#"
             WITH filtered_notifications AS (
-                SELECT * FROM (
-                    -- Step 1a: Get recent mentions from non-blocked users (exclude quotes as they're handled separately)
-                    SELECT km.id as notification_id, km.content_id, km.content_type, km.block_time, km.sender_pubkey,
-                           NULL::bytea as referenced_content_id, 'mention' as notification_type
-                    FROM k_mentions km
-                    WHERE km.mentioned_pubkey = $1
-                      AND km.sender_pubkey IS NOT NULL
-                      AND km.sender_pubkey != $1
-                      AND km.content_type != 'quote'
-                      AND NOT EXISTS (
-                          SELECT 1 FROM k_blocks kb
-                          WHERE kb.sender_pubkey = $1 AND kb.blocked_user_pubkey = km.sender_pubkey
-                      )
-                    {mention_cursor_conditions}
-
-                    UNION ALL
-
-                    -- Step 1b: Get quotes of user's content from non-blocked users
-                    SELECT kc.id as notification_id, kc.transaction_id as content_id, 'quote' as content_type,
-                           kc.block_time, kc.sender_pubkey, kc.referenced_content_id, 'quote' as notification_type
-                    FROM k_contents kc
-                    INNER JOIN k_contents original ON kc.referenced_content_id = original.transaction_id
-                    WHERE kc.content_type = 'quote'
-                      AND original.sender_pubkey = $1
-                      AND kc.sender_pubkey != $1
-                      AND NOT EXISTS (
-                          SELECT 1 FROM k_blocks kb
-                          WHERE kb.sender_pubkey = $1 AND kb.blocked_user_pubkey = kc.sender_pubkey
-                      )
-                    {quote_cursor_conditions}
-                ) combined_notifications
+                SELECT km.id as notification_id, km.content_id, km.content_type, km.block_time, km.sender_pubkey,
+                       kc.referenced_content_id,
+                       CASE WHEN km.content_type = 'quote' THEN 'quote' ELSE 'mention' END as notification_type
+                FROM k_mentions km
+                LEFT JOIN k_contents kc ON km.content_type = 'quote' AND km.content_id = kc.transaction_id
+                WHERE km.mentioned_pubkey = $1
+                  AND km.sender_pubkey IS NOT NULL
+                  AND km.sender_pubkey != $1
+                  AND NOT EXISTS (
+                      SELECT 1 FROM k_blocks kb
+                      WHERE kb.sender_pubkey = $1 AND kb.blocked_user_pubkey = km.sender_pubkey
+                  )
+                {cursor_conditions}
                 {final_order_clause}
                 {final_limit}
             ),
@@ -2644,8 +2578,7 @@ impl DatabaseInterface for PostgresDbManager {
             )
             SELECT * FROM notifications_with_content
             "#,
-            mention_cursor_conditions = mention_cursor_conditions,
-            quote_cursor_conditions = quote_cursor_conditions,
+            cursor_conditions = cursor_conditions,
             final_order_clause = final_order_clause,
             final_limit = final_limit
         );
