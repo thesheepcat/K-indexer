@@ -86,51 +86,51 @@ pub trait DatabaseInterface: Send + Sync {
         options: QueryOptions,
     ) -> DatabaseResult<PaginatedResult<KBroadcastRecord>>;
 
-    // NEW: k_contents table - Get all posts using unified content table
+    // NEW: k_contents table - Get all posts using unified content table (excludes blocked users)
     async fn get_all_posts(
         &self,
         requester_pubkey: &str,
         options: QueryOptions,
-    ) -> DatabaseResult<PaginatedResult<(KPostRecord, bool)>>;
+    ) -> DatabaseResult<PaginatedResult<KPostRecord>>;
 
-    // NEW: k_contents table - Get content (posts, replies, quotes) from followed users
+    // NEW: k_contents table - Get content (posts, replies, quotes) from followed users (excludes blocked users)
     async fn get_content_following(
         &self,
         requester_pubkey: &str,
         options: QueryOptions,
-    ) -> DatabaseResult<PaginatedResult<(KPostRecord, bool)>>;
+    ) -> DatabaseResult<PaginatedResult<KPostRecord>>;
 
-    // NEW: k_contents table - Get contents mentioning a specific user using unified content table
+    // NEW: k_contents table - Get contents mentioning a specific user using unified content table (excludes blocked users)
     async fn get_contents_mentioning_user(
         &self,
         user_public_key: &str,
         requester_pubkey: &str,
         options: QueryOptions,
-    ) -> DatabaseResult<PaginatedResult<(ContentRecord, bool)>>;
+    ) -> DatabaseResult<PaginatedResult<ContentRecord>>;
 
-    // NEW: k_contents table - Get replies by post ID using unified content table
+    // NEW: k_contents table - Get replies by post ID using unified content table (excludes blocked users)
     async fn get_replies_by_post_id(
         &self,
         post_id: &str,
         requester_pubkey: &str,
         options: QueryOptions,
-    ) -> DatabaseResult<PaginatedResult<(KReplyRecord, bool)>>;
+    ) -> DatabaseResult<PaginatedResult<KReplyRecord>>;
 
-    // NEW: k_contents table - Get replies by user using unified content table
+    // NEW: k_contents table - Get replies by user using unified content table (excludes blocked users)
     async fn get_replies_by_user(
         &self,
         user_public_key: &str,
         requester_pubkey: &str,
         options: QueryOptions,
-    ) -> DatabaseResult<PaginatedResult<(KReplyRecord, bool)>>;
+    ) -> DatabaseResult<PaginatedResult<KReplyRecord>>;
 
-    // NEW: k_contents table - Get posts by user using unified content table
+    // NEW: k_contents table - Get posts by user using unified content table (excludes blocked users)
     async fn get_posts_by_user(
         &self,
         user_public_key: &str,
         requester_pubkey: &str,
         options: QueryOptions,
-    ) -> DatabaseResult<PaginatedResult<(KPostRecord, bool)>>;
+    ) -> DatabaseResult<PaginatedResult<KPostRecord>>;
 
     // NEW: k_contents table - Get notifications using unified content table
     async fn get_notifications(

@@ -100,12 +100,12 @@ impl ApiHandlers {
             }
         };
 
-        // Convert enriched KPostRecords to ServerPosts with blocking awareness for get-posts
+        // Convert enriched KPostRecords to ServerPosts (blocked users already excluded)
         let all_posts: Vec<ServerPost> = posts_result
             .items
             .iter()
-            .map(|(post_record, is_blocked)| {
-                ServerPost::from_enriched_k_post_record_with_block_status(post_record, *is_blocked)
+            .map(|post_record| {
+                ServerPost::from_enriched_k_post_record_with_block_status(post_record, false)
             })
             .collect();
 
@@ -181,12 +181,12 @@ impl ApiHandlers {
             }
         };
 
-        // Convert enriched KPostRecords to ServerPosts with blocking awareness for get-posts-watching
+        // Convert enriched KPostRecords to ServerPosts (blocked users already excluded)
         let all_posts: Vec<ServerPost> = posts_result
             .items
             .iter()
-            .map(|(post_record, is_blocked)| {
-                ServerPost::from_enriched_k_post_record_with_block_status(post_record, *is_blocked)
+            .map(|post_record| {
+                ServerPost::from_enriched_k_post_record_with_block_status(post_record, false)
             })
             .collect();
 
@@ -265,12 +265,12 @@ impl ApiHandlers {
             }
         };
 
-        // Convert enriched KPostRecords to ServerPosts with blocking awareness
+        // Convert enriched KPostRecords to ServerPosts (blocked users already excluded)
         let all_posts: Vec<ServerPost> = content_result
             .items
             .iter()
-            .map(|(post_record, is_blocked)| {
-                ServerPost::from_enriched_k_post_record_with_block_status(post_record, *is_blocked)
+            .map(|post_record| {
+                ServerPost::from_enriched_k_post_record_with_block_status(post_record, false)
             })
             .collect();
 
@@ -431,15 +431,12 @@ impl ApiHandlers {
             }
         };
 
-        // Convert enriched KReplyRecords to ServerReplies with blocking awareness for post replies
+        // Convert enriched KReplyRecords to ServerReplies (blocked users already excluded)
         let all_replies: Vec<ServerReply> = replies_result
             .items
             .iter()
-            .map(|(reply_record, is_blocked)| {
-                ServerReply::from_enriched_k_reply_record_with_block_status(
-                    reply_record,
-                    *is_blocked,
-                )
+            .map(|reply_record| {
+                ServerReply::from_enriched_k_reply_record_with_block_status(reply_record, false)
             })
             .collect();
 
@@ -543,15 +540,12 @@ impl ApiHandlers {
             }
         };
 
-        // Convert enriched KReplyRecords to ServerReplies with blocking awareness for user replies
+        // Convert enriched KReplyRecords to ServerReplies (blocked users already excluded)
         let all_replies: Vec<ServerReply> = replies_result
             .items
             .iter()
-            .map(|(reply_record, is_blocked)| {
-                ServerReply::from_enriched_k_reply_record_with_block_status(
-                    reply_record,
-                    *is_blocked,
-                )
+            .map(|reply_record| {
+                ServerReply::from_enriched_k_reply_record_with_block_status(reply_record, false)
             })
             .collect();
 
@@ -656,22 +650,16 @@ impl ApiHandlers {
             }
         };
 
-        // Convert enriched ContentRecords (posts and replies) to ServerPosts with blocking awareness
+        // Convert enriched ContentRecords (posts and replies) to ServerPosts (blocked users already excluded)
         let all_mentions: Vec<ServerPost> = mentions_result
             .items
             .iter()
-            .map(|(content_record, is_blocked)| match content_record {
+            .map(|content_record| match content_record {
                 ContentRecord::Post(post_record) => {
-                    ServerPost::from_enriched_k_post_record_with_block_status(
-                        post_record,
-                        *is_blocked,
-                    )
+                    ServerPost::from_enriched_k_post_record_with_block_status(post_record, false)
                 }
                 ContentRecord::Reply(reply_record) => {
-                    ServerReply::from_enriched_k_reply_record_with_block_status(
-                        reply_record,
-                        *is_blocked,
-                    )
+                    ServerReply::from_enriched_k_reply_record_with_block_status(reply_record, false)
                 }
                 ContentRecord::Vote(_vote_record) => {
                     // For get-mentions, votes are returned as ServerReply (same structure as ServerPost)
@@ -693,7 +681,7 @@ impl ApiHandlers {
                         is_downvoted: None,
                         user_nickname: _vote_record.user_nickname.clone(),
                         user_profile_image: _vote_record.user_profile_image.clone(),
-                        blocked_user: Some(*is_blocked),
+                        blocked_user: Some(false),
                         content_type: Some("vote".to_string()),
                         is_quote: false,
                         quote: None,
