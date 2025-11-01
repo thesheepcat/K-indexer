@@ -661,7 +661,7 @@ impl DatabaseInterface for PostgresDbManager {
         &self,
         requester_pubkey: &str,
         options: QueryOptions,
-    ) -> DatabaseResult<PaginatedResult<(KPostRecord, bool)>> {
+    ) -> DatabaseResult<PaginatedResult<KPostRecord>> {
         let requester_pubkey_bytes = Self::decode_hex_to_bytes(requester_pubkey)?;
         let limit = options.limit.unwrap_or(20) as i64;
         let offset_limit = limit + 1; // Get one extra to check if there are more
@@ -713,7 +713,9 @@ impl DatabaseInterface for PostgresDbManager {
                        c.sender_signature, c.base64_encoded_message, c.content_type,
                        c.referenced_content_id
                 FROM k_contents c
-                WHERE c.content_type IN ('post', 'quote'){cursor_conditions}
+                LEFT JOIN k_blocks kb ON kb.sender_pubkey = $1 AND kb.blocked_user_pubkey = c.sender_pubkey
+                WHERE c.content_type IN ('post', 'quote')
+                  AND kb.blocked_user_pubkey IS NULL{cursor_conditions}
                 {order_clause}
                 LIMIT ${limit_param}
             ), post_stats AS (
@@ -764,11 +766,7 @@ impl DatabaseInterface for PostgresDbManager {
                    ref_c.base64_encoded_message as referenced_message,
                    encode(ref_c.sender_pubkey, 'hex') as referenced_sender_pubkey,
                    COALESCE(ref_b.base64_encoded_nickname, '') as referenced_nickname,
-                   ref_b.base64_encoded_profile_image as referenced_profile_image,
-                   CASE
-                       WHEN kb.blocked_user_pubkey IS NOT NULL THEN true
-                       ELSE false
-                   END as is_blocked
+                   ref_b.base64_encoded_profile_image as referenced_profile_image
             FROM post_stats ps
             LEFT JOIN LATERAL (
                 SELECT base64_encoded_nickname, base64_encoded_profile_image
@@ -791,7 +789,6 @@ impl DatabaseInterface for PostgresDbManager {
                 ORDER BY block_time DESC
                 LIMIT 1
             ) ref_b ON ref_c.sender_pubkey IS NOT NULL
-            LEFT JOIN k_blocks kb ON kb.sender_pubkey = $1 AND kb.blocked_user_pubkey = ps.sender_pubkey
             WHERE 1=1
             {final_order_clause}
             "#,
@@ -831,13 +828,12 @@ impl DatabaseInterface for PostgresDbManager {
             rows.into_iter().collect::<Vec<_>>()
         };
 
-        let mut posts_with_block_status = Vec::new();
+        let mut posts = Vec::new();
         for row in actual_items {
             let transaction_id: Vec<u8> = row.get("transaction_id");
             let sender_pubkey: Vec<u8> = row.get("sender_pubkey");
             let sender_signature: Vec<u8> = row.get("sender_signature");
             let mentioned_pubkeys_array: Vec<String> = row.get("mentioned_pubkeys");
-            let is_blocked: bool = row.get("is_blocked");
 
             let post_record = KPostRecord {
                 id: row.get::<i64, _>("id"),
@@ -863,18 +859,13 @@ impl DatabaseInterface for PostgresDbManager {
                 referenced_profile_image: row.get("referenced_profile_image"),
             };
 
-            posts_with_block_status.push((post_record, is_blocked));
+            posts.push(post_record);
         }
 
-        // Extract just the posts for pagination metadata calculation
-        let posts: Vec<KPostRecord> = posts_with_block_status
-            .iter()
-            .map(|(post, _)| post.clone())
-            .collect();
         let pagination = self.create_compound_pagination_metadata(&posts, limit as u32, has_more);
 
         Ok(PaginatedResult {
-            items: posts_with_block_status,
+            items: posts,
             pagination,
         })
     }
@@ -883,7 +874,7 @@ impl DatabaseInterface for PostgresDbManager {
         &self,
         requester_pubkey: &str,
         options: QueryOptions,
-    ) -> DatabaseResult<PaginatedResult<(KPostRecord, bool)>> {
+    ) -> DatabaseResult<PaginatedResult<KPostRecord>> {
         let requester_pubkey_bytes = Self::decode_hex_to_bytes(requester_pubkey)?;
         let limit = options.limit.unwrap_or(20) as i64;
         let offset_limit = limit + 1; // Get one extra to check if there are more
@@ -936,8 +927,10 @@ impl DatabaseInterface for PostgresDbManager {
                        c.referenced_content_id
                 FROM k_contents c
                 INNER JOIN k_follows kf ON kf.followed_user_pubkey = c.sender_pubkey
+                LEFT JOIN k_blocks kb ON kb.sender_pubkey = $1 AND kb.blocked_user_pubkey = c.sender_pubkey
                 WHERE kf.sender_pubkey = $1
-                  AND c.content_type IN ('post', 'reply', 'quote'){cursor_conditions}
+                  AND c.content_type IN ('post', 'reply', 'quote')
+                  AND kb.blocked_user_pubkey IS NULL{cursor_conditions}
                 {order_clause}
                 LIMIT ${limit_param}
             ), content_stats AS (
@@ -988,11 +981,7 @@ impl DatabaseInterface for PostgresDbManager {
                    ref_c.base64_encoded_message as referenced_message,
                    encode(ref_c.sender_pubkey, 'hex') as referenced_sender_pubkey,
                    COALESCE(ref_b.base64_encoded_nickname, '') as referenced_nickname,
-                   ref_b.base64_encoded_profile_image as referenced_profile_image,
-                   CASE
-                       WHEN kb.blocked_user_pubkey IS NOT NULL THEN true
-                       ELSE false
-                   END as is_blocked
+                   ref_b.base64_encoded_profile_image as referenced_profile_image
             FROM content_stats ps
             LEFT JOIN LATERAL (
                 SELECT base64_encoded_nickname, base64_encoded_profile_image
@@ -1015,7 +1004,6 @@ impl DatabaseInterface for PostgresDbManager {
                 ORDER BY block_time DESC
                 LIMIT 1
             ) ref_b ON ref_c.sender_pubkey IS NOT NULL
-            LEFT JOIN k_blocks kb ON kb.sender_pubkey = $1 AND kb.blocked_user_pubkey = ps.sender_pubkey
             WHERE 1=1
             {final_order_clause}
             "#,
@@ -1061,7 +1049,6 @@ impl DatabaseInterface for PostgresDbManager {
             let sender_pubkey: Vec<u8> = row.get("sender_pubkey");
             let sender_signature: Vec<u8> = row.get("sender_signature");
             let mentioned_pubkeys_raw: Vec<String> = row.get("mentioned_pubkeys");
-            let is_blocked: bool = row.get("is_blocked");
 
             let referenced_content_id: Option<String> = row.try_get("referenced_content_id").ok();
             let referenced_message: Option<String> = row.try_get("referenced_message").ok();
@@ -1095,7 +1082,7 @@ impl DatabaseInterface for PostgresDbManager {
                 referenced_profile_image,
             };
 
-            items.push((record, is_blocked));
+            items.push(record);
         }
 
         // Build pagination metadata
@@ -1106,8 +1093,8 @@ impl DatabaseInterface for PostgresDbManager {
                 prev_cursor: None,
             }
         } else {
-            let first_item = &items.first().unwrap().0;
-            let last_item = &items.last().unwrap().0;
+            let first_item = items.first().unwrap();
+            let last_item = items.last().unwrap();
 
             let next_cursor = if has_more {
                 Some(Self::create_compound_cursor(
@@ -1138,7 +1125,7 @@ impl DatabaseInterface for PostgresDbManager {
         user_public_key: &str,
         requester_pubkey: &str,
         options: QueryOptions,
-    ) -> DatabaseResult<PaginatedResult<(ContentRecord, bool)>> {
+    ) -> DatabaseResult<PaginatedResult<ContentRecord>> {
         let mentioned_user_pubkey_bytes = Self::decode_hex_to_bytes(user_public_key)?;
         let requester_pubkey_bytes = Self::decode_hex_to_bytes(requester_pubkey)?;
         let limit = options.limit.unwrap_or(20) as i64;
@@ -1191,13 +1178,15 @@ impl DatabaseInterface for PostgresDbManager {
                 SELECT c.content_type, c.id, c.transaction_id, c.block_time, c.sender_pubkey,
                        c.sender_signature, c.base64_encoded_message, c.referenced_content_id
                 FROM k_contents c
+                LEFT JOIN k_blocks kb ON kb.sender_pubkey = ${requester_param} AND kb.blocked_user_pubkey = c.sender_pubkey
                 WHERE EXISTS (
                     SELECT 1
                     FROM k_mentions m
                     WHERE m.mentioned_pubkey = $1
                       AND m.content_id = c.transaction_id
                       AND m.content_type = c.content_type
-                ){cursor_conditions}
+                )
+                  AND kb.blocked_user_pubkey IS NULL{cursor_conditions}
                 {order_clause}
                 LIMIT ${limit_param}
             ),
@@ -1282,13 +1271,7 @@ impl DatabaseInterface for PostgresDbManager {
                 ref_c.base64_encoded_message as ref_message,
                 encode(ref_c.sender_pubkey, 'hex') as ref_sender_pubkey,
                 COALESCE(ref_b.base64_encoded_nickname, '') as ref_nickname,
-                ref_b.base64_encoded_profile_image as ref_profile_image,
-
-                -- Blocking status check
-                CASE
-                    WHEN kb.blocked_user_pubkey IS NOT NULL THEN true
-                    ELSE false
-                END as is_blocked
+                ref_b.base64_encoded_profile_image as ref_profile_image
 
             FROM content_stats cs
             LEFT JOIN LATERAL (
@@ -1312,7 +1295,6 @@ impl DatabaseInterface for PostgresDbManager {
                 ORDER BY block_time DESC
                 LIMIT 1
             ) ref_b ON ref_c.sender_pubkey IS NOT NULL
-            LEFT JOIN k_blocks kb ON kb.sender_pubkey = ${requester_param} AND kb.blocked_user_pubkey = cs.sender_pubkey
             WHERE 1=1
             {cs_final_order_clause}
             "#,
@@ -1355,14 +1337,13 @@ impl DatabaseInterface for PostgresDbManager {
             rows.into_iter().collect::<Vec<_>>()
         };
 
-        let mut content_records_with_block_status = Vec::new();
+        let mut content_records = Vec::new();
         for row in actual_items {
             let content_type: &str = row.get("content_type");
             let transaction_id: Vec<u8> = row.get("transaction_id");
             let sender_pubkey: Vec<u8> = row.get("sender_pubkey");
             let sender_signature: Vec<u8> = row.get("sender_signature");
             let mentioned_pubkeys_array: Vec<String> = row.get("mentioned_pubkeys");
-            let is_blocked: bool = row.get("is_blocked");
 
             let content_record = match content_type {
                 "post" | "quote" => {
@@ -1431,19 +1412,14 @@ impl DatabaseInterface for PostgresDbManager {
                 }
             };
 
-            content_records_with_block_status.push((content_record, is_blocked));
+            content_records.push(content_record);
         }
 
-        // Extract just the content records for pagination metadata calculation
-        let content_records: Vec<ContentRecord> = content_records_with_block_status
-            .iter()
-            .map(|(record, _)| record.clone())
-            .collect();
         let pagination =
             self.create_compound_pagination_metadata(&content_records, limit as u32, has_more);
 
         Ok(PaginatedResult {
-            items: content_records_with_block_status,
+            items: content_records,
             pagination,
         })
     }
@@ -1652,7 +1628,7 @@ impl DatabaseInterface for PostgresDbManager {
         post_id: &str,
         requester_pubkey: &str,
         options: QueryOptions,
-    ) -> DatabaseResult<PaginatedResult<(KReplyRecord, bool)>> {
+    ) -> DatabaseResult<PaginatedResult<KReplyRecord>> {
         let post_id_bytes = Self::decode_hex_to_bytes(post_id)?;
         let requester_pubkey_bytes = Self::decode_hex_to_bytes(requester_pubkey)?;
         let limit = options.limit.unwrap_or(20) as i64;
@@ -1705,7 +1681,10 @@ impl DatabaseInterface for PostgresDbManager {
                 SELECT c.id, c.transaction_id, c.block_time, c.sender_pubkey,
                        c.sender_signature, c.referenced_content_id, c.base64_encoded_message
                 FROM k_contents c
-                WHERE c.content_type = 'reply' AND c.referenced_content_id = $1{cursor_conditions}
+                LEFT JOIN k_blocks kb ON kb.sender_pubkey = ${requester_param} AND kb.blocked_user_pubkey = c.sender_pubkey
+                WHERE c.content_type = 'reply'
+                  AND c.referenced_content_id = $1
+                  AND kb.blocked_user_pubkey IS NULL{cursor_conditions}
                 {order_clause}
                 LIMIT ${limit_param}
             ),
@@ -1783,13 +1762,7 @@ impl DatabaseInterface for PostgresDbManager {
 
                 -- User profile lookup with LATERAL join
                 COALESCE(b.base64_encoded_nickname, '') as user_nickname,
-                b.base64_encoded_profile_image as user_profile_image,
-
-                -- Blocking status check
-                CASE
-                    WHEN kb.blocked_user_pubkey IS NOT NULL THEN true
-                    ELSE false
-                END as is_blocked
+                b.base64_encoded_profile_image as user_profile_image
 
             FROM reply_stats rs
             LEFT JOIN LATERAL (
@@ -1799,7 +1772,6 @@ impl DatabaseInterface for PostgresDbManager {
                 ORDER BY b.block_time DESC
                 LIMIT 1
             ) b ON true
-            LEFT JOIN k_blocks kb ON kb.sender_pubkey = ${requester_param} AND kb.blocked_user_pubkey = rs.sender_pubkey
             WHERE 1=1
             {final_order_clause}
             "#,
@@ -1842,14 +1814,13 @@ impl DatabaseInterface for PostgresDbManager {
             rows.into_iter().collect::<Vec<_>>()
         };
 
-        let mut replies_with_block_status = Vec::new();
+        let mut replies = Vec::new();
         for row in actual_items {
             let transaction_id: Vec<u8> = row.get("transaction_id");
             let sender_pubkey: Vec<u8> = row.get("sender_pubkey");
             let sender_signature: Vec<u8> = row.get("sender_signature");
             let referenced_content_id: Vec<u8> = row.get("referenced_content_id");
             let mentioned_pubkeys_array: Vec<String> = row.get("mentioned_pubkeys");
-            let is_blocked: bool = row.get("is_blocked");
 
             let reply_record = KReplyRecord {
                 id: row.get::<i64, _>("id"),
@@ -1871,18 +1842,13 @@ impl DatabaseInterface for PostgresDbManager {
                 user_profile_image: row.get("user_profile_image"),
             };
 
-            replies_with_block_status.push((reply_record, is_blocked));
+            replies.push(reply_record);
         }
 
-        // Extract just the replies for pagination metadata calculation
-        let replies: Vec<KReplyRecord> = replies_with_block_status
-            .iter()
-            .map(|(reply, _)| reply.clone())
-            .collect();
         let pagination = self.create_compound_pagination_metadata(&replies, limit as u32, has_more);
 
         Ok(PaginatedResult {
-            items: replies_with_block_status,
+            items: replies,
             pagination,
         })
     }
@@ -1892,7 +1858,7 @@ impl DatabaseInterface for PostgresDbManager {
         user_public_key: &str,
         requester_pubkey: &str,
         options: QueryOptions,
-    ) -> DatabaseResult<PaginatedResult<(KReplyRecord, bool)>> {
+    ) -> DatabaseResult<PaginatedResult<KReplyRecord>> {
         let user_pubkey_bytes = Self::decode_hex_to_bytes(user_public_key)?;
         let requester_pubkey_bytes = Self::decode_hex_to_bytes(requester_pubkey)?;
         let limit = options.limit.unwrap_or(20) as i64;
@@ -1945,7 +1911,10 @@ impl DatabaseInterface for PostgresDbManager {
                 SELECT c.id, c.transaction_id, c.block_time, c.sender_pubkey,
                        c.sender_signature, c.referenced_content_id, c.base64_encoded_message
                 FROM k_contents c
-                WHERE c.content_type = 'reply' AND c.sender_pubkey = $1{cursor_conditions}
+                LEFT JOIN k_blocks kb ON kb.sender_pubkey = ${requester_param} AND kb.blocked_user_pubkey = c.sender_pubkey
+                WHERE c.content_type = 'reply'
+                  AND c.sender_pubkey = $1
+                  AND kb.blocked_user_pubkey IS NULL{cursor_conditions}
                 {order_clause}
                 LIMIT ${limit_param}
             ),
@@ -2023,13 +1992,7 @@ impl DatabaseInterface for PostgresDbManager {
 
                 -- User profile lookup with LATERAL join
                 COALESCE(b.base64_encoded_nickname, '') as user_nickname,
-                b.base64_encoded_profile_image as user_profile_image,
-
-                -- Blocking status check
-                CASE
-                    WHEN kb.blocked_user_pubkey IS NOT NULL THEN true
-                    ELSE false
-                END as is_blocked
+                b.base64_encoded_profile_image as user_profile_image
 
             FROM reply_stats rs
             LEFT JOIN LATERAL (
@@ -2039,7 +2002,6 @@ impl DatabaseInterface for PostgresDbManager {
                 ORDER BY b.block_time DESC
                 LIMIT 1
             ) b ON true
-            LEFT JOIN k_blocks kb ON kb.sender_pubkey = ${requester_param} AND kb.blocked_user_pubkey = rs.sender_pubkey
             WHERE 1=1
             {final_order_clause}
             "#,
@@ -2082,14 +2044,13 @@ impl DatabaseInterface for PostgresDbManager {
             rows.into_iter().collect::<Vec<_>>()
         };
 
-        let mut replies_with_block_status = Vec::new();
+        let mut replies = Vec::new();
         for row in actual_items {
             let transaction_id: Vec<u8> = row.get("transaction_id");
             let sender_pubkey: Vec<u8> = row.get("sender_pubkey");
             let sender_signature: Vec<u8> = row.get("sender_signature");
             let referenced_content_id: Vec<u8> = row.get("referenced_content_id");
             let mentioned_pubkeys_array: Vec<String> = row.get("mentioned_pubkeys");
-            let is_blocked: bool = row.get("is_blocked");
 
             let reply_record = KReplyRecord {
                 id: row.get::<i64, _>("id"),
@@ -2111,18 +2072,13 @@ impl DatabaseInterface for PostgresDbManager {
                 user_profile_image: row.get("user_profile_image"),
             };
 
-            replies_with_block_status.push((reply_record, is_blocked));
+            replies.push(reply_record);
         }
 
-        // Extract just the replies for pagination metadata calculation
-        let replies: Vec<KReplyRecord> = replies_with_block_status
-            .iter()
-            .map(|(reply, _)| reply.clone())
-            .collect();
         let pagination = self.create_compound_pagination_metadata(&replies, limit as u32, has_more);
 
         Ok(PaginatedResult {
-            items: replies_with_block_status,
+            items: replies,
             pagination,
         })
     }
@@ -2132,7 +2088,7 @@ impl DatabaseInterface for PostgresDbManager {
         user_public_key: &str,
         requester_pubkey: &str,
         options: QueryOptions,
-    ) -> DatabaseResult<PaginatedResult<(KPostRecord, bool)>> {
+    ) -> DatabaseResult<PaginatedResult<KPostRecord>> {
         let user_pubkey_bytes = Self::decode_hex_to_bytes(user_public_key)?;
         let requester_pubkey_bytes = Self::decode_hex_to_bytes(requester_pubkey)?;
         let limit = options.limit.unwrap_or(20) as i64;
@@ -2272,13 +2228,7 @@ impl DatabaseInterface for PostgresDbManager {
                 ref_c.base64_encoded_message as referenced_message,
                 encode(ref_c.sender_pubkey, 'hex') as referenced_sender_pubkey,
                 COALESCE(ref_b.base64_encoded_nickname, '') as referenced_nickname,
-                ref_b.base64_encoded_profile_image as referenced_profile_image,
-
-                -- Blocking status check
-                CASE
-                    WHEN kb.blocked_user_pubkey IS NOT NULL THEN true
-                    ELSE false
-                END as is_blocked
+                ref_b.base64_encoded_profile_image as referenced_profile_image
 
             FROM post_stats ps
             LEFT JOIN LATERAL (
@@ -2303,7 +2253,7 @@ impl DatabaseInterface for PostgresDbManager {
                 LIMIT 1
             ) ref_b ON ref_c.sender_pubkey IS NOT NULL
             LEFT JOIN k_blocks kb ON kb.sender_pubkey = ${requester_param} AND kb.blocked_user_pubkey = ps.sender_pubkey
-            WHERE 1=1
+            WHERE kb.blocked_user_pubkey IS NULL
             {final_order_clause}
             "#,
             cursor_conditions = cursor_conditions,
@@ -2345,13 +2295,12 @@ impl DatabaseInterface for PostgresDbManager {
             rows.into_iter().collect::<Vec<_>>()
         };
 
-        let mut posts_with_block_status = Vec::new();
+        let mut posts = Vec::new();
         for row in actual_items {
             let transaction_id: Vec<u8> = row.get("transaction_id");
             let sender_pubkey: Vec<u8> = row.get("sender_pubkey");
             let sender_signature: Vec<u8> = row.get("sender_signature");
             let mentioned_pubkeys_array: Vec<String> = row.get("mentioned_pubkeys");
-            let is_blocked: bool = row.get("is_blocked");
 
             let post_record = KPostRecord {
                 id: row.get::<i64, _>("id"),
@@ -2377,18 +2326,13 @@ impl DatabaseInterface for PostgresDbManager {
                 referenced_profile_image: row.get("referenced_profile_image"),
             };
 
-            posts_with_block_status.push((post_record, is_blocked));
+            posts.push(post_record);
         }
 
-        // Extract just the posts for pagination metadata calculation
-        let posts: Vec<KPostRecord> = posts_with_block_status
-            .iter()
-            .map(|(post, _)| post.clone())
-            .collect();
         let pagination = self.create_compound_pagination_metadata(&posts, limit as u32, has_more);
 
         Ok(PaginatedResult {
-            items: posts_with_block_status,
+            items: posts,
             pagination,
         })
     }
