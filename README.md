@@ -105,6 +105,7 @@ The following services will be activated:
 - simply-kaspa-indexer
 - k-transaction-processor
 - k-webserver
+- k-database-cleaner (only if set as "personal indexer")
 
 
 ---
