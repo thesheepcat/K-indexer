@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "K-transaction-processor", 
-    "K-webserver"
+    "K-webserver",
+    "K-database-cleaner"
 ]
 resolver = "2"

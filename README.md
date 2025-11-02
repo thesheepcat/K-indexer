@@ -14,6 +14,7 @@ The new indexer architecture is composed of the following components:
 - **📡 Simply-kaspa-indexer**: By supertypo (https://github.com/supertypo/simply-kaspa-indexer) to receive all transactions from Kaspa network and temporarily store them
 - **🔍 K-transaction-processor**: Filters incoming transactions and indexes all K-related data in proper database tables
 - **🌐 K-webserver**: Serves all K-related data to web applications via API calls
+- **🧹 K-database-cleaner** *(Optional)*: Maintains a lighter, cleaner database for personal indexers by automatically purging unwanted content
 
 ### Process Flow
 
@@ -117,5 +118,34 @@ Once running, K-indexer provides REST endpoints for:
 - **Mentions**: Find posts where users are mentioned
 
 You can find all details of the API techical specification in the API_TECHNICAL_SPECIFICATIONS.md document.
+
+---
+
+## 🧹 Personal Indexer with K-database-cleaner
+
+For users running a **personal indexer**, K-database-cleaner helps maintain a lightweight, efficient database by automatically removing unwanted data based on your preferences.
+
+### Why Use K-database-cleaner?
+
+When running a personal indexer, you may not want to store:
+- Content from users you've blocked
+- Old posts from users you don't follow
+- Orphaned replies and votes that reference deleted content
+- Follow/block records from other users
+
+K-database-cleaner runs periodic purge operations to keep your database clean and storage-efficient, retaining only the content that matters to you.
+
+### Key Features
+
+- **Automated Cleanup**: Runs at configurable intervals (default: every 10 minutes)
+- **Configurable Retention**: Set how long to keep content from non-followed users (default: 72 hours)
+- **Single Query per Operation**: Optimized CTEs for efficient purging
+- **Detailed Logging**: Reports exactly what was deleted in each cycle
+
+### Getting Started
+
+For full documentation on installation, configuration, and usage, see the [K-database-cleaner README](K-database-cleaner/README.md).
+
+---
 
 In case you need any support, please join us at the Kluster Discord server: https://discord.gg/vuKyjtRGKB

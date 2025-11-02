@@ -1,5 +1,6 @@
 services:
   k-indexer-db-DEV:
+    profiles: ["public-indexer", "personal-indexer"]
     container_name: k-indexer-db-DEV
     image: postgres:17-alpine
     restart: unless-stopped
@@ -15,6 +16,7 @@ services:
       - /var/${DB_NAME}/:/var/lib/postgresql/data/
 
   simply-kaspa-indexer-DEV:
+    profiles: ["public-indexer", "personal-indexer"]
     container_name: simply-kaspa-indexer-DEV
     image: supertypo/simply-kaspa-indexer:latest
     restart: unless-stopped
@@ -24,6 +26,7 @@ services:
       - k-indexer-db-DEV
 
   k-transaction-processor-DEV:
+    profiles: ["public-indexer", "personal-indexer"]
     container_name: k-transaction-processor-DEV
     image: thesheepcat/k-transaction-processor:dev
     restart: unless-stopped
@@ -34,6 +37,7 @@ services:
       - simply-kaspa-indexer-DEV
 
   k-webserver-DEV:
+    profiles: ["public-indexer", "personal-indexer"]
     container_name: k-webserver-DEV
     image: thesheepcat/k-webserver:dev
     restart: unless-stopped
@@ -42,4 +46,15 @@ services:
     depends_on:
       - k-indexer-db-DEV
       - simply-kaspa-indexer-DEV
+      - k-transaction-processor-DEV
+
+  k-database-cleaner-DEV:
+    profiles: ["personal-indexer"]
+    container_name: k-database-cleaner-DEV
+    image: thesheepcat/k-database-cleaner:dev
+    restart: unless-stopped
+    network_mode: "host"
+    command: --user ${USER_PUBKEY} --data-retention ${DATA_RETENTION} --purge-interval ${PURGE_INTERVAL} --db-host localhost --db-port ${DB_PORT} --db-name ${DB_NAME} --db-user ${DB_USER} --db-password ${DB_PASSWORD} --db-max-connections 2
+    depends_on:
+      - k-indexer-db-DEV
       - k-transaction-processor-DEV
