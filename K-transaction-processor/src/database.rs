@@ -122,11 +122,9 @@ impl KDbClient {
                             info!("Migration v4 -> v5 completed successfully");
                         }
 
-                        // v5 -> v6: Add TimescaleDB and pg_cron with automatic REINDEX
+                        // v5 -> v6: Add TimescaleDB extension
                         if current_version == 5 {
-                            info!(
-                                "Applying migration v5 -> v6 (TimescaleDB and pg_cron with REINDEX)"
-                            );
+                            info!("Applying migration v5 -> v6 (TimescaleDB extension)");
                             execute_ddl(MIGRATION_V5_TO_V6_SQL, &self.pool).await?;
                             current_version = 6;
                             info!("Migration v5 -> v6 completed successfully");
