@@ -1,8 +1,10 @@
--- K-transaction-processor Schema v1
+-- K-transaction-processor Schema v6
 -- Complete schema for fresh installation
 
--- Enable pg_stat_statements extension for query performance monitoring
+-- Enable extensions
 CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+CREATE EXTENSION IF NOT EXISTS timescaledb;
+CREATE EXTENSION IF NOT EXISTS pg_cron;
 
 -- Create system variables table first
 CREATE TABLE IF NOT EXISTS k_vars (
@@ -10,8 +12,8 @@ CREATE TABLE IF NOT EXISTS k_vars (
     value TEXT NOT NULL
 );
 
--- Insert initial schema version (v5 = adds k_follows table for following/unfollowing users)
-INSERT INTO k_vars (key, value) VALUES ('schema_version', '5') ON CONFLICT (key) DO NOTHING;
+-- Insert initial schema version (v6 = adds TimescaleDB and pg_cron with automatic REINDEX)
+INSERT INTO k_vars (key, value) VALUES ('schema_version', '6') ON CONFLICT (key) DO NOTHING;
 
 -- Create K protocol tables
 CREATE TABLE IF NOT EXISTS k_posts (
@@ -193,3 +195,25 @@ CREATE INDEX IF NOT EXISTS idx_k_contents_content_type ON k_contents(content_typ
 
 -- User content index (all content types by user)
 CREATE INDEX IF NOT EXISTS idx_k_contents_sender_content_type ON k_contents(sender_pubkey, content_type, block_time DESC);
+
+-- ============================================================================
+-- NEW in v6: Automatic REINDEX scheduling with pg_cron
+-- ============================================================================
+-- Prevents index bloat on transactions table caused by hourly DELETE operations
+
+-- Remove existing jobs if present (for idempotency)
+DELETE FROM cron.job WHERE jobname IN ('reindex-transactions-pkey', 'reindex-transactions-block-time');
+
+-- Schedule REINDEX for transactions_pkey every 2 hours at :00
+SELECT cron.schedule(
+    'reindex-transactions-pkey',
+    '0 */2 * * *',
+    'REINDEX INDEX CONCURRENTLY transactions_pkey'
+);
+
+-- Schedule REINDEX for transactions_block_time_idx every 2 hours at :05
+SELECT cron.schedule(
+    'reindex-transactions-block-time',
+    '5 */2 * * *',
+    'REINDEX INDEX CONCURRENTLY transactions_block_time_idx'
+);

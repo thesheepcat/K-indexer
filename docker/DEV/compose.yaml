@@ -2,7 +2,7 @@ services:
   k-indexer-db-DEV:
     profiles: ["public-indexer", "personal-indexer"]
     container_name: k-indexer-db-DEV
-    image: postgres:17-alpine
+    image: timescale/timescaledb:latest-pg17
     restart: unless-stopped
     shm_size: 4G
     environment:
@@ -10,8 +10,9 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_DB: ${DB_NAME}
       PGPORT: ${DB_PORT}
+      TIMESCALEDB_TELEMETRY: off
     network_mode: "host"
-    command: -c shared_preload_libraries=pg_stat_statements -c pg_stat_statements.max=10000 -c pg_stat_statements.track=all -c pg_stat_statements.save=on
+    command: -c shared_preload_libraries=timescaledb,pg_cron,pg_stat_statements -c cron.database_name=${DB_NAME} -c pg_stat_statements.max=10000 -c pg_stat_statements.track=all -c pg_stat_statements.save=on
     volumes:
       - /var/${DB_NAME}/:/var/lib/postgresql/data/
 
