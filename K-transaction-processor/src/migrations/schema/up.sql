@@ -1,4 +1,4 @@
--- K-transaction-processor Schema v6
+-- K-transaction-processor Schema v7
 -- Complete schema for fresh installation
 
 -- Enable extensions
@@ -11,28 +11,11 @@ CREATE TABLE IF NOT EXISTS k_vars (
     value TEXT NOT NULL
 );
 
--- Insert initial schema version (v6 = adds TimescaleDB extension)
-INSERT INTO k_vars (key, value) VALUES ('schema_version', '6') ON CONFLICT (key) DO NOTHING;
+-- Insert initial schema version (v7 = removed k_posts and k_replies tables)
+INSERT INTO k_vars (key, value) VALUES ('schema_version', '7') ON CONFLICT (key) DO NOTHING;
 
 -- Create K protocol tables
-CREATE TABLE IF NOT EXISTS k_posts (
-    id BIGSERIAL PRIMARY KEY,
-    transaction_id BYTEA UNIQUE NOT NULL,
-    block_time BIGINT NOT NULL,
-    sender_pubkey BYTEA NOT NULL,
-    sender_signature BYTEA NOT NULL,
-    base64_encoded_message TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS k_replies (
-    id BIGSERIAL PRIMARY KEY,
-    transaction_id BYTEA UNIQUE NOT NULL,
-    block_time BIGINT NOT NULL,
-    sender_pubkey BYTEA NOT NULL,
-    sender_signature BYTEA NOT NULL,
-    post_id BYTEA NOT NULL,
-    base64_encoded_message TEXT NOT NULL
-);
+-- NOTE: k_posts and k_replies tables removed in v7 (replaced by k_contents in v4)
 
 CREATE TABLE IF NOT EXISTS k_broadcasts (
     id BIGSERIAL PRIMARY KEY,
@@ -65,13 +48,6 @@ CREATE TABLE IF NOT EXISTS k_mentions (
 );
 
 -- Create indexes for K protocol tables
-CREATE INDEX IF NOT EXISTS idx_k_posts_transaction_id ON k_posts(transaction_id);
-CREATE INDEX IF NOT EXISTS idx_k_posts_sender_pubkey ON k_posts(sender_pubkey);
-CREATE INDEX IF NOT EXISTS idx_k_posts_block_time ON k_posts(block_time);
-CREATE INDEX IF NOT EXISTS idx_k_replies_transaction_id ON k_replies(transaction_id);
-CREATE INDEX IF NOT EXISTS idx_k_replies_sender_pubkey ON k_replies(sender_pubkey);
-CREATE INDEX IF NOT EXISTS idx_k_replies_post_id ON k_replies(post_id);
-CREATE INDEX IF NOT EXISTS idx_k_replies_block_time ON k_replies(block_time);
 CREATE INDEX IF NOT EXISTS idx_k_broadcasts_transaction_id ON k_broadcasts(transaction_id);
 CREATE INDEX IF NOT EXISTS idx_k_broadcasts_sender_pubkey ON k_broadcasts(sender_pubkey);
 CREATE INDEX IF NOT EXISTS idx_k_broadcasts_block_time ON k_broadcasts(block_time);
@@ -84,8 +60,6 @@ CREATE INDEX IF NOT EXISTS idx_k_mentions_content_id ON k_mentions(content_id);
 CREATE INDEX IF NOT EXISTS idx_k_mentions_mentioned_pubkey ON k_mentions(mentioned_pubkey);
 CREATE INDEX IF NOT EXISTS idx_k_mentions_content_type ON k_mentions(content_type);
 CREATE INDEX IF NOT EXISTS idx_k_votes_post_id_sender ON k_votes(post_id, sender_pubkey);
-CREATE INDEX IF NOT EXISTS idx_k_replies_post_id_block_time ON k_replies(post_id, block_time DESC);
-CREATE INDEX IF NOT EXISTS idx_k_posts_block_time_id_covering ON k_posts(block_time DESC, id DESC) INCLUDE (transaction_id, sender_pubkey, sender_signature, base64_encoded_message);
 CREATE INDEX IF NOT EXISTS idx_k_mentions_content_type_id ON k_mentions(content_type, content_id);
 
 -- Create k_blocks table for blocking/unblocking users
@@ -100,8 +74,6 @@ CREATE TABLE IF NOT EXISTS k_blocks (
 );
 
 -- Signature-based deduplication indexes
-CREATE UNIQUE INDEX IF NOT EXISTS idx_k_posts_sender_signature_unique ON k_posts(sender_signature);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_k_replies_sender_signature_unique ON k_replies(sender_signature);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_k_votes_sender_signature_unique ON k_votes(sender_signature);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_k_blocks_sender_signature_unique ON k_blocks(sender_signature);
 
