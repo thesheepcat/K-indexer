@@ -1,5 +1,5 @@
--- K-transaction-processor Schema v7
--- Complete schema for fresh installation
+-- K-transaction-processor Schema v8
+-- Complete schema for fresh installation with TimescaleDB hypertables
 
 -- Enable extensions
 CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
@@ -11,8 +11,8 @@ CREATE TABLE IF NOT EXISTS k_vars (
     value TEXT NOT NULL
 );
 
--- Insert initial schema version (v7 = removed k_posts and k_replies tables)
-INSERT INTO k_vars (key, value) VALUES ('schema_version', '7') ON CONFLICT (key) DO NOTHING;
+-- Insert initial schema version (v8 = TimescaleDB hypertables for all k_ tables)
+INSERT INTO k_vars (key, value) VALUES ('schema_version', '8') ON CONFLICT (key) DO NOTHING;
 
 -- Create K protocol tables
 -- NOTE: k_posts and k_replies tables removed in v7 (replaced by k_contents in v4)
@@ -166,3 +166,97 @@ CREATE INDEX IF NOT EXISTS idx_k_contents_content_type ON k_contents(content_typ
 
 -- User content index (all content types by user)
 CREATE INDEX IF NOT EXISTS idx_k_contents_sender_content_type ON k_contents(sender_pubkey, content_type, block_time DESC);
+
+-- ============================================================================
+-- TimescaleDB Hypertable Conversion (Schema v8)
+-- ============================================================================
+
+-- Convert k_votes to hypertable
+SELECT create_hypertable('k_votes', 'block_time',
+    chunk_time_interval => 86400000000,
+    migrate_data => true,
+    if_not_exists => TRUE);
+
+ALTER TABLE k_votes SET (
+    timescaledb.compress,
+    timescaledb.compress_segmentby = 'sender_pubkey,post_id',
+    timescaledb.compress_orderby = 'block_time DESC'
+);
+
+SELECT add_compression_policy('k_votes',
+    compress_after => '30 days'::interval);
+
+-- Convert k_mentions to hypertable
+SELECT create_hypertable('k_mentions', 'block_time',
+    chunk_time_interval => 86400000000,
+    migrate_data => true,
+    if_not_exists => TRUE);
+
+ALTER TABLE k_mentions SET (
+    timescaledb.compress,
+    timescaledb.compress_segmentby = 'mentioned_pubkey,content_type',
+    timescaledb.compress_orderby = 'block_time DESC'
+);
+
+SELECT add_compression_policy('k_mentions',
+    compress_after => '30 days'::interval);
+
+-- Convert k_contents to hypertable
+SELECT create_hypertable('k_contents', 'block_time',
+    chunk_time_interval => 86400000000,
+    migrate_data => true,
+    if_not_exists => TRUE);
+
+ALTER TABLE k_contents SET (
+    timescaledb.compress,
+    timescaledb.compress_segmentby = 'sender_pubkey,content_type',
+    timescaledb.compress_orderby = 'block_time DESC'
+);
+
+SELECT add_compression_policy('k_contents',
+    compress_after => '30 days'::interval);
+
+-- Convert k_broadcasts to hypertable
+SELECT create_hypertable('k_broadcasts', 'block_time',
+    chunk_time_interval => 86400000000,
+    migrate_data => true,
+    if_not_exists => TRUE);
+
+ALTER TABLE k_broadcasts SET (
+    timescaledb.compress,
+    timescaledb.compress_segmentby = 'sender_pubkey',
+    timescaledb.compress_orderby = 'block_time DESC'
+);
+
+SELECT add_compression_policy('k_broadcasts',
+    compress_after => '30 days'::interval);
+
+-- Convert k_follows to hypertable
+SELECT create_hypertable('k_follows', 'block_time',
+    chunk_time_interval => 86400000000,
+    migrate_data => true,
+    if_not_exists => TRUE);
+
+ALTER TABLE k_follows SET (
+    timescaledb.compress,
+    timescaledb.compress_segmentby = 'sender_pubkey,followed_user_pubkey',
+    timescaledb.compress_orderby = 'block_time DESC'
+);
+
+SELECT add_compression_policy('k_follows',
+    compress_after => '30 days'::interval);
+
+-- Convert k_blocks to hypertable
+SELECT create_hypertable('k_blocks', 'block_time',
+    chunk_time_interval => 86400000000,
+    migrate_data => true,
+    if_not_exists => TRUE);
+
+ALTER TABLE k_blocks SET (
+    timescaledb.compress,
+    timescaledb.compress_segmentby = 'sender_pubkey,blocked_user_pubkey',
+    timescaledb.compress_orderby = 'block_time DESC'
+);
+
+SELECT add_compression_policy('k_blocks',
+    compress_after => '30 days'::interval);
