@@ -426,13 +426,15 @@ async fn verify_schema_setup(pool: &DbPool) -> Result<()> {
         all_verified = false;
     }
 
-    // Explicit verification of all 35 expected K protocol indexes (v7: removed k_posts and k_replies)
+    // Explicit verification of all 38 expected K protocol indexes (v8: TimescaleDB, non-unique indexes)
     let expected_indexes = vec![
         "idx_k_broadcasts_transaction_id",
         "idx_k_broadcasts_sender_pubkey",
+        "idx_k_broadcasts_sender_signature",
         "idx_k_broadcasts_block_time",
         "idx_k_votes_transaction_id",
         "idx_k_votes_sender_pubkey",
+        "idx_k_votes_sender_signature",
         "idx_k_votes_post_id",
         "idx_k_votes_vote",
         "idx_k_votes_block_time",
@@ -441,15 +443,15 @@ async fn verify_schema_setup(pool: &DbPool) -> Result<()> {
         "idx_k_mentions_content_type",
         "idx_k_votes_post_id_sender",
         "idx_k_mentions_content_type_id",
-        "idx_k_votes_sender_signature_unique",
-        "idx_k_blocks_sender_signature_unique",
-        "idx_k_blocks_sender_blocked_user_unique",
+        "idx_k_blocks_transaction_id",
+        "idx_k_blocks_sender_signature",
+        "idx_k_blocks_sender_blocked_user",
         "idx_k_blocks_sender_pubkey",
         "idx_k_blocks_blocked_user_pubkey",
         "idx_k_blocks_block_time",
         "idx_k_mentions_comprehensive",
         "idx_k_contents_transaction_id",
-        "idx_k_contents_sender_signature_unique",
+        "idx_k_contents_sender_signature",
         "idx_k_contents_sender_pubkey",
         "idx_k_contents_block_time",
         "idx_k_contents_replies",
@@ -458,8 +460,9 @@ async fn verify_schema_setup(pool: &DbPool) -> Result<()> {
         "idx_k_contents_feed_covering",
         "idx_k_contents_content_type",
         "idx_k_contents_sender_content_type",
-        "idx_k_follows_sender_signature_unique",
-        "idx_k_follows_sender_followed_user_unique",
+        "idx_k_follows_transaction_id",
+        "idx_k_follows_sender_signature",
+        "idx_k_follows_sender_followed_user",
         "idx_k_follows_followed_user_pubkey",
         "idx_k_follows_sender_pubkey",
         "idx_k_follows_block_time",
@@ -484,19 +487,19 @@ async fn verify_schema_setup(pool: &DbPool) -> Result<()> {
         }
     }
 
-    // Verify total count matches expected (35 indexes in v7: removed 11 from k_posts and k_replies)
+    // Verify total count matches expected (38 indexes in v8: TimescaleDB with non-unique indexes)
     let index_count = sqlx::query("SELECT COUNT(*) FROM pg_indexes WHERE indexname LIKE 'idx_k_%'")
         .fetch_one(pool)
         .await?
         .get::<i64, _>(0);
 
-    if index_count == 35 {
+    if index_count == 38 {
         info!(
-            "  ✓ Expected 35 K protocol indexes verified (found {})",
+            "  ✓ Expected 38 K protocol indexes verified (found {})",
             index_count
         );
     } else {
-        error!("  ✗ Expected 35 K protocol indexes, found {}", index_count);
+        error!("  ✗ Expected 38 K protocol indexes, found {}", index_count);
         all_verified = false;
     }
 
