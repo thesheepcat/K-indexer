@@ -2,10 +2,18 @@
 -- Converts all k_ prefixed tables to TimescaleDB hypertables with compression
 
 -- ============================================================================
--- Step 0: Drop unique constraints that don't include partitioning column
--- TimescaleDB requires all unique indexes to include the partitioning column (block_time)
--- We drop these constraints and rely on application-level deduplication
+-- Step 0: Drop unique constraints and PRIMARY KEY that don't include partitioning column
+-- TimescaleDB requires all unique indexes/constraints to include the partitioning column (block_time)
+-- We drop PRIMARY KEY constraints and rely on regular indexes + application-level deduplication
 -- ============================================================================
+
+-- Drop PRIMARY KEY constraints (they are UNIQUE indexes that don't include block_time)
+ALTER TABLE k_votes DROP CONSTRAINT IF EXISTS k_votes_pkey;
+ALTER TABLE k_mentions DROP CONSTRAINT IF EXISTS k_mentions_pkey;
+ALTER TABLE k_contents DROP CONSTRAINT IF EXISTS k_contents_pkey;
+ALTER TABLE k_broadcasts DROP CONSTRAINT IF EXISTS k_broadcasts_pkey;
+ALTER TABLE k_follows DROP CONSTRAINT IF EXISTS k_follows_pkey;
+ALTER TABLE k_blocks DROP CONSTRAINT IF EXISTS k_blocks_pkey;
 
 -- Drop UNIQUE constraints on transaction_id (inline column constraint)
 ALTER TABLE k_votes ALTER COLUMN transaction_id DROP NOT NULL;
@@ -152,6 +160,11 @@ SELECT add_compression_policy('k_blocks',
 -- ============================================================================
 -- Step 7: Recreate indexes as non-unique (deduplication handled by application)
 -- ============================================================================
+
+-- Note: We don't recreate id indexes because:
+-- 1. id is never queried directly (WHERE id = ?)
+-- 2. id is only used in ORDER BY clauses alongside block_time
+-- 3. Existing composite indexes like idx_k_contents_block_time(block_time DESC, id DESC) already cover this
 
 -- Recreate transaction_id indexes (non-unique)
 CREATE INDEX IF NOT EXISTS idx_k_votes_transaction_id ON k_votes(transaction_id);
