@@ -176,8 +176,7 @@ ALTER TABLE k_votes SET (
     timescaledb.compress_orderby = 'block_time DESC'
 );
 
-SELECT add_compression_policy('k_votes',
-    compress_after => '30 days'::interval);
+SELECT add_compression_policy('k_votes', compress_after => 2592000000000); -- 30 days in microseconds
 
 -- Convert k_mentions to hypertable
 SELECT create_hypertable('k_mentions', 'block_time',
@@ -191,8 +190,7 @@ ALTER TABLE k_mentions SET (
     timescaledb.compress_orderby = 'block_time DESC'
 );
 
-SELECT add_compression_policy('k_mentions',
-    compress_after => '30 days'::interval);
+SELECT add_compression_policy('k_mentions', compress_after => 2592000000000); -- 30 days in microseconds
 
 -- Convert k_contents to hypertable
 SELECT create_hypertable('k_contents', 'block_time',
@@ -206,8 +204,7 @@ ALTER TABLE k_contents SET (
     timescaledb.compress_orderby = 'block_time DESC'
 );
 
-SELECT add_compression_policy('k_contents',
-    compress_after => '30 days'::interval);
+SELECT add_compression_policy('k_contents', compress_after => 2592000000000); -- 30 days in microseconds
 
 -- Convert k_broadcasts to hypertable
 SELECT create_hypertable('k_broadcasts', 'block_time',
@@ -221,8 +218,7 @@ ALTER TABLE k_broadcasts SET (
     timescaledb.compress_orderby = 'block_time DESC'
 );
 
-SELECT add_compression_policy('k_broadcasts',
-    compress_after => '30 days'::interval);
+SELECT add_compression_policy('k_broadcasts', compress_after => 2592000000000); -- 30 days in microseconds
 
 -- Convert k_follows to hypertable
 SELECT create_hypertable('k_follows', 'block_time',
@@ -236,8 +232,7 @@ ALTER TABLE k_follows SET (
     timescaledb.compress_orderby = 'block_time DESC'
 );
 
-SELECT add_compression_policy('k_follows',
-    compress_after => '30 days'::interval);
+SELECT add_compression_policy('k_follows', compress_after => 2592000000000); -- 30 days in microseconds
 
 -- Convert k_blocks to hypertable
 SELECT create_hypertable('k_blocks', 'block_time',
@@ -251,5 +246,4 @@ ALTER TABLE k_blocks SET (
     timescaledb.compress_orderby = 'block_time DESC'
 );
 
-SELECT add_compression_policy('k_blocks',
-    compress_after => '30 days'::interval);
+SELECT add_compression_policy('k_blocks', compress_after => 2592000000000); -- 30 days in microseconds

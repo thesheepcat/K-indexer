@@ -64,8 +64,7 @@ ALTER TABLE k_votes SET (
     timescaledb.compress_orderby = 'block_time DESC'
 );
 
-SELECT add_compression_policy('k_votes',
-    compress_after => '30 days'::interval);
+SELECT add_compression_policy('k_votes', compress_after => 2592000000000); -- 30 days in microseconds
 
 -- ============================================================================
 -- Step 2: Convert k_mentions to hypertable
@@ -82,8 +81,7 @@ ALTER TABLE k_mentions SET (
     timescaledb.compress_orderby = 'block_time DESC'
 );
 
-SELECT add_compression_policy('k_mentions',
-    compress_after => '30 days'::interval);
+SELECT add_compression_policy('k_mentions', compress_after => 2592000000000); -- 30 days in microseconds
 
 -- ============================================================================
 -- Step 3: Convert k_contents to hypertable
@@ -100,8 +98,7 @@ ALTER TABLE k_contents SET (
     timescaledb.compress_orderby = 'block_time DESC'
 );
 
-SELECT add_compression_policy('k_contents',
-    compress_after => '30 days'::interval);
+SELECT add_compression_policy('k_contents', compress_after => 2592000000000); -- 30 days in microseconds
 
 -- ============================================================================
 -- Step 4: Convert k_broadcasts to hypertable
@@ -118,8 +115,7 @@ ALTER TABLE k_broadcasts SET (
     timescaledb.compress_orderby = 'block_time DESC'
 );
 
-SELECT add_compression_policy('k_broadcasts',
-    compress_after => '30 days'::interval);
+SELECT add_compression_policy('k_broadcasts', compress_after => 2592000000000); -- 30 days in microseconds
 
 -- ============================================================================
 -- Step 5: Convert k_follows to hypertable
@@ -136,8 +132,7 @@ ALTER TABLE k_follows SET (
     timescaledb.compress_orderby = 'block_time DESC'
 );
 
-SELECT add_compression_policy('k_follows',
-    compress_after => '30 days'::interval);
+SELECT add_compression_policy('k_follows', compress_after => 2592000000000); -- 30 days in microseconds
 
 -- ============================================================================
 -- Step 6: Convert k_blocks to hypertable
@@ -154,8 +149,7 @@ ALTER TABLE k_blocks SET (
     timescaledb.compress_orderby = 'block_time DESC'
 );
 
-SELECT add_compression_policy('k_blocks',
-    compress_after => '30 days'::interval);
+SELECT add_compression_policy('k_blocks', compress_after => 2592000000000); -- 30 days in microseconds
 
 -- ============================================================================
 -- Step 7: Recreate indexes as non-unique (deduplication handled by application)

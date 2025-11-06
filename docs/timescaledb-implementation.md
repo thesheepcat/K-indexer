@@ -66,7 +66,7 @@ ALTER TABLE k_votes SET (
 
 -- Add compression policy: compress data older than 30 days
 SELECT add_compression_policy('k_votes',
-    compress_after => '30 days'::interval);
+    compress_after => 2592000000000  -- 30 days in microseconds);
 ```
 
 #### Rationale:
@@ -129,7 +129,7 @@ ALTER TABLE k_mentions SET (
 
 -- Add compression policy: compress data older than 30 days
 SELECT add_compression_policy('k_mentions',
-    compress_after => '30 days'::interval);
+    compress_after => 2592000000000  -- 30 days in microseconds);
 ```
 
 #### Rationale:
@@ -196,7 +196,7 @@ ALTER TABLE k_contents SET (
 
 -- Add compression policy: compress data older than 30 days
 SELECT add_compression_policy('k_contents',
-    compress_after => '30 days'::interval);
+    compress_after => 2592000000000  -- 30 days in microseconds);
 ```
 
 #### Rationale:
@@ -265,7 +265,7 @@ ALTER TABLE k_broadcasts SET (
 
 -- Add compression policy: compress data older than 30 days
 SELECT add_compression_policy('k_broadcasts',
-    compress_after => '30 days'::interval);
+    compress_after => 2592000000000  -- 30 days in microseconds);
 ```
 
 #### Rationale:
@@ -319,7 +319,7 @@ ALTER TABLE k_follows SET (
 
 -- Add compression policy: compress data older than 90 days
 SELECT add_compression_policy('k_follows',
-    compress_after => '30 days'::interval);
+    compress_after => 2592000000000  -- 30 days in microseconds);
 ```
 
 #### Rationale:
@@ -373,7 +373,7 @@ ALTER TABLE k_blocks SET (
 
 -- Add compression policy: compress data older than 90 days
 SELECT add_compression_policy('k_blocks',
-    compress_after => '30 days'::interval);
+    compress_after => 2592000000000  -- 30 days in microseconds);
 ```
 
 #### Rationale:
@@ -494,7 +494,7 @@ ALTER TABLE k_contents SET (
 );
 
 SELECT add_compression_policy('k_contents',
-    compress_after => '30 days'::interval);
+    compress_after => 2592000000000  -- 30 days in microseconds);
 
 -- ============================================================================
 -- Phase 2: Optional Small Tables (328 KB savings)
@@ -513,7 +513,7 @@ ALTER TABLE k_broadcasts SET (
 );
 
 SELECT add_compression_policy('k_broadcasts',
-    compress_after => '30 days'::interval);
+    compress_after => 2592000000000  -- 30 days in microseconds);
 
 -- Table 5: k_follows (optional)
 SELECT create_hypertable('k_follows', 'block_time',
@@ -528,7 +528,7 @@ ALTER TABLE k_follows SET (
 );
 
 SELECT add_compression_policy('k_follows',
-    compress_after => '30 days'::interval);
+    compress_after => 2592000000000  -- 30 days in microseconds);
 
 -- Table 6: k_blocks (optional)
 SELECT create_hypertable('k_blocks', 'block_time',
@@ -543,7 +543,7 @@ ALTER TABLE k_blocks SET (
 );
 
 SELECT add_compression_policy('k_blocks',
-    compress_after => '30 days'::interval);
+    compress_after => 2592000000000  -- 30 days in microseconds);
 
 -- ============================================================================
 -- Update schema version
