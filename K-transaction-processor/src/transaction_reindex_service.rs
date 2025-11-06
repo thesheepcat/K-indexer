@@ -26,6 +26,9 @@ impl TransactionReindexService {
             self.interval_hours
         );
 
+        // Run first reindex immediately on startup
+        self.run_reindex_cycle().await;
+
         loop {
             // Wait for the configured interval
             let duration = Duration::from_secs(self.interval_hours * 3600);
@@ -35,33 +38,56 @@ impl TransactionReindexService {
             );
             tokio::time::sleep(duration).await;
 
-            info!("Starting reindex operation for transactions table indexes");
-
-            // Reindex transactions_pkey
-            match self.reindex_transactions_pkey().await {
-                Ok(_) => info!("Successfully reindexed transactions_pkey"),
-                Err(e) => error!("Failed to reindex transactions_pkey: {}", e),
-            }
-
-            // Reindex transactions_block_time_idx
-            match self.reindex_transactions_block_time_idx().await {
-                Ok(_) => info!("Successfully reindexed transactions_block_time_idx"),
-                Err(e) => error!("Failed to reindex transactions_block_time_idx: {}", e),
-            }
-
-            info!("Reindex operation completed");
+            self.run_reindex_cycle().await;
         }
+    }
+
+    /// Run a complete reindex cycle for both indexes
+    async fn run_reindex_cycle(&self) {
+        use std::time::Instant;
+
+        info!("Starting reindex operation for transactions table indexes");
+        let cycle_start = Instant::now();
+
+        // Reindex transactions_pkey
+        match self.reindex_transactions_pkey().await {
+            Ok(_) => info!("Successfully reindexed transactions_pkey"),
+            Err(e) => error!("Failed to reindex transactions_pkey: {}", e),
+        }
+
+        // Reindex transactions_block_time_idx
+        match self.reindex_transactions_block_time_idx().await {
+            Ok(_) => info!("Successfully reindexed transactions_block_time_idx"),
+            Err(e) => error!("Failed to reindex transactions_block_time_idx: {}", e),
+        }
+
+        let cycle_duration = cycle_start.elapsed();
+        info!(
+            "Reindex operation completed - Total time: {:.2} seconds ({:.2} minutes)",
+            cycle_duration.as_secs_f64(),
+            cycle_duration.as_secs_f64() / 60.0
+        );
     }
 
     /// Reindex the primary key index on transactions table
     /// Uses REINDEX CONCURRENTLY to avoid blocking reads/writes
     async fn reindex_transactions_pkey(&self) -> Result<()> {
-        info!("Reindexing transactions_pkey (this may take several minutes)...");
+        use std::time::Instant;
+
+        info!("Starting REINDEX on transactions_pkey...");
+        let start = Instant::now();
 
         // REINDEX CONCURRENTLY allows reads and writes to continue during reindex
         sqlx::query("REINDEX INDEX CONCURRENTLY transactions_pkey")
             .execute(&self.pool)
             .await?;
+
+        let duration = start.elapsed();
+        info!(
+            "Completed REINDEX on transactions_pkey - Time: {:.2} seconds ({:.2} minutes)",
+            duration.as_secs_f64(),
+            duration.as_secs_f64() / 60.0
+        );
 
         Ok(())
     }
@@ -69,12 +95,22 @@ impl TransactionReindexService {
     /// Reindex the block_time index on transactions table
     /// Uses REINDEX CONCURRENTLY to avoid blocking reads/writes
     async fn reindex_transactions_block_time_idx(&self) -> Result<()> {
-        info!("Reindexing transactions_block_time_idx (this may take several minutes)...");
+        use std::time::Instant;
+
+        info!("Starting REINDEX on transactions_block_time_idx...");
+        let start = Instant::now();
 
         // REINDEX CONCURRENTLY allows reads and writes to continue during reindex
         sqlx::query("REINDEX INDEX CONCURRENTLY transactions_block_time_idx")
             .execute(&self.pool)
             .await?;
+
+        let duration = start.elapsed();
+        info!(
+            "Completed REINDEX on transactions_block_time_idx - Time: {:.2} seconds ({:.2} minutes)",
+            duration.as_secs_f64(),
+            duration.as_secs_f64() / 60.0
+        );
 
         Ok(())
     }
