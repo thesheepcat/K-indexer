@@ -6,7 +6,7 @@ use tracing::{error, info, warn};
 pub type DbPool = PgPool;
 
 // Schema version management
-const SCHEMA_VERSION: i32 = 8;
+const SCHEMA_VERSION: i32 = 9;
 
 /// K-transaction-processor Database Client
 /// Similar to KaspaDbClient in Simply Kaspa Indexer
@@ -150,6 +150,16 @@ impl KDbClient {
                             info!("Migration v7 -> v8 completed successfully");
                         }
 
+                        // v8 -> v9: Drop redundant idx_k_mentions_comprehensive index
+                        if current_version == 8 {
+                            info!(
+                                "Applying migration v8 -> v9 (drop redundant idx_k_mentions_comprehensive)"
+                            );
+                            execute_ddl(MIGRATION_V8_TO_V9_SQL, &self.pool).await?;
+                            current_version = 9;
+                            info!("Migration v8 -> v9 completed successfully");
+                        }
+
                         info!(
                             "Schema upgrade completed successfully (final version: {})",
                             current_version
@@ -238,6 +248,7 @@ const MIGRATION_V4_TO_V5_SQL: &str = include_str!("migrations/schema/v4_to_v5.sq
 const MIGRATION_V5_TO_V6_SQL: &str = include_str!("migrations/schema/v5_to_v6.sql");
 const MIGRATION_V6_TO_V7_SQL: &str = include_str!("migrations/schema/v6_to_v7.sql");
 const MIGRATION_V7_TO_V8_SQL: &str = include_str!("migrations/schema/v7_to_v8.sql");
+const MIGRATION_V8_TO_V9_SQL: &str = include_str!("migrations/schema/v8_to_v9.sql");
 
 pub async fn create_pool(config: &AppConfig) -> Result<DbPool> {
     let connection_string = config.connection_string();
@@ -449,7 +460,6 @@ async fn verify_schema_setup(pool: &DbPool) -> Result<()> {
         "idx_k_blocks_sender_pubkey",
         "idx_k_blocks_blocked_user_pubkey",
         "idx_k_blocks_block_time",
-        "idx_k_mentions_comprehensive",
         "idx_k_contents_transaction_id",
         "idx_k_contents_sender_signature",
         "idx_k_contents_sender_pubkey",
@@ -493,13 +503,13 @@ async fn verify_schema_setup(pool: &DbPool) -> Result<()> {
         .await?
         .get::<i64, _>(0);
 
-    if index_count == 38 {
+    if index_count == 37 {
         info!(
-            "  ✓ Expected 38 K protocol indexes verified (found {})",
+            "  ✓ Expected 37 K protocol indexes verified (found {})",
             index_count
         );
     } else {
-        error!("  ✗ Expected 38 K protocol indexes, found {}", index_count);
+        error!("  ✗ Expected 37 K protocol indexes, found {}", index_count);
         all_verified = false;
     }
 

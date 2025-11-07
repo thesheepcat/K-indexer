@@ -1,4 +1,4 @@
--- K-transaction-processor Schema v8
+-- K-transaction-processor Schema v9
 -- Complete schema for fresh installation with TimescaleDB hypertables
 
 -- Enable extensions
@@ -11,8 +11,8 @@ CREATE TABLE IF NOT EXISTS k_vars (
     value TEXT NOT NULL
 );
 
--- Insert initial schema version (v8 = TimescaleDB hypertables for all k_ tables)
-INSERT INTO k_vars (key, value) VALUES ('schema_version', '8') ON CONFLICT (key) DO NOTHING;
+-- Insert initial schema version (v9 = removed idx_k_mentions_comprehensive)
+INSERT INTO k_vars (key, value) VALUES ('schema_version', '9') ON CONFLICT (key) DO NOTHING;
 
 -- Create K protocol tables
 -- NOTE: k_posts and k_replies tables removed in v7 (replaced by k_contents in v4)
@@ -83,11 +83,11 @@ CREATE INDEX IF NOT EXISTS idx_k_blocks_sender_pubkey ON k_blocks(sender_pubkey)
 CREATE INDEX IF NOT EXISTS idx_k_blocks_blocked_user_pubkey ON k_blocks(blocked_user_pubkey);
 CREATE INDEX IF NOT EXISTS idx_k_blocks_block_time ON k_blocks(block_time);
 
--- Create comprehensive index that efficiently serves both get-notifications and get-mentions queries
--- This index supports:
--- 1. get-notifications: WHERE mentioned_pubkey = ? AND sender_pubkey NOT IN (blocked_users) ORDER BY block_time DESC, id DESC
--- 2. get-mentions: WHERE mentioned_pubkey = ? AND content_type = ? AND content_id = ?
-CREATE INDEX IF NOT EXISTS idx_k_mentions_comprehensive ON k_mentions(mentioned_pubkey, sender_pubkey, content_type, content_id, block_time DESC, id DESC);
+-- Note: idx_k_mentions_comprehensive was removed in v9 (redundant with simpler indexes)
+-- Simpler indexes cover all query patterns:
+--   - idx_k_mentions_mentioned_pubkey (for notifications)
+--   - idx_k_mentions_content_type_id (for content lookups)
+--   - idx_k_mentions_content_id (for direct content ID lookups)
 
 -- ============================================================================
 -- NEW in v5: k_follows table for following/unfollowing users
