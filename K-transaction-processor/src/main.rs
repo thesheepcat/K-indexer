@@ -3,6 +3,7 @@ mod database;
 mod k_protocol;
 mod listener;
 mod queue;
+mod transaction_reindex_service;
 mod worker;
 
 use anyhow::Result;
@@ -115,6 +116,13 @@ async fn main() -> Result<()> {
 
     info!("Starting all components...");
 
+    // Start transaction reindex service (runs every 2 hours)
+    let reindex_pool = database.pool().clone();
+    let reindex_config = config.clone();
+    let reindex_handle = tokio::spawn(async move {
+        transaction_reindex_service::start_reindex_service(reindex_config, reindex_pool).await;
+    });
+
     let listener_handle = tokio::spawn(async move {
         if let Err(e) = notification_listener.start().await {
             error!("Notification listener failed: {}", e);
@@ -136,6 +144,9 @@ async fn main() -> Result<()> {
     );
 
     tokio::select! {
+        _ = reindex_handle => {
+            error!("Transaction reindex service stopped unexpectedly");
+        }
         _ = listener_handle => {
             error!("Notification listener stopped unexpectedly");
         }

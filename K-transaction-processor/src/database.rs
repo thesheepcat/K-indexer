@@ -6,7 +6,7 @@ use tracing::{error, info, warn};
 pub type DbPool = PgPool;
 
 // Schema version management
-const SCHEMA_VERSION: i32 = 5;
+const SCHEMA_VERSION: i32 = 9;
 
 /// K-transaction-processor Database Client
 /// Similar to KaspaDbClient in Simply Kaspa Indexer
@@ -122,6 +122,44 @@ impl KDbClient {
                             info!("Migration v4 -> v5 completed successfully");
                         }
 
+                        // v5 -> v6: Add TimescaleDB extension
+                        if current_version == 5 {
+                            info!("Applying migration v5 -> v6 (TimescaleDB extension)");
+                            execute_ddl(MIGRATION_V5_TO_V6_SQL, &self.pool).await?;
+                            current_version = 6;
+                            info!("Migration v5 -> v6 completed successfully");
+                        }
+
+                        // v6 -> v7: Remove k_posts and k_replies tables
+                        if current_version == 6 {
+                            info!(
+                                "Applying migration v6 -> v7 (removing k_posts and k_replies tables)"
+                            );
+                            execute_ddl(MIGRATION_V6_TO_V7_SQL, &self.pool).await?;
+                            current_version = 7;
+                            info!("Migration v6 -> v7 completed successfully");
+                        }
+
+                        // v7 -> v8: Convert all k_ tables to TimescaleDB hypertables
+                        if current_version == 7 {
+                            info!(
+                                "Applying migration v7 -> v8 (TimescaleDB hypertables for all k_ tables)"
+                            );
+                            execute_ddl(MIGRATION_V7_TO_V8_SQL, &self.pool).await?;
+                            current_version = 8;
+                            info!("Migration v7 -> v8 completed successfully");
+                        }
+
+                        // v8 -> v9: Drop redundant idx_k_mentions_comprehensive index
+                        if current_version == 8 {
+                            info!(
+                                "Applying migration v8 -> v9 (drop redundant idx_k_mentions_comprehensive)"
+                            );
+                            execute_ddl(MIGRATION_V8_TO_V9_SQL, &self.pool).await?;
+                            current_version = 9;
+                            info!("Migration v8 -> v9 completed successfully");
+                        }
+
                         info!(
                             "Schema upgrade completed successfully (final version: {})",
                             current_version
@@ -207,6 +245,10 @@ const MIGRATION_V1_TO_V2_SQL: &str = include_str!("migrations/schema/v1_to_v2.sq
 const MIGRATION_V2_TO_V3_SQL: &str = include_str!("migrations/schema/v2_to_v3.sql");
 const MIGRATION_V3_TO_V4_SQL: &str = include_str!("migrations/schema/v3_to_v4.sql");
 const MIGRATION_V4_TO_V5_SQL: &str = include_str!("migrations/schema/v4_to_v5.sql");
+const MIGRATION_V5_TO_V6_SQL: &str = include_str!("migrations/schema/v5_to_v6.sql");
+const MIGRATION_V6_TO_V7_SQL: &str = include_str!("migrations/schema/v6_to_v7.sql");
+const MIGRATION_V7_TO_V8_SQL: &str = include_str!("migrations/schema/v7_to_v8.sql");
+const MIGRATION_V8_TO_V9_SQL: &str = include_str!("migrations/schema/v8_to_v9.sql");
 
 pub async fn create_pool(config: &AppConfig) -> Result<DbPool> {
     let connection_string = config.connection_string();
@@ -348,9 +390,7 @@ async fn verify_schema_setup(pool: &DbPool) -> Result<()> {
 
     // Check K protocol tables
     let tables = vec![
-        "k_posts",
-        "k_replies",
-        "k_contents", // NEW in v4
+        "k_contents", // Unified table (v4+)
         "k_broadcasts",
         "k_votes",
         "k_mentions",
@@ -397,21 +437,15 @@ async fn verify_schema_setup(pool: &DbPool) -> Result<()> {
         all_verified = false;
     }
 
-    // Explicit verification of all 46 expected K protocol indexes (31 old + 10 in v4 + 5 in v5)
+    // Explicit verification of all 38 expected K protocol indexes (v8: TimescaleDB, non-unique indexes)
     let expected_indexes = vec![
-        // v0_to_v1 indexes (22 total)
-        "idx_k_posts_transaction_id",
-        "idx_k_posts_sender_pubkey",
-        "idx_k_posts_block_time",
-        "idx_k_replies_transaction_id",
-        "idx_k_replies_sender_pubkey",
-        "idx_k_replies_post_id",
-        "idx_k_replies_block_time",
         "idx_k_broadcasts_transaction_id",
         "idx_k_broadcasts_sender_pubkey",
+        "idx_k_broadcasts_sender_signature",
         "idx_k_broadcasts_block_time",
         "idx_k_votes_transaction_id",
         "idx_k_votes_sender_pubkey",
+        "idx_k_votes_sender_signature",
         "idx_k_votes_post_id",
         "idx_k_votes_vote",
         "idx_k_votes_block_time",
@@ -419,23 +453,15 @@ async fn verify_schema_setup(pool: &DbPool) -> Result<()> {
         "idx_k_mentions_mentioned_pubkey",
         "idx_k_mentions_content_type",
         "idx_k_votes_post_id_sender",
-        "idx_k_replies_post_id_block_time",
-        "idx_k_posts_block_time_id_covering",
         "idx_k_mentions_content_type_id",
-        // v1_to_v2 indexes (9 total)
-        "idx_k_posts_sender_signature_unique",
-        "idx_k_replies_sender_signature_unique",
-        "idx_k_votes_sender_signature_unique",
-        "idx_k_blocks_sender_signature_unique",
-        "idx_k_blocks_sender_blocked_user_unique",
+        "idx_k_blocks_transaction_id",
+        "idx_k_blocks_sender_signature",
+        "idx_k_blocks_sender_blocked_user",
         "idx_k_blocks_sender_pubkey",
         "idx_k_blocks_blocked_user_pubkey",
         "idx_k_blocks_block_time",
-        // v2_to_v3 replacement (net 0: drops idx_k_mentions_optimal, adds idx_k_mentions_comprehensive)
-        "idx_k_mentions_comprehensive",
-        // v3_to_v4 new indexes for k_contents (10 total)
         "idx_k_contents_transaction_id",
-        "idx_k_contents_sender_signature_unique",
+        "idx_k_contents_sender_signature",
         "idx_k_contents_sender_pubkey",
         "idx_k_contents_block_time",
         "idx_k_contents_replies",
@@ -444,9 +470,9 @@ async fn verify_schema_setup(pool: &DbPool) -> Result<()> {
         "idx_k_contents_feed_covering",
         "idx_k_contents_content_type",
         "idx_k_contents_sender_content_type",
-        // v4_to_v5 new indexes for k_follows (5 total)
-        "idx_k_follows_sender_signature_unique",
-        "idx_k_follows_sender_followed_user_unique",
+        "idx_k_follows_transaction_id",
+        "idx_k_follows_sender_signature",
+        "idx_k_follows_sender_followed_user",
         "idx_k_follows_followed_user_pubkey",
         "idx_k_follows_sender_pubkey",
         "idx_k_follows_block_time",
@@ -471,19 +497,19 @@ async fn verify_schema_setup(pool: &DbPool) -> Result<()> {
         }
     }
 
-    // Verify total count matches expected (46 indexes: 31 old + 10 in v4 + 5 in v5)
+    // Verify total count matches expected (38 indexes in v8: TimescaleDB with non-unique indexes)
     let index_count = sqlx::query("SELECT COUNT(*) FROM pg_indexes WHERE indexname LIKE 'idx_k_%'")
         .fetch_one(pool)
         .await?
         .get::<i64, _>(0);
 
-    if index_count == 46 {
+    if index_count == 37 {
         info!(
-            "  ✓ Expected 46 K protocol indexes verified (found {})",
+            "  ✓ Expected 37 K protocol indexes verified (found {})",
             index_count
         );
     } else {
-        error!("  ✗ Expected 46 K protocol indexes, found {}", index_count);
+        error!("  ✗ Expected 37 K protocol indexes, found {}", index_count);
         all_verified = false;
     }
 
@@ -491,46 +517,17 @@ async fn verify_schema_setup(pool: &DbPool) -> Result<()> {
         error!("  ✗ Missing indexes: {:?}", missing_indexes);
     }
 
-    // Verify k_contents data migration (v4+)
+    // Verify k_contents table (v4+)
     if version.unwrap_or(0) >= 4 {
-        info!("Verifying k_contents data migration");
-
-        let k_posts_count: i64 = sqlx::query("SELECT COUNT(*) FROM k_posts")
-            .fetch_one(pool)
-            .await?
-            .get(0);
-
-        let k_replies_count: i64 = sqlx::query("SELECT COUNT(*) FROM k_replies")
-            .fetch_one(pool)
-            .await?
-            .get(0);
+        info!("Verifying k_contents table");
 
         let k_contents_count: i64 = sqlx::query("SELECT COUNT(*) FROM k_contents")
             .fetch_one(pool)
             .await?
             .get(0);
 
-        let old_tables_total = k_posts_count + k_replies_count;
-
-        info!("  k_posts records: {}", k_posts_count);
-        info!("  k_replies records: {}", k_replies_count);
-        info!("  Old tables total: {}", old_tables_total);
         info!("  k_contents records: {}", k_contents_count);
-
-        if k_contents_count >= old_tables_total {
-            info!(
-                "  ✓ k_contents has {} records (>= {} from old tables)",
-                k_contents_count, old_tables_total
-            );
-        } else {
-            warn!(
-                "  ⚠ k_contents has {} records (expected >= {} from old tables)",
-                k_contents_count, old_tables_total
-            );
-            warn!(
-                "  This may indicate incomplete migration. New records will be written to k_contents."
-            );
-        }
+        info!("  ✓ k_contents is the unified content table (k_posts and k_replies removed in v7)");
     }
 
     if all_verified {

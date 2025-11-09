@@ -68,3 +68,14 @@ jobs:
           ${{ github.ref == 'refs/heads/master' && 'thesheepcat/k-webserver:latest' || 'thesheepcat/k-webserver:dev' }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
+
+    - name: Build and push K-database-cleaner
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ${{ github.ref == 'refs/heads/master' && './docker/PROD/Dockerfile.K-database-cleaner' || './docker/DEV/Dockerfile.K-database-cleaner' }}
+        push: true
+        tags: |
+          ${{ github.ref == 'refs/heads/master' && 'thesheepcat/k-database-cleaner:latest' || 'thesheepcat/k-database-cleaner:dev' }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max

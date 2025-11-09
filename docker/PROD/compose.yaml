@@ -1,7 +1,8 @@
 services:
   k-indexer-db:
+    profiles: ["public-indexer", "personal-indexer"]
     container_name: k-indexer-db
-    image: postgres:17-alpine
+    image: timescale/timescaledb:latest-pg17
     restart: unless-stopped
     shm_size: 4G
     environment:
@@ -9,12 +10,14 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_DB: ${DB_NAME}
       PGPORT: ${DB_PORT}
+      TIMESCALEDB_TELEMETRY: off
     network_mode: "host"
-    command: -c shared_preload_libraries=pg_stat_statements -c pg_stat_statements.max=10000 -c pg_stat_statements.track=all -c pg_stat_statements.save=on
+    command: -c shared_preload_libraries=timescaledb,pg_stat_statements -c pg_stat_statements.max=10000 -c pg_stat_statements.track=all -c pg_stat_statements.save=on
     volumes:
       - /var/${DB_NAME}/:/var/lib/postgresql/data/
 
   simply-kaspa-indexer:
+    profiles: ["public-indexer", "personal-indexer"]
     container_name: simply-kaspa-indexer
     image: supertypo/simply-kaspa-indexer:latest
     restart: unless-stopped
@@ -24,6 +27,7 @@ services:
       - k-indexer-db
 
   k-transaction-processor:
+    profiles: ["public-indexer", "personal-indexer"]
     container_name: k-transaction-processor
     image: thesheepcat/k-transaction-processor:latest
     restart: unless-stopped
@@ -34,12 +38,24 @@ services:
       - simply-kaspa-indexer
 
   k-webserver:
+    profiles: ["public-indexer", "personal-indexer"]
     container_name: k-webserver
     image: thesheepcat/k-webserver:latest
     restart: unless-stopped
     network_mode: "host"
-    command: --db-host localhost --db-port ${DB_PORT} --db-name ${DB_NAME} --db-user ${DB_USER} --db-password ${DB_PASSWORD} --bind-address 0.0.0.0:${WEBSERVER_PORT} --worker-threads 6 --db-max-connections 18 --request-timeout 30 --rate-limit 500
+    command: --db-host localhost --db-port ${DB_PORT} --db-name ${DB_NAME} --db-user ${DB_USER} --db-password ${DB_PASSWORD} --bind-address 0.0.0.0:${WEBSERVER_PORT} --worker-threads 6 --db-max-connections 18 --request-timeout 30 --rate-limit 200
     depends_on:
       - k-indexer-db
       - simply-kaspa-indexer
+      - k-transaction-processor
+
+  k-database-cleaner:
+    profiles: ["personal-indexer"]
+    container_name: k-database-cleaner
+    image: thesheepcat/k-database-cleaner:latest
+    restart: unless-stopped
+    network_mode: "host"
+    command: --user ${USER_PUBKEY} --data-retention ${DATA_RETENTION} --purge-interval ${PURGE_INTERVAL} --db-host localhost --db-port ${DB_PORT} --db-name ${DB_NAME} --db-user ${DB_USER} --db-password ${DB_PASSWORD} --db-max-connections 2
+    depends_on:
+      - k-indexer-db
       - k-transaction-processor
