@@ -1,4 +1,4 @@
--- K-transaction-processor Schema v9
+-- K-transaction-processor Schema v10
 -- Complete schema for fresh installation with TimescaleDB hypertables
 
 -- Enable extensions
@@ -11,8 +11,8 @@ CREATE TABLE IF NOT EXISTS k_vars (
     value TEXT NOT NULL
 );
 
--- Insert initial schema version (v9 = removed idx_k_mentions_comprehensive)
-INSERT INTO k_vars (key, value) VALUES ('schema_version', '9') ON CONFLICT (key) DO NOTHING;
+-- Insert initial schema version (v10 = added integer_now function for compression)
+INSERT INTO k_vars (key, value) VALUES ('schema_version', '10') ON CONFLICT (key) DO NOTHING;
 
 -- Create K protocol tables
 -- NOTE: k_posts and k_replies tables removed in v7 (replaced by k_contents in v4)
@@ -247,3 +247,19 @@ ALTER TABLE k_blocks SET (
 );
 
 SELECT add_compression_policy('k_blocks', compress_after => 2592000000000); -- 30 days in microseconds
+
+-- Create integer_now function for TimescaleDB compression (v10)
+-- This function is required for compression policies to work with integer-based timestamps
+CREATE OR REPLACE FUNCTION public.integer_now_ms()
+RETURNS bigint LANGUAGE SQL STABLE AS $$
+  SELECT (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint;
+$$;
+
+-- Set the integer_now function for all hypertables
+-- This tells TimescaleDB how to determine "current time" for compression age comparison
+SELECT set_integer_now_func('k_votes', 'integer_now_ms');
+SELECT set_integer_now_func('k_mentions', 'integer_now_ms');
+SELECT set_integer_now_func('k_contents', 'integer_now_ms');
+SELECT set_integer_now_func('k_broadcasts', 'integer_now_ms');
+SELECT set_integer_now_func('k_follows', 'integer_now_ms');
+SELECT set_integer_now_func('k_blocks', 'integer_now_ms');

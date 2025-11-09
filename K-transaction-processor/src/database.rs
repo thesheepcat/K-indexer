@@ -6,7 +6,7 @@ use tracing::{error, info, warn};
 pub type DbPool = PgPool;
 
 // Schema version management
-const SCHEMA_VERSION: i32 = 9;
+const SCHEMA_VERSION: i32 = 10;
 
 /// K-transaction-processor Database Client
 /// Similar to KaspaDbClient in Simply Kaspa Indexer
@@ -160,6 +160,16 @@ impl KDbClient {
                             info!("Migration v8 -> v9 completed successfully");
                         }
 
+                        // v9 -> v10: Add integer_now function for TimescaleDB compression
+                        if current_version == 9 {
+                            info!(
+                                "Applying migration v9 -> v10 (add integer_now function for compression)"
+                            );
+                            execute_ddl(MIGRATION_V9_TO_V10_SQL, &self.pool).await?;
+                            current_version = 10;
+                            info!("Migration v9 -> v10 completed successfully");
+                        }
+
                         info!(
                             "Schema upgrade completed successfully (final version: {})",
                             current_version
@@ -249,6 +259,7 @@ const MIGRATION_V5_TO_V6_SQL: &str = include_str!("migrations/schema/v5_to_v6.sq
 const MIGRATION_V6_TO_V7_SQL: &str = include_str!("migrations/schema/v6_to_v7.sql");
 const MIGRATION_V7_TO_V8_SQL: &str = include_str!("migrations/schema/v7_to_v8.sql");
 const MIGRATION_V8_TO_V9_SQL: &str = include_str!("migrations/schema/v8_to_v9.sql");
+const MIGRATION_V9_TO_V10_SQL: &str = include_str!("migrations/schema/v9_to_v10.sql");
 
 pub async fn create_pool(config: &AppConfig) -> Result<DbPool> {
     let connection_string = config.connection_string();
