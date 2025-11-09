@@ -3,9 +3,8 @@
 
 -- Create function that returns current time in milliseconds (matching block_time format)
 CREATE OR REPLACE FUNCTION public.integer_now_ms()
-RETURNS bigint LANGUAGE SQL STABLE AS $$
-  SELECT (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint;
-$$;
+RETURNS bigint LANGUAGE SQL STABLE AS
+'SELECT (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint';
 
 -- Set the integer_now function for all hypertables
 SELECT set_integer_now_func('k_votes', 'integer_now_ms');

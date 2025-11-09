@@ -251,9 +251,8 @@ SELECT add_compression_policy('k_blocks', compress_after => 2592000000000); -- 3
 -- Create integer_now function for TimescaleDB compression (v10)
 -- This function is required for compression policies to work with integer-based timestamps
 CREATE OR REPLACE FUNCTION public.integer_now_ms()
-RETURNS bigint LANGUAGE SQL STABLE AS $$
-  SELECT (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint;
-$$;
+RETURNS bigint LANGUAGE SQL STABLE AS
+'SELECT (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint';
 
 -- Set the integer_now function for all hypertables
 -- This tells TimescaleDB how to determine "current time" for compression age comparison
