@@ -85,13 +85,19 @@ nano .env
 ##### Variables description
 | Variable | Default | Description |
 |-----------|---------|-------------|
+| `COMPOSE_PROFILES` | `public-indexer` | Indexer type: `public-indexer` or `personal-indexer` |
 | `DB_USER` | `username` | PostgreSQL database username |
 | `DB_PASSWORD` | `password` | PostgreSQL database password |
 | `DB_NAME` | `k-db` | PostgreSQL database name |
 | `DB_PORT` | `5432` | PostgreSQL database access port |
 | `WEBSERVER_PORT` | `3000` | K-webserver access port (used by K-webapp, to connect to K-indexer) |
+| `USER_PUBKEY` | - | Your Kaspa public key (required only for `personal-indexer`) |
+| `DATA_RETENTION` | `72h` | How long to keep content from non-followed users (required only for `personal-indexer`) |
+| `PURGE_INTERVAL` | `10m` | How often to run cleanup operations (required only for `personal-indexer`) |
 
-**IMPORTANT**: It's recommended that you change the DB_USER and DB_PASSWORD variables to your username and password.
+**IMPORTANT**:
+- Change `DB_USER` and `DB_PASSWORD` to secure values
+- Set `COMPOSE_PROFILES` to `personal-indexer` and configure `USER_PUBKEY`, `DATA_RETENTION`, and `PURGE_INTERVAL` if running a personal indexer with k-database-cleaner
 
 #### 3. **Activate all Services**
 Navigate to docker/PROD folder and use docker compose to activate all services:
@@ -112,13 +118,9 @@ The following services will be activated:
 
 ## 📖 API Endpoints
 
-Once running, K-indexer provides REST endpoints for:
-- **Posts**: Retrieve user posts
-- **Replies**: Access post replies  
-- **Users**: Get user profiles and introductions
-- **Mentions**: Find posts where users are mentioned
+Once running, K-indexer provides REST endpoints the K webapp.
 
-You can find all details of the API techical specification in the API_TECHNICAL_SPECIFICATIONS.md document.
+You can find all details of the API techical specification in the [API_TECHNICAL_SPECIFICATIONS.md](API_TECHNICAL_SPECIFICATIONS.md) document.
 
 ---
 
