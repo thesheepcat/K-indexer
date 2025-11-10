@@ -1,9 +1,8 @@
--- K-transaction-processor Schema v10
--- Complete schema for fresh installation with TimescaleDB hypertables
+-- K-transaction-processor Schema v7
+-- Complete schema for fresh installation
 
--- Enable extensions
+-- Enable pg_stat_statements extension for query performance monitoring
 CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
-CREATE EXTENSION IF NOT EXISTS timescaledb;
 
 -- Create system variables table first
 CREATE TABLE IF NOT EXISTS k_vars (
@@ -11,15 +10,15 @@ CREATE TABLE IF NOT EXISTS k_vars (
     value TEXT NOT NULL
 );
 
--- Insert initial schema version (v10 = added integer_now function for compression)
-INSERT INTO k_vars (key, value) VALUES ('schema_version', '10') ON CONFLICT (key) DO NOTHING;
+-- Insert initial schema version (v6 = removes k_posts and k_replies tables, uses k_contents)
+INSERT INTO k_vars (key, value) VALUES ('schema_version', '6') ON CONFLICT (key) DO NOTHING;
 
+-- NOTE: k_posts and k_replies tables removed in v6 (replaced by k_contents table in v4)
 -- Create K protocol tables
--- NOTE: k_posts and k_replies tables removed in v7 (replaced by k_contents in v4)
 
 CREATE TABLE IF NOT EXISTS k_broadcasts (
     id BIGSERIAL PRIMARY KEY,
-    transaction_id BYTEA NOT NULL,
+    transaction_id BYTEA UNIQUE NOT NULL,
     block_time BIGINT NOT NULL,
     sender_pubkey BYTEA NOT NULL,
     sender_signature BYTEA NOT NULL,
@@ -30,7 +29,7 @@ CREATE TABLE IF NOT EXISTS k_broadcasts (
 
 CREATE TABLE IF NOT EXISTS k_votes (
     id BIGSERIAL PRIMARY KEY,
-    transaction_id BYTEA NOT NULL,
+    transaction_id BYTEA UNIQUE NOT NULL,
     block_time BIGINT NOT NULL,
     sender_pubkey BYTEA NOT NULL,
     sender_signature BYTEA NOT NULL,
@@ -50,24 +49,18 @@ CREATE TABLE IF NOT EXISTS k_mentions (
 -- Create indexes for K protocol tables
 CREATE INDEX IF NOT EXISTS idx_k_broadcasts_transaction_id ON k_broadcasts(transaction_id);
 CREATE INDEX IF NOT EXISTS idx_k_broadcasts_sender_pubkey ON k_broadcasts(sender_pubkey);
-CREATE INDEX IF NOT EXISTS idx_k_broadcasts_sender_signature ON k_broadcasts(sender_signature);
 CREATE INDEX IF NOT EXISTS idx_k_broadcasts_block_time ON k_broadcasts(block_time);
 CREATE INDEX IF NOT EXISTS idx_k_votes_transaction_id ON k_votes(transaction_id);
 CREATE INDEX IF NOT EXISTS idx_k_votes_sender_pubkey ON k_votes(sender_pubkey);
-CREATE INDEX IF NOT EXISTS idx_k_votes_sender_signature ON k_votes(sender_signature);
 CREATE INDEX IF NOT EXISTS idx_k_votes_post_id ON k_votes(post_id);
 CREATE INDEX IF NOT EXISTS idx_k_votes_vote ON k_votes(vote);
 CREATE INDEX IF NOT EXISTS idx_k_votes_block_time ON k_votes(block_time);
-CREATE INDEX IF NOT EXISTS idx_k_mentions_content_id ON k_mentions(content_id);
-CREATE INDEX IF NOT EXISTS idx_k_mentions_mentioned_pubkey ON k_mentions(mentioned_pubkey);
-CREATE INDEX IF NOT EXISTS idx_k_mentions_content_type ON k_mentions(content_type);
 CREATE INDEX IF NOT EXISTS idx_k_votes_post_id_sender ON k_votes(post_id, sender_pubkey);
-CREATE INDEX IF NOT EXISTS idx_k_mentions_content_type_id ON k_mentions(content_type, content_id);
 
 -- Create k_blocks table for blocking/unblocking users
 CREATE TABLE IF NOT EXISTS k_blocks (
     id BIGSERIAL PRIMARY KEY,
-    transaction_id BYTEA NOT NULL,
+    transaction_id BYTEA UNIQUE NOT NULL,
     block_time BIGINT NOT NULL,
     sender_pubkey BYTEA NOT NULL,
     sender_signature BYTEA NOT NULL,
@@ -75,19 +68,21 @@ CREATE TABLE IF NOT EXISTS k_blocks (
     blocked_user_pubkey BYTEA NOT NULL
 );
 
--- Create indexes for k_blocks (deduplication handled by application)
-CREATE INDEX IF NOT EXISTS idx_k_blocks_transaction_id ON k_blocks(transaction_id);
-CREATE INDEX IF NOT EXISTS idx_k_blocks_sender_signature ON k_blocks(sender_signature);
-CREATE INDEX IF NOT EXISTS idx_k_blocks_sender_blocked_user ON k_blocks(sender_pubkey, blocked_user_pubkey);
+-- Signature-based deduplication indexes
+CREATE UNIQUE INDEX IF NOT EXISTS idx_k_votes_sender_signature_unique ON k_votes(sender_signature);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_k_blocks_sender_signature_unique ON k_blocks(sender_signature);
+
+-- Create indexes for efficient blocking queries
+CREATE UNIQUE INDEX IF NOT EXISTS idx_k_blocks_sender_blocked_user_unique ON k_blocks(sender_pubkey, blocked_user_pubkey);
 CREATE INDEX IF NOT EXISTS idx_k_blocks_sender_pubkey ON k_blocks(sender_pubkey);
 CREATE INDEX IF NOT EXISTS idx_k_blocks_blocked_user_pubkey ON k_blocks(blocked_user_pubkey);
 CREATE INDEX IF NOT EXISTS idx_k_blocks_block_time ON k_blocks(block_time);
 
--- Note: idx_k_mentions_comprehensive was removed in v9 (redundant with simpler indexes)
--- Simpler indexes cover all query patterns:
---   - idx_k_mentions_mentioned_pubkey (for notifications)
---   - idx_k_mentions_content_type_id (for content lookups)
---   - idx_k_mentions_content_id (for direct content ID lookups)
+-- Create comprehensive index that efficiently serves both get-notifications and get-mentions queries
+-- This index supports:
+-- 1. get-notifications: WHERE mentioned_pubkey = ? AND sender_pubkey NOT IN (blocked_users) ORDER BY block_time DESC, id DESC
+-- 2. get-mentions: WHERE mentioned_pubkey = ? AND content_type = ? AND content_id = ?
+CREATE INDEX IF NOT EXISTS idx_k_mentions_comprehensive ON k_mentions(mentioned_pubkey, sender_pubkey, content_type, content_id, block_time DESC, id DESC);
 
 -- ============================================================================
 -- NEW in v5: k_follows table for following/unfollowing users
@@ -96,7 +91,7 @@ CREATE INDEX IF NOT EXISTS idx_k_blocks_block_time ON k_blocks(block_time);
 -- Create k_follows table for following/unfollowing users
 CREATE TABLE IF NOT EXISTS k_follows (
     id BIGSERIAL PRIMARY KEY,
-    transaction_id BYTEA NOT NULL,
+    transaction_id BYTEA UNIQUE NOT NULL,
     block_time BIGINT NOT NULL,
     sender_pubkey BYTEA NOT NULL,
     sender_signature BYTEA NOT NULL,
@@ -104,12 +99,19 @@ CREATE TABLE IF NOT EXISTS k_follows (
     followed_user_pubkey BYTEA NOT NULL
 );
 
--- Create indexes for k_follows (deduplication handled by application)
-CREATE INDEX IF NOT EXISTS idx_k_follows_transaction_id ON k_follows(transaction_id);
-CREATE INDEX IF NOT EXISTS idx_k_follows_sender_signature ON k_follows(sender_signature);
-CREATE INDEX IF NOT EXISTS idx_k_follows_sender_followed_user ON k_follows(sender_pubkey, followed_user_pubkey);
+-- Signature-based deduplication index
+CREATE UNIQUE INDEX IF NOT EXISTS idx_k_follows_sender_signature_unique ON k_follows(sender_signature);
+
+-- Unique constraint: one follow record per sender-followed pair (prevents duplicates)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_k_follows_sender_followed_user_unique ON k_follows(sender_pubkey, followed_user_pubkey);
+
+-- Index for queries: "who is following user X?"
 CREATE INDEX IF NOT EXISTS idx_k_follows_followed_user_pubkey ON k_follows(followed_user_pubkey, block_time DESC);
+
+-- Index for queries: "who does user X follow?"
 CREATE INDEX IF NOT EXISTS idx_k_follows_sender_pubkey ON k_follows(sender_pubkey, block_time DESC);
+
+-- Index for time-based queries
 CREATE INDEX IF NOT EXISTS idx_k_follows_block_time ON k_follows(block_time DESC);
 
 -- ============================================================================
@@ -119,7 +121,7 @@ CREATE INDEX IF NOT EXISTS idx_k_follows_block_time ON k_follows(block_time DESC
 -- Create unified contents table (posts, replies, reposts, quotes)
 CREATE TABLE IF NOT EXISTS k_contents (
     id BIGSERIAL PRIMARY KEY,
-    transaction_id BYTEA NOT NULL,
+    transaction_id BYTEA UNIQUE NOT NULL,
     block_time BIGINT NOT NULL,
     sender_pubkey BYTEA NOT NULL,
     sender_signature BYTEA NOT NULL,
@@ -130,9 +132,9 @@ CREATE TABLE IF NOT EXISTS k_contents (
     referenced_content_id BYTEA
 );
 
--- Primary indexes for k_contents (deduplication handled by application)
-CREATE INDEX IF NOT EXISTS idx_k_contents_transaction_id ON k_contents(transaction_id);
-CREATE INDEX IF NOT EXISTS idx_k_contents_sender_signature ON k_contents(sender_signature);
+-- Primary indexes for k_contents
+CREATE UNIQUE INDEX IF NOT EXISTS idx_k_contents_transaction_id ON k_contents(transaction_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_k_contents_sender_signature_unique ON k_contents(sender_signature);
 CREATE INDEX IF NOT EXISTS idx_k_contents_sender_pubkey ON k_contents(sender_pubkey, block_time DESC);
 CREATE INDEX IF NOT EXISTS idx_k_contents_block_time ON k_contents(block_time DESC, id DESC);
 
@@ -159,106 +161,3 @@ CREATE INDEX IF NOT EXISTS idx_k_contents_content_type ON k_contents(content_typ
 
 -- User content index (all content types by user)
 CREATE INDEX IF NOT EXISTS idx_k_contents_sender_content_type ON k_contents(sender_pubkey, content_type, block_time DESC);
-
--- ============================================================================
--- TimescaleDB Hypertable Conversion (Schema v8)
--- ============================================================================
-
--- Convert k_votes to hypertable
-SELECT create_hypertable('k_votes', 'block_time',
-    chunk_time_interval => 86400000000,
-    migrate_data => true,
-    if_not_exists => TRUE);
-
-ALTER TABLE k_votes SET (
-    timescaledb.compress,
-    timescaledb.compress_segmentby = 'sender_pubkey,post_id',
-    timescaledb.compress_orderby = 'block_time DESC'
-);
-
-SELECT add_compression_policy('k_votes', compress_after => 2592000000000); -- 30 days in microseconds
-
--- Convert k_mentions to hypertable
-SELECT create_hypertable('k_mentions', 'block_time',
-    chunk_time_interval => 86400000000,
-    migrate_data => true,
-    if_not_exists => TRUE);
-
-ALTER TABLE k_mentions SET (
-    timescaledb.compress,
-    timescaledb.compress_segmentby = 'mentioned_pubkey,content_type',
-    timescaledb.compress_orderby = 'block_time DESC'
-);
-
-SELECT add_compression_policy('k_mentions', compress_after => 2592000000000); -- 30 days in microseconds
-
--- Convert k_contents to hypertable
-SELECT create_hypertable('k_contents', 'block_time',
-    chunk_time_interval => 86400000000,
-    migrate_data => true,
-    if_not_exists => TRUE);
-
-ALTER TABLE k_contents SET (
-    timescaledb.compress,
-    timescaledb.compress_segmentby = 'sender_pubkey,content_type',
-    timescaledb.compress_orderby = 'block_time DESC'
-);
-
-SELECT add_compression_policy('k_contents', compress_after => 2592000000000); -- 30 days in microseconds
-
--- Convert k_broadcasts to hypertable
-SELECT create_hypertable('k_broadcasts', 'block_time',
-    chunk_time_interval => 86400000000,
-    migrate_data => true,
-    if_not_exists => TRUE);
-
-ALTER TABLE k_broadcasts SET (
-    timescaledb.compress,
-    timescaledb.compress_segmentby = 'sender_pubkey',
-    timescaledb.compress_orderby = 'block_time DESC'
-);
-
-SELECT add_compression_policy('k_broadcasts', compress_after => 2592000000000); -- 30 days in microseconds
-
--- Convert k_follows to hypertable
-SELECT create_hypertable('k_follows', 'block_time',
-    chunk_time_interval => 86400000000,
-    migrate_data => true,
-    if_not_exists => TRUE);
-
-ALTER TABLE k_follows SET (
-    timescaledb.compress,
-    timescaledb.compress_segmentby = 'sender_pubkey,followed_user_pubkey',
-    timescaledb.compress_orderby = 'block_time DESC'
-);
-
-SELECT add_compression_policy('k_follows', compress_after => 2592000000000); -- 30 days in microseconds
-
--- Convert k_blocks to hypertable
-SELECT create_hypertable('k_blocks', 'block_time',
-    chunk_time_interval => 86400000000,
-    migrate_data => true,
-    if_not_exists => TRUE);
-
-ALTER TABLE k_blocks SET (
-    timescaledb.compress,
-    timescaledb.compress_segmentby = 'sender_pubkey,blocked_user_pubkey',
-    timescaledb.compress_orderby = 'block_time DESC'
-);
-
-SELECT add_compression_policy('k_blocks', compress_after => 2592000000000); -- 30 days in microseconds
-
--- Create integer_now function for TimescaleDB compression (v10)
--- This function is required for compression policies to work with integer-based timestamps
-CREATE OR REPLACE FUNCTION public.integer_now_ms()
-RETURNS bigint LANGUAGE SQL STABLE AS
-'SELECT (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint';
-
--- Set the integer_now function for all hypertables
--- This tells TimescaleDB how to determine "current time" for compression age comparison
-SELECT set_integer_now_func('k_votes', 'integer_now_ms');
-SELECT set_integer_now_func('k_mentions', 'integer_now_ms');
-SELECT set_integer_now_func('k_contents', 'integer_now_ms');
-SELECT set_integer_now_func('k_broadcasts', 'integer_now_ms');
-SELECT set_integer_now_func('k_follows', 'integer_now_ms');
-SELECT set_integer_now_func('k_blocks', 'integer_now_ms');
