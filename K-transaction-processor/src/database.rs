@@ -142,6 +142,16 @@ impl KDbClient {
                             info!("Migration v6 -> v7 completed successfully");
                         }
 
+                        // v7 -> v8: Restore critical k_mentions indexes for performance
+                        if current_version == 7 {
+                            info!(
+                                "Applying migration v7 -> v8 (restore critical k_mentions indexes)"
+                            );
+                            execute_ddl(MIGRATION_V7_TO_V8_SQL, &self.pool).await?;
+                            current_version = 8;
+                            info!("Migration v7 -> v8 completed successfully");
+                        }
+
                         info!(
                             "Schema upgrade completed successfully (final version: {})",
                             current_version
@@ -229,6 +239,7 @@ const MIGRATION_V3_TO_V4_SQL: &str = include_str!("migrations/schema/v3_to_v4.sq
 const MIGRATION_V4_TO_V5_SQL: &str = include_str!("migrations/schema/v4_to_v5.sql");
 const MIGRATION_V5_TO_V6_SQL: &str = include_str!("migrations/schema/v5_to_v6.sql");
 const MIGRATION_V6_TO_V7_SQL: &str = include_str!("migrations/schema/v6_to_v7.sql");
+const MIGRATION_V7_TO_V8_SQL: &str = include_str!("migrations/schema/v7_to_v8.sql");
 
 pub async fn create_pool(config: &AppConfig) -> Result<DbPool> {
     let connection_string = config.connection_string();
