@@ -341,7 +341,6 @@ impl DatabaseInterface for PostgresDbManager {
                 (SELECT COUNT(*) FROM k_follows WHERE sender_pubkey = $1) as following_count
             FROM k_broadcasts b
             WHERE b.sender_pubkey = $1
-            ORDER BY b.block_time DESC
             LIMIT 1
         "#;
 
@@ -772,7 +771,6 @@ impl DatabaseInterface for PostgresDbManager {
                 SELECT base64_encoded_nickname, base64_encoded_profile_image
                 FROM k_broadcasts b
                 WHERE b.sender_pubkey = ps.sender_pubkey
-                ORDER BY b.block_time DESC
                 LIMIT 1
             ) b ON true
             LEFT JOIN LATERAL (
@@ -786,7 +784,6 @@ impl DatabaseInterface for PostgresDbManager {
                 SELECT base64_encoded_nickname, base64_encoded_profile_image
                 FROM k_broadcasts
                 WHERE sender_pubkey = ref_c.sender_pubkey
-                ORDER BY block_time DESC
                 LIMIT 1
             ) ref_b ON ref_c.sender_pubkey IS NOT NULL
             WHERE 1=1
@@ -987,7 +984,6 @@ impl DatabaseInterface for PostgresDbManager {
                 SELECT base64_encoded_nickname, base64_encoded_profile_image
                 FROM k_broadcasts b
                 WHERE b.sender_pubkey = ps.sender_pubkey
-                ORDER BY b.block_time DESC
                 LIMIT 1
             ) b ON true
             LEFT JOIN LATERAL (
@@ -1001,7 +997,6 @@ impl DatabaseInterface for PostgresDbManager {
                 SELECT base64_encoded_nickname, base64_encoded_profile_image
                 FROM k_broadcasts
                 WHERE sender_pubkey = ref_c.sender_pubkey
-                ORDER BY block_time DESC
                 LIMIT 1
             ) ref_b ON ref_c.sender_pubkey IS NOT NULL
             WHERE 1=1
@@ -1278,7 +1273,6 @@ impl DatabaseInterface for PostgresDbManager {
                 SELECT base64_encoded_nickname, base64_encoded_profile_image
                 FROM k_broadcasts b
                 WHERE b.sender_pubkey = cs.sender_pubkey
-                ORDER BY b.block_time DESC
                 LIMIT 1
             ) b ON true
             LEFT JOIN LATERAL (
@@ -1292,7 +1286,6 @@ impl DatabaseInterface for PostgresDbManager {
                 SELECT base64_encoded_nickname, base64_encoded_profile_image
                 FROM k_broadcasts
                 WHERE sender_pubkey = ref_c.sender_pubkey
-                ORDER BY block_time DESC
                 LIMIT 1
             ) ref_b ON ref_c.sender_pubkey IS NOT NULL
             WHERE 1=1
@@ -1504,7 +1497,7 @@ impl DatabaseInterface for PostgresDbManager {
                     base64_encoded_nickname,
                     base64_encoded_profile_image
                 FROM k_broadcasts
-                ORDER BY sender_pubkey, block_time DESC
+                ORDER BY sender_pubkey
             ) user_profile ON c.sender_pubkey = user_profile.sender_pubkey
             LEFT JOIN LATERAL (
                 SELECT base64_encoded_message, sender_pubkey
@@ -1517,7 +1510,6 @@ impl DatabaseInterface for PostgresDbManager {
                 SELECT base64_encoded_nickname, base64_encoded_profile_image
                 FROM k_broadcasts
                 WHERE sender_pubkey = ref_c.sender_pubkey
-                ORDER BY block_time DESC
                 LIMIT 1
             ) ref_b ON ref_c.sender_pubkey IS NOT NULL
             LEFT JOIN k_blocks kb ON kb.sender_pubkey = $2 AND kb.blocked_user_pubkey = c.sender_pubkey
@@ -1769,7 +1761,6 @@ impl DatabaseInterface for PostgresDbManager {
                 SELECT base64_encoded_nickname, base64_encoded_profile_image
                 FROM k_broadcasts b
                 WHERE b.sender_pubkey = rs.sender_pubkey
-                ORDER BY b.block_time DESC
                 LIMIT 1
             ) b ON true
             WHERE 1=1
@@ -1999,7 +1990,6 @@ impl DatabaseInterface for PostgresDbManager {
                 SELECT base64_encoded_nickname, base64_encoded_profile_image
                 FROM k_broadcasts b
                 WHERE b.sender_pubkey = rs.sender_pubkey
-                ORDER BY b.block_time DESC
                 LIMIT 1
             ) b ON true
             WHERE 1=1
@@ -2235,7 +2225,6 @@ impl DatabaseInterface for PostgresDbManager {
                 SELECT base64_encoded_nickname, base64_encoded_profile_image
                 FROM k_broadcasts b
                 WHERE b.sender_pubkey = ps.sender_pubkey
-                ORDER BY b.block_time DESC
                 LIMIT 1
             ) b ON true
             LEFT JOIN LATERAL (
@@ -2249,7 +2238,6 @@ impl DatabaseInterface for PostgresDbManager {
                 SELECT base64_encoded_nickname, base64_encoded_profile_image
                 FROM k_broadcasts
                 WHERE sender_pubkey = ref_c.sender_pubkey
-                ORDER BY block_time DESC
                 LIMIT 1
             ) ref_b ON ref_c.sender_pubkey IS NOT NULL
             LEFT JOIN k_blocks kb ON kb.sender_pubkey = ${requester_param} AND kb.blocked_user_pubkey = ps.sender_pubkey
@@ -2512,7 +2500,7 @@ impl DatabaseInterface for PostgresDbManager {
                     SELECT base64_encoded_nickname, base64_encoded_profile_image
                     FROM k_broadcasts b
                     WHERE b.sender_pubkey = fn.sender_pubkey
-                    ORDER BY b.block_time DESC LIMIT 1
+                    LIMIT 1
                 ) b ON true
                 -- For votes, get the content being voted on
                 LEFT JOIN k_contents vc ON fn.content_type = 'vote' AND v.post_id = vc.transaction_id

@@ -6,7 +6,7 @@ use tracing::{error, info, warn};
 pub type DbPool = PgPool;
 
 // Schema version management
-const SCHEMA_VERSION: i32 = 7;
+const SCHEMA_VERSION: i32 = 8;
 
 /// K-transaction-processor Database Client
 /// Similar to KaspaDbClient in Simply Kaspa Indexer
@@ -417,7 +417,7 @@ async fn verify_schema_setup(pool: &DbPool) -> Result<()> {
         all_verified = false;
     }
 
-    // Explicit verification of all 31 expected K protocol indexes (v7: redundant k_mentions indexes removed)
+    // Explicit verification of all 33 expected K protocol indexes (v8: restored critical k_mentions indexes)
     let expected_indexes = vec![
         // k_broadcasts indexes
         "idx_k_broadcasts_transaction_id",
@@ -431,8 +431,10 @@ async fn verify_schema_setup(pool: &DbPool) -> Result<()> {
         "idx_k_votes_vote",
         "idx_k_votes_block_time",
         "idx_k_votes_post_id_sender",
-        // k_mentions indexes (v7: only comprehensive index, redundant indexes removed)
+        // k_mentions indexes (v8: restored content_id and mentioned_pubkey indexes for performance)
         "idx_k_mentions_comprehensive",
+        "idx_k_mentions_content_id",
+        "idx_k_mentions_mentioned_pubkey",
         // k_blocks indexes
         "idx_k_blocks_sender_signature_unique",
         "idx_k_blocks_sender_blocked_user_unique",
@@ -477,19 +479,19 @@ async fn verify_schema_setup(pool: &DbPool) -> Result<()> {
         }
     }
 
-    // Verify total count matches expected (31 indexes in v7: redundant k_mentions indexes removed)
+    // Verify total count matches expected (33 indexes in v8: restored critical k_mentions indexes)
     let index_count = sqlx::query("SELECT COUNT(*) FROM pg_indexes WHERE indexname LIKE 'idx_k_%'")
         .fetch_one(pool)
         .await?
         .get::<i64, _>(0);
 
-    if index_count == 31 {
+    if index_count == 33 {
         info!(
-            "  ✓ Expected 31 K protocol indexes verified (found {})",
+            "  ✓ Expected 33 K protocol indexes verified (found {})",
             index_count
         );
     } else {
-        error!("  ✗ Expected 31 K protocol indexes, found {}", index_count);
+        error!("  ✗ Expected 33 K protocol indexes, found {}", index_count);
         all_verified = false;
     }
 
