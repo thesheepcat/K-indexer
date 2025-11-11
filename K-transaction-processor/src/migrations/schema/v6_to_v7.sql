@@ -1,26 +1,15 @@
 -- Migration from Schema v6 to v7
--- Removes k_posts and k_replies tables (replaced by k_contents table in v4)
+-- Removes redundant k_mentions indexes that are covered by idx_k_mentions_comprehensive
 
--- ============================================================================
--- Step 1: Drop k_posts table and all its indexes
--- ============================================================================
+-- The comprehensive index (mentioned_pubkey, sender_pubkey, content_type, content_id, block_time DESC, id DESC)
+-- covers all query patterns for get-notifications, get-notification-count, and get-mentions.
+-- PostgreSQL can use the left-prefix of this index for simpler queries.
 
--- Note: Indexes will be automatically dropped when the table is dropped
-DROP TABLE IF EXISTS k_posts CASCADE;
+-- Drop 4 redundant k_mentions indexes
+DROP INDEX IF EXISTS idx_k_mentions_content_id;
+DROP INDEX IF EXISTS idx_k_mentions_mentioned_pubkey;
+DROP INDEX IF EXISTS idx_k_mentions_content_type;
+DROP INDEX IF EXISTS idx_k_mentions_content_type_id;
 
--- ============================================================================
--- Step 2: Drop k_replies table and all its indexes
--- ============================================================================
-
--- Note: Indexes will be automatically dropped when the table is dropped
-DROP TABLE IF EXISTS k_replies CASCADE;
-
--- ============================================================================
--- Step 3: Update schema version to v7
--- ============================================================================
-
+-- Update schema version
 UPDATE k_vars SET value = '7' WHERE key = 'schema_version';
-
--- ============================================================================
--- Migration complete!
--- ============================================================================

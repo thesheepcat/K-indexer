@@ -597,11 +597,8 @@ impl KProtocolProcessor {
                 INSERT INTO k_contents (
                     transaction_id, block_time, sender_pubkey, sender_signature,
                     base64_encoded_message, content_type, referenced_content_id
-                )
-                SELECT $1, $2, $3, $4, $5, 'post', NULL
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM k_contents WHERE sender_signature = $4
-                )
+                ) VALUES ($1, $2, $3, $4, $5, 'post', NULL)
+                ON CONFLICT (sender_signature) DO NOTHING
                 "#,
             )
             .bind(&transaction_id_bytes)
@@ -636,11 +633,8 @@ impl KProtocolProcessor {
                     INSERT INTO k_contents (
                         transaction_id, block_time, sender_pubkey, sender_signature,
                         base64_encoded_message, content_type, referenced_content_id
-                    )
-                    SELECT $1, $2, $3, $4, $5, 'post', NULL
-                    WHERE NOT EXISTS (
-                        SELECT 1 FROM k_contents WHERE sender_signature = $4
-                    )
+                    ) VALUES ($1, $2, $3, $4, $5, 'post', NULL)
+                    ON CONFLICT (sender_signature) DO NOTHING
                     RETURNING transaction_id, block_time, sender_pubkey
                 )
                 INSERT INTO k_mentions (content_id, content_type, mentioned_pubkey, block_time, sender_pubkey)
@@ -715,11 +709,8 @@ impl KProtocolProcessor {
                 INSERT INTO k_contents (
                     transaction_id, block_time, sender_pubkey, sender_signature,
                     base64_encoded_message, content_type, referenced_content_id
-                )
-                SELECT $1, $2, $3, $4, $5, 'reply', $6
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM k_contents WHERE sender_signature = $4
-                )
+                ) VALUES ($1, $2, $3, $4, $5, 'reply', $6)
+                ON CONFLICT (sender_signature) DO NOTHING
                 "#,
             )
             .bind(&transaction_id_bytes)
@@ -755,11 +746,8 @@ impl KProtocolProcessor {
                     INSERT INTO k_contents (
                         transaction_id, block_time, sender_pubkey, sender_signature,
                         base64_encoded_message, content_type, referenced_content_id
-                    )
-                    SELECT $1, $2, $3, $4, $5, 'reply', $6
-                    WHERE NOT EXISTS (
-                        SELECT 1 FROM k_contents WHERE sender_signature = $4
-                    )
+                    ) VALUES ($1, $2, $3, $4, $5, 'reply', $6)
+                    ON CONFLICT (sender_signature) DO NOTHING
                     RETURNING transaction_id, block_time, sender_pubkey
                 )
                 INSERT INTO k_mentions (content_id, content_type, mentioned_pubkey, block_time, sender_pubkey)
@@ -834,11 +822,8 @@ impl KProtocolProcessor {
                 INSERT INTO k_contents (
                     transaction_id, block_time, sender_pubkey, sender_signature,
                     base64_encoded_message, content_type, referenced_content_id
-                )
-                SELECT $1, $2, $3, $4, $5, 'quote', $6
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM k_contents WHERE sender_signature = $4
-                )
+                ) VALUES ($1, $2, $3, $4, $5, 'quote', $6)
+                ON CONFLICT (sender_signature) DO NOTHING
                 RETURNING transaction_id, block_time, sender_pubkey
             )
             INSERT INTO k_mentions (content_id, content_type, mentioned_pubkey, block_time, sender_pubkey)
@@ -919,11 +904,8 @@ impl KProtocolProcessor {
             INSERT INTO k_broadcasts (
                 transaction_id, block_time, sender_pubkey, sender_signature,
                 base64_encoded_nickname, base64_encoded_profile_image, base64_encoded_message
-            )
-            SELECT $1, $2, $3, $4, $5, $6, $7
-            WHERE NOT EXISTS (
-                SELECT 1 FROM k_broadcasts WHERE transaction_id = $1
-            )
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+            ON CONFLICT (transaction_id) DO NOTHING
             "#,
         )
         .bind(&transaction_id_bytes)
@@ -995,11 +977,8 @@ impl KProtocolProcessor {
                 INSERT INTO k_votes (
                     transaction_id, block_time, sender_pubkey, sender_signature,
                     post_id, vote
-                )
-                SELECT $1, $2, $3, $4, $5, $6
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM k_votes WHERE sender_signature = $4
-                )
+                ) VALUES ($1, $2, $3, $4, $5, $6)
+                ON CONFLICT (sender_signature) DO NOTHING
                 RETURNING transaction_id, block_time, sender_pubkey
             )
             INSERT INTO k_mentions (content_id, content_type, mentioned_pubkey, block_time, sender_pubkey)
@@ -1076,12 +1055,9 @@ impl KProtocolProcessor {
                     INSERT INTO k_blocks (
                         transaction_id, block_time, sender_pubkey, sender_signature,
                         blocking_action, blocked_user_pubkey
-                    )
-                    SELECT $1, $2, $3, $4, $5, $6
-                    WHERE NOT EXISTS (
-                        SELECT 1 FROM k_blocks
-                        WHERE sender_pubkey = $3 AND blocked_user_pubkey = $6
-                    )
+                    ) VALUES ($1, $2, $3, $4, $5, $6)
+                    ON CONFLICT (sender_pubkey, blocked_user_pubkey)
+                    DO NOTHING
                     "#,
                 )
                 .bind(&transaction_id_bytes)
@@ -1186,12 +1162,9 @@ impl KProtocolProcessor {
                     INSERT INTO k_follows (
                         transaction_id, block_time, sender_pubkey, sender_signature,
                         following_action, followed_user_pubkey
-                    )
-                    SELECT $1, $2, $3, $4, $5, $6
-                    WHERE NOT EXISTS (
-                        SELECT 1 FROM k_follows
-                        WHERE sender_pubkey = $3 AND followed_user_pubkey = $6
-                    )
+                    ) VALUES ($1, $2, $3, $4, $5, $6)
+                    ON CONFLICT (sender_pubkey, followed_user_pubkey)
+                    DO NOTHING
                     "#,
                 )
                 .bind(&transaction_id_bytes)
