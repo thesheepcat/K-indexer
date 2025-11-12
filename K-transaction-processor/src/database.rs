@@ -6,7 +6,7 @@ use tracing::{error, info, warn};
 pub type DbPool = PgPool;
 
 // Schema version management
-const SCHEMA_VERSION: i32 = 8;
+const SCHEMA_VERSION: i32 = 1;
 
 /// K-transaction-processor Database Client
 /// Similar to KaspaDbClient in Simply Kaspa Indexer
@@ -78,78 +78,12 @@ impl KDbClient {
                         // Perform sequential upgrades
                         let mut current_version = version;
 
-                        // v0 -> v1: Add all indexes
+                        // v0 -> v1: Add all indexes, constraints, and extensions
                         if current_version == 0 {
-                            info!("Applying migration v0 -> v1 (adding indexes)");
+                            info!("Applying migration v0 -> v1 (indexes, constraints, extensions)");
                             execute_ddl(MIGRATION_V0_TO_V1_SQL, &self.pool).await?;
                             current_version = 1;
                             info!("Migration v0 -> v1 completed successfully");
-                        }
-
-                        // v1 -> v2: Add signature deduplication and k_blocks table
-                        if current_version == 1 {
-                            info!(
-                                "Applying migration v1 -> v2 (signature deduplication and blocking)"
-                            );
-                            execute_ddl(MIGRATION_V1_TO_V2_SQL, &self.pool).await?;
-                            current_version = 2;
-                            info!("Migration v1 -> v2 completed successfully");
-                        }
-
-                        // v2 -> v3: Add sender_pubkey to k_mentions for optimized notifications
-                        if current_version == 2 {
-                            info!(
-                                "Applying migration v2 -> v3 (optimized k_mentions for notifications)"
-                            );
-                            execute_ddl(MIGRATION_V2_TO_V3_SQL, &self.pool).await?;
-                            current_version = 3;
-                            info!("Migration v2 -> v3 completed successfully");
-                        }
-
-                        // v3 -> v4: Add unified k_contents table
-                        if current_version == 3 {
-                            info!("Applying migration v3 -> v4 (unified k_contents table)");
-                            execute_ddl(MIGRATION_V3_TO_V4_SQL, &self.pool).await?;
-                            current_version = 4;
-                            info!("Migration v3 -> v4 completed successfully");
-                        }
-
-                        // v4 -> v5: Add k_follows table
-                        if current_version == 4 {
-                            info!("Applying migration v4 -> v5 (k_follows table)");
-                            execute_ddl(MIGRATION_V4_TO_V5_SQL, &self.pool).await?;
-                            current_version = 5;
-                            info!("Migration v4 -> v5 completed successfully");
-                        }
-
-                        // v5 -> v6: Remove k_posts and k_replies tables (replaced by k_contents)
-                        if current_version == 5 {
-                            info!(
-                                "Applying migration v5 -> v6 (remove k_posts and k_replies tables)"
-                            );
-                            execute_ddl(MIGRATION_V5_TO_V6_SQL, &self.pool).await?;
-                            current_version = 6;
-                            info!("Migration v5 -> v6 completed successfully");
-                        }
-
-                        // v6 -> v7: Remove redundant k_mentions indexes
-                        if current_version == 6 {
-                            info!(
-                                "Applying migration v6 -> v7 (remove redundant k_mentions indexes)"
-                            );
-                            execute_ddl(MIGRATION_V6_TO_V7_SQL, &self.pool).await?;
-                            current_version = 7;
-                            info!("Migration v6 -> v7 completed successfully");
-                        }
-
-                        // v7 -> v8: Restore critical k_mentions indexes for performance
-                        if current_version == 7 {
-                            info!(
-                                "Applying migration v7 -> v8 (restore critical k_mentions indexes)"
-                            );
-                            execute_ddl(MIGRATION_V7_TO_V8_SQL, &self.pool).await?;
-                            current_version = 8;
-                            info!("Migration v7 -> v8 completed successfully");
                         }
 
                         info!(
@@ -233,13 +167,6 @@ impl KDbClient {
 const SCHEMA_UP_SQL: &str = include_str!("migrations/schema/up.sql");
 const SCHEMA_DOWN_SQL: &str = include_str!("migrations/schema/down.sql");
 const MIGRATION_V0_TO_V1_SQL: &str = include_str!("migrations/schema/v0_to_v1.sql");
-const MIGRATION_V1_TO_V2_SQL: &str = include_str!("migrations/schema/v1_to_v2.sql");
-const MIGRATION_V2_TO_V3_SQL: &str = include_str!("migrations/schema/v2_to_v3.sql");
-const MIGRATION_V3_TO_V4_SQL: &str = include_str!("migrations/schema/v3_to_v4.sql");
-const MIGRATION_V4_TO_V5_SQL: &str = include_str!("migrations/schema/v4_to_v5.sql");
-const MIGRATION_V5_TO_V6_SQL: &str = include_str!("migrations/schema/v5_to_v6.sql");
-const MIGRATION_V6_TO_V7_SQL: &str = include_str!("migrations/schema/v6_to_v7.sql");
-const MIGRATION_V7_TO_V8_SQL: &str = include_str!("migrations/schema/v7_to_v8.sql");
 
 pub async fn create_pool(config: &AppConfig) -> Result<DbPool> {
     let connection_string = config.connection_string();
@@ -428,7 +355,7 @@ async fn verify_schema_setup(pool: &DbPool) -> Result<()> {
         all_verified = false;
     }
 
-    // Explicit verification of all 33 expected K protocol indexes (v8: restored critical k_mentions indexes)
+    // Explicit verification of all 33 expected K protocol indexes (v1: final schema)
     let expected_indexes = vec![
         // k_broadcasts indexes
         "idx_k_broadcasts_transaction_id",
@@ -442,7 +369,7 @@ async fn verify_schema_setup(pool: &DbPool) -> Result<()> {
         "idx_k_votes_vote",
         "idx_k_votes_block_time",
         "idx_k_votes_post_id_sender",
-        // k_mentions indexes (v8: restored content_id and mentioned_pubkey indexes for performance)
+        // k_mentions indexes
         "idx_k_mentions_comprehensive",
         "idx_k_mentions_content_id",
         "idx_k_mentions_mentioned_pubkey",
@@ -452,7 +379,7 @@ async fn verify_schema_setup(pool: &DbPool) -> Result<()> {
         "idx_k_blocks_sender_pubkey",
         "idx_k_blocks_blocked_user_pubkey",
         "idx_k_blocks_block_time",
-        // k_contents indexes (v4+, replaces k_posts and k_replies)
+        // k_contents indexes
         "idx_k_contents_transaction_id",
         "idx_k_contents_sender_signature_unique",
         "idx_k_contents_sender_pubkey",
@@ -463,7 +390,7 @@ async fn verify_schema_setup(pool: &DbPool) -> Result<()> {
         "idx_k_contents_feed_covering",
         "idx_k_contents_content_type",
         "idx_k_contents_sender_content_type",
-        // k_follows indexes (v5+)
+        // k_follows indexes
         "idx_k_follows_sender_signature_unique",
         "idx_k_follows_sender_followed_user_unique",
         "idx_k_follows_followed_user_pubkey",
@@ -490,7 +417,7 @@ async fn verify_schema_setup(pool: &DbPool) -> Result<()> {
         }
     }
 
-    // Verify total count matches expected (33 indexes in v8: restored critical k_mentions indexes)
+    // Verify total count matches expected (33 indexes in v1: final schema)
     let index_count = sqlx::query("SELECT COUNT(*) FROM pg_indexes WHERE indexname LIKE 'idx_k_%'")
         .fetch_one(pool)
         .await?

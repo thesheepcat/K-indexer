@@ -1,4 +1,4 @@
--- K-transaction-processor Schema v8
+-- K-transaction-processor Schema v1
 -- Complete schema for fresh installation
 
 -- Enable pg_stat_statements extension for query performance monitoring
@@ -10,8 +10,8 @@ CREATE TABLE IF NOT EXISTS k_vars (
     value TEXT NOT NULL
 );
 
--- Insert initial schema version (v8 = restored critical k_mentions indexes for performance)
-INSERT INTO k_vars (key, value) VALUES ('schema_version', '8') ON CONFLICT (key) DO NOTHING;
+-- Insert initial schema version (v1 = complete K protocol schema)
+INSERT INTO k_vars (key, value) VALUES ('schema_version', '1') ON CONFLICT (key) DO NOTHING;
 
 -- NOTE: k_posts and k_replies tables removed in v6 (replaced by k_contents table in v4)
 -- Create K protocol tables
@@ -84,7 +84,7 @@ CREATE INDEX IF NOT EXISTS idx_k_blocks_block_time ON k_blocks(block_time);
 -- 2. get-mentions: WHERE mentioned_pubkey = ? AND content_type = ? AND content_id = ?
 CREATE INDEX IF NOT EXISTS idx_k_mentions_comprehensive ON k_mentions(mentioned_pubkey, sender_pubkey, content_type, content_id, block_time DESC, id DESC);
 
--- v8: Restored critical k_mentions indexes for performance optimization
+-- v1: Critical k_mentions indexes for performance optimization
 -- idx_k_mentions_content_id: Used for feed queries to fetch mentions array per content (20x per feed query)
 CREATE INDEX IF NOT EXISTS idx_k_mentions_content_id ON k_mentions(content_id);
 -- idx_k_mentions_mentioned_pubkey: Used for get-mentions endpoint to find all contents mentioning a user
