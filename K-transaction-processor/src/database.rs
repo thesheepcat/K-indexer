@@ -57,6 +57,43 @@ impl KDbClient {
         Ok(())
     }
 
+    /// Set or verify network type in k_vars table
+    pub async fn set_and_verify_network(&self, network: &str) -> Result<()> {
+        info!("Setting and verifying network type: {}", network);
+
+        // Check if network is already set in k_vars
+        let existing_network = sqlx::query("SELECT value FROM k_vars WHERE key = 'network'")
+            .fetch_optional(&self.pool)
+            .await?;
+
+        match existing_network {
+            Some(row) => {
+                let stored_network: String = row.get("value");
+                if stored_network != network {
+                    return Err(anyhow::anyhow!(
+                        "Network mismatch! Database is configured for '{}' but K-transaction-processor is set to '{}'. \
+                        This could lead to data corruption. Please use the correct network parameter or initialize a new database.",
+                        stored_network,
+                        network
+                    ));
+                } else {
+                    info!("✓ Network type verified: {}", network);
+                }
+            }
+            None => {
+                // Insert network type for the first time
+                info!("Setting network type in database: {}", network);
+                sqlx::query("INSERT INTO k_vars (key, value) VALUES ('network', $1)")
+                    .bind(network)
+                    .execute(&self.pool)
+                    .await?;
+                info!("✓ Network type set to: {}", network);
+            }
+        }
+
+        Ok(())
+    }
+
     /// Create or upgrade schema (equivalent to KaspaDbClient::create_schema)
     pub async fn create_schema(&self, upgrade_db: bool) -> Result<()> {
         info!("Starting schema creation/upgrade process");

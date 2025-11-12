@@ -50,6 +50,17 @@ impl PostgresDbManager {
         }
     }
 
+    /// Get network type from k_vars table (internal implementation)
+    async fn get_network_from_db(&self) -> Result<String, sqlx::Error> {
+        let result = sqlx::query("SELECT value FROM k_vars WHERE key = 'network'")
+            .fetch_optional(&self.pool)
+            .await?;
+
+        Ok(result
+            .map(|row| row.get("value"))
+            .unwrap_or_else(|| "unknown".to_string()))
+    }
+
     fn create_compound_pagination_metadata<T>(
         &self,
         items: &[T],
@@ -2699,5 +2710,11 @@ impl DatabaseInterface for PostgresDbManager {
             items: notifications,
             pagination,
         })
+    }
+
+    async fn get_network(&self) -> DatabaseResult<String> {
+        self.get_network_from_db()
+            .await
+            .map_err(|e| DatabaseError::QueryError(e.to_string()))
     }
 }
