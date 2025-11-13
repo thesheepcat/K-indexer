@@ -146,7 +146,6 @@ async fn async_main(args: Args, worker_threads: usize) -> Result<(), Box<dyn std
     let db_interface: Arc<dyn database_trait::DatabaseInterface> = Arc::new(db_manager);
     let web_server = WebServer::new(db_interface, config.server.clone()).await;
 
-    info!("Network type: {}", web_server.app_state.network);
     info!("Starting web server on {}", config.server.bind_address);
 
     // Start the server

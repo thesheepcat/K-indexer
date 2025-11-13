@@ -36,7 +36,7 @@ pub struct AppState {
     pub api_handlers: ApiHandlers,
     pub rate_limit_map: RateLimitMap,
     pub server_config: ServerConfig,
-    pub network: String,
+    pub db: Arc<dyn DatabaseInterface>,
 }
 
 pub struct WebServer {
@@ -154,17 +154,11 @@ impl WebServer {
         let api_handlers = ApiHandlers::new(db.clone());
         let rate_limit_map = Arc::new(RwLock::new(HashMap::new()));
 
-        // Load network from database once at startup
-        let network = db
-            .get_network()
-            .await
-            .unwrap_or_else(|_| "unknown".to_string());
-
         let app_state = Arc::new(AppState {
             api_handlers,
             rate_limit_map,
             server_config,
-            network,
+            db,
         });
 
         Self { app_state }
@@ -265,11 +259,18 @@ async fn handle_root() -> &'static str {
 }
 
 async fn handle_health(State(app_state): State<Arc<AppState>>) -> Json<serde_json::Value> {
+    // Query database for network on every health check
+    let network = app_state
+        .db
+        .get_network()
+        .await
+        .unwrap_or_else(|_| "unknown".to_string());
+
     Json(serde_json::json!({
         "status": "healthy",
         "service": env!("CARGO_PKG_NAME"),
         "version": env!("CARGO_PKG_VERSION"),
-        "network": app_state.network
+        "network": network
     }))
 }
 
