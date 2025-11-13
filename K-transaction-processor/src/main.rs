@@ -56,6 +56,14 @@ struct Args {
 
     #[arg(short = 'u', long, help = "Enable automatic schema upgrades")]
     upgrade_db: bool,
+
+    #[arg(
+        short = 'n',
+        long,
+        help = "Network type: 'testnet-10' or 'mainnet'",
+        default_value = "testnet-10"
+    )]
+    network: String,
 }
 
 #[tokio::main]
@@ -79,8 +87,8 @@ async fn main() -> Result<()> {
     // Load configuration from CLI arguments only
     let config = AppConfig::from_args(&args);
     info!(
-        "Configuration loaded: {} workers, channel: {}",
-        config.workers.count, config.processing.channel_name
+        "Configuration loaded: {} workers, channel: {}, network: {}",
+        config.workers.count, config.processing.channel_name, config.network
     );
     info!(
         "Database connection: {}:{}/{}",
@@ -104,6 +112,12 @@ async fn main() -> Result<()> {
         .create_schema(args.upgrade_db)
         .await
         .expect("Unable to create schema");
+
+    // Set and verify network type after schema is created/verified
+    database
+        .set_and_verify_network(&config.network)
+        .await
+        .expect("Network verification failed");
 
     let (notification_sender, notification_receiver) = mpsc::unbounded_channel();
 

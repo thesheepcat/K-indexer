@@ -5,6 +5,7 @@ pub struct AppConfig {
     pub database: DatabaseConfig,
     pub workers: WorkerConfig,
     pub processing: ProcessingConfig,
+    pub network: String,
 }
 
 #[derive(Debug, Clone)]
@@ -42,6 +43,15 @@ impl AppConfig {
     }
 
     pub fn from_args(args: &Args) -> Self {
+        // Validate network parameter
+        let network = args.network.trim().to_string();
+        if network != "testnet-10" && network != "mainnet" {
+            panic!(
+                "Invalid network type '{}'. Must be 'testnet-10' or 'mainnet'",
+                network
+            );
+        }
+
         Self {
             database: DatabaseConfig {
                 host: args
@@ -74,6 +84,7 @@ impl AppConfig {
                 retry_attempts: args.retry_attempts.unwrap_or(3),
                 retry_delay_ms: args.retry_delay.unwrap_or(1000),
             },
+            network,
         }
     }
 }

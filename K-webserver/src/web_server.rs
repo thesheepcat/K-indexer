@@ -36,6 +36,7 @@ pub struct AppState {
     pub api_handlers: ApiHandlers,
     pub rate_limit_map: RateLimitMap,
     pub server_config: ServerConfig,
+    pub db: Arc<dyn DatabaseInterface>,
 }
 
 pub struct WebServer {
@@ -149,13 +150,15 @@ struct GetNotificationsCountQuery {
 }
 
 impl WebServer {
-    pub fn new(db: Arc<dyn DatabaseInterface>, server_config: ServerConfig) -> Self {
+    pub async fn new(db: Arc<dyn DatabaseInterface>, server_config: ServerConfig) -> Self {
         let api_handlers = ApiHandlers::new(db.clone());
         let rate_limit_map = Arc::new(RwLock::new(HashMap::new()));
+
         let app_state = Arc::new(AppState {
             api_handlers,
             rate_limit_map,
             server_config,
+            db,
         });
 
         Self { app_state }
@@ -255,11 +258,19 @@ async fn handle_root() -> &'static str {
     "K-indexer API Server - Posts API v1.0"
 }
 
-async fn handle_health() -> Json<serde_json::Value> {
+async fn handle_health(State(app_state): State<Arc<AppState>>) -> Json<serde_json::Value> {
+    // Query database for network on every health check
+    let network = app_state
+        .db
+        .get_network()
+        .await
+        .unwrap_or_else(|_| "unknown".to_string());
+
     Json(serde_json::json!({
         "status": "healthy",
         "service": env!("CARGO_PKG_NAME"),
-        "version": env!("CARGO_PKG_VERSION")
+        "version": env!("CARGO_PKG_VERSION"),
+        "network": network
     }))
 }
 
