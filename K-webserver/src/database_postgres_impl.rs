@@ -2717,4 +2717,32 @@ impl DatabaseInterface for PostgresDbManager {
             .await
             .map_err(|e| DatabaseError::QueryError(e.to_string()))
     }
+
+    async fn get_stats(&self) -> DatabaseResult<crate::database_trait::DatabaseStats> {
+        let row = sqlx::query(
+            r#"
+            SELECT
+                (SELECT COUNT(*) FROM k_broadcasts) as broadcasts_count,
+                (SELECT COUNT(*) FROM k_contents WHERE content_type = 'post') as posts_count,
+                (SELECT COUNT(*) FROM k_contents WHERE content_type = 'reply') as replies_count,
+                (SELECT COUNT(*) FROM k_contents WHERE content_type = 'quote') as quotes_count,
+                (SELECT COUNT(*) FROM k_votes) as votes_count,
+                (SELECT COUNT(*) FROM k_follows) as follows_count,
+                (SELECT COUNT(*) FROM k_blocks) as blocks_count
+            "#,
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
+
+        Ok(crate::database_trait::DatabaseStats {
+            broadcasts_count: row.get("broadcasts_count"),
+            posts_count: row.get("posts_count"),
+            replies_count: row.get("replies_count"),
+            quotes_count: row.get("quotes_count"),
+            votes_count: row.get("votes_count"),
+            follows_count: row.get("follows_count"),
+            blocks_count: row.get("blocks_count"),
+        })
+    }
 }

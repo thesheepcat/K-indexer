@@ -3,6 +3,7 @@ use crate::models::{
     PaginationMetadata,
 };
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use std::result::Result as StdResult;
 
 pub type DatabaseResult<T> = StdResult<T, DatabaseError>;
@@ -155,4 +156,18 @@ pub trait DatabaseInterface: Send + Sync {
 
     // Get network type from k_vars table
     async fn get_network(&self) -> DatabaseResult<String>;
+
+    // Get database statistics
+    async fn get_stats(&self) -> DatabaseResult<DatabaseStats>;
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DatabaseStats {
+    pub broadcasts_count: i64,
+    pub posts_count: i64,
+    pub replies_count: i64,
+    pub quotes_count: i64,
+    pub votes_count: i64,
+    pub follows_count: i64,
+    pub blocks_count: i64,
 }
