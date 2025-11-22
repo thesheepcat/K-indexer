@@ -171,6 +171,7 @@ impl WebServer {
         Router::new()
             .route("/", get(handle_root))
             .route("/health", get(handle_health))
+            .route("/stats", get(handle_stats))
             .route(
                 "/metrics",
                 get(move || async move { metric_handle.render() }),
@@ -258,7 +259,13 @@ async fn handle_root() -> &'static str {
     "K-indexer API Server - Posts API v1.0"
 }
 
-async fn handle_health(State(app_state): State<Arc<AppState>>) -> Json<serde_json::Value> {
+async fn handle_health(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    State(app_state): State<Arc<AppState>>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ApiError>)> {
+    // Check rate limit first
+    check_rate_limit(&app_state, addr).await?;
+
     // Query database for network on every health check
     let network = app_state
         .db
@@ -266,12 +273,40 @@ async fn handle_health(State(app_state): State<Arc<AppState>>) -> Json<serde_jso
         .await
         .unwrap_or_else(|_| "unknown".to_string());
 
-    Json(serde_json::json!({
+    Ok(Json(serde_json::json!({
         "status": "healthy",
         "service": env!("CARGO_PKG_NAME"),
         "version": env!("CARGO_PKG_VERSION"),
         "network": network
-    }))
+    })))
+}
+
+async fn handle_stats(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    State(app_state): State<Arc<AppState>>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ApiError>)> {
+    // Check rate limit first
+    check_rate_limit(&app_state, addr).await?;
+
+    match app_state.db.get_stats().await {
+        Ok(stats) => Ok(Json(serde_json::json!({
+            "broadcasts": stats.broadcasts_count,
+            "posts": stats.posts_count,
+            "replies": stats.replies_count,
+            "quotes": stats.quotes_count,
+            "votes": stats.votes_count,
+            "follows": stats.follows_count,
+            "blocks": stats.blocks_count
+        }))),
+        Err(e) => {
+            log_error!("Failed to get database stats: {}", e);
+            let error = ApiError {
+                error: "Failed to retrieve database statistics".to_string(),
+                code: "INTERNAL_ERROR".to_string(),
+            };
+            Err((StatusCode::INTERNAL_SERVER_ERROR, Json(error)))
+        }
+    }
 }
 
 async fn handle_get_posts(
