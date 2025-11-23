@@ -5,7 +5,7 @@ use std::time::Duration;
 use tracing::{error, info};
 
 /// Reindex service that runs REINDEX CONCURRENTLY on transactions table indexes
-/// every 2 hours to prevent index bloat
+/// every XX hours to prevent index bloat
 pub struct TransactionReindexService {
     pool: PgPool,
     interval_hours: u64,
@@ -118,8 +118,8 @@ impl TransactionReindexService {
 
 /// Start the reindex service as a background task
 pub async fn start_reindex_service(_config: AppConfig, pool: PgPool) {
-    // Default to 2 hours interval
-    let interval_hours = 2;
+    // Default to 12 hours interval
+    let interval_hours = 12;
 
     let service = TransactionReindexService::new(pool, interval_hours);
 

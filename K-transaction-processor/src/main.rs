@@ -130,7 +130,7 @@ async fn main() -> Result<()> {
 
     info!("Starting all components...");
 
-    // Start transaction reindex service (runs every 2 hours)
+    // Start transaction reindex service
     let reindex_pool = database.pool().clone();
     let reindex_config = config.clone();
     let reindex_handle = tokio::spawn(async move {
