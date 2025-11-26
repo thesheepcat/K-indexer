@@ -956,16 +956,14 @@ impl DatabaseInterface for PostgresDbManager {
                     SELECT referenced_content_id, COUNT(*) as replies_count
                     FROM k_contents r
                     WHERE r.content_type = 'reply'
-                      AND EXISTS (SELECT 1 FROM followed_content fc WHERE fc.transaction_id = r.referenced_content_id)
                     GROUP BY referenced_content_id
-                ) r ON fc.transaction_id = r.referenced_content_id AND fc.content_type IN ('post', 'quote')
+                ) r ON fc.transaction_id = r.referenced_content_id
                 LEFT JOIN (
                     SELECT referenced_content_id, COUNT(*) as quotes_count
                     FROM k_contents qt
                     WHERE qt.content_type = 'quote'
-                      AND EXISTS (SELECT 1 FROM followed_content fc WHERE fc.transaction_id = qt.referenced_content_id)
                     GROUP BY referenced_content_id
-                ) q ON fc.transaction_id = q.referenced_content_id AND fc.content_type IN ('post', 'quote')
+                ) q ON fc.transaction_id = q.referenced_content_id
                 LEFT JOIN (
                     SELECT post_id,
                            COUNT(*) FILTER (WHERE vote = 'upvote') as up_votes_count,
@@ -973,9 +971,8 @@ impl DatabaseInterface for PostgresDbManager {
                            bool_or(vote = 'upvote' AND sender_pubkey = $1) as user_upvoted,
                            bool_or(vote = 'downvote' AND sender_pubkey = $1) as user_downvoted
                     FROM k_votes v
-                    WHERE EXISTS (SELECT 1 FROM followed_content fc WHERE fc.transaction_id = v.post_id)
                     GROUP BY post_id
-                ) v ON fc.transaction_id = v.post_id AND fc.content_type IN ('post', 'quote')
+                ) v ON fc.transaction_id = v.post_id
             )
             SELECT ps.id, ps.transaction_id, ps.block_time, ps.sender_pubkey,
                    ps.sender_signature, ps.base64_encoded_message, ps.content_type,
@@ -1454,7 +1451,7 @@ impl DatabaseInterface for PostgresDbManager {
                     ),
                     ARRAY[]::bytea[]
                 ) as mentioned_pubkeys,
-                CASE WHEN c.content_type IN ('post', 'quote') THEN COALESCE(reply_counts.replies_count, 0) ELSE 0 END as replies_count,
+                COALESCE(reply_counts.replies_count, 0) as replies_count,
                 COALESCE(quote_counts.quotes_count, 0) as quotes_count,
                 COALESCE(vote_counts.up_votes_count, 0) as up_votes_count,
                 COALESCE(vote_counts.down_votes_count, 0) as down_votes_count,
@@ -1477,7 +1474,7 @@ impl DatabaseInterface for PostgresDbManager {
                 FROM k_contents
                 WHERE content_type = 'reply'
                 GROUP BY referenced_content_id
-            ) reply_counts ON c.content_type IN ('post', 'quote') AND c.transaction_id = reply_counts.referenced_content_id
+            ) reply_counts ON c.transaction_id = reply_counts.referenced_content_id
             LEFT JOIN (
                 SELECT referenced_content_id, COUNT(*) as quotes_count
                 FROM k_contents
