@@ -151,4 +151,30 @@ For full documentation on installation, configuration, and usage, see the [K-dat
 
 ---
 
+## 🗑️ Content Removal with K-content-remover
+
+For operators running a **public indexer**, K-content-remover provides a simple way to remove harmful, spam, or unwanted content created by specific users from your database.
+
+### Why Use K-content-remover?
+
+Public indexers may need to remove:
+- Spam content from malicious users
+- Harmful or unwanted content from malicious users
+
+K-content-remover allows you to completely remove all content associated with a specific public key in a single, atomic operation.
+
+### Key Features
+
+- **One-time Execution**: Run on-demand when needed
+- **Dry-Run Mode**: Preview what will be deleted before committing
+- **Confirmation Required**: Safety prompt to prevent accidental deletions
+- **Atomic Transaction**: All-or-nothing deletion ensures database consistency
+- **Detailed Reporting**: Shows exactly what was removed from each table
+
+### Getting Started
+
+For full documentation on installation, configuration, and usage, see the [K-content-remover README](K-content-remover/README.md).
+
+---
+
 In case you need any support, please join us at the Kluster Discord server: https://discord.gg/vuKyjtRGKB

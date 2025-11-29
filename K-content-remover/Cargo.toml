@@ -1,5 +1,5 @@
 [package]
-name = "K-database-cleaner"
+name = "K-content-remover"
 version.workspace = true
 edition.workspace = true
 
