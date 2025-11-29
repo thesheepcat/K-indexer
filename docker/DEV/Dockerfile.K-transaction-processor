@@ -10,8 +10,8 @@ RUN apk add --no-cache \
 # Set working directory
 WORKDIR /app
 
-# Create a temporary workspace with only K-transaction-processor
-RUN printf '[workspace]\nmembers = ["K-transaction-processor"]\nresolver = "2"\n' > Cargo.toml
+# Copy the workspace Cargo.toml to get workspace.package settings
+COPY Cargo.toml ./
 
 # Copy package files
 COPY K-transaction-processor/Cargo.toml ./K-transaction-processor/
