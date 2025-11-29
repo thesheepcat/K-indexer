@@ -1,7 +1,12 @@
 [workspace]
 members = [
-    "K-transaction-processor", 
+    "K-transaction-processor",
     "K-webserver",
-    "K-database-cleaner"
+    "K-database-cleaner",
+    "K-content-remover"
 ]
 resolver = "2"
+
+[workspace.package]
+version = "0.1.12"
+edition = "2024"
