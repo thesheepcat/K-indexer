@@ -12,7 +12,7 @@ WORKDIR /app
 
 # Copy the workspace Cargo.toml and modify it to only include K-transaction-processor
 COPY Cargo.toml ./
-RUN sed -i 's/members = \[.*\]/members = ["K-transaction-processor"]/' Cargo.toml
+RUN sed -i '/members = \[/,/\]/c\members = ["K-transaction-processor"]' Cargo.toml
 
 # Copy package files
 COPY K-transaction-processor/Cargo.toml ./K-transaction-processor/
