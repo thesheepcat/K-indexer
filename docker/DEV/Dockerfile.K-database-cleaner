@@ -10,8 +10,9 @@ RUN apk add --no-cache \
 # Set working directory
 WORKDIR /app
 
-# Copy the workspace Cargo.toml to get workspace.package settings
+# Copy the workspace Cargo.toml and modify it to only include K-database-cleaner
 COPY Cargo.toml ./
+RUN sed -i 's/members = \[.*\]/members = ["K-database-cleaner"]/' Cargo.toml
 
 # Copy package files
 COPY K-database-cleaner/Cargo.toml ./K-database-cleaner/

@@ -10,8 +10,9 @@ RUN apk add --no-cache \
 # Set working directory
 WORKDIR /app
 
-# Copy the workspace Cargo.toml to get workspace.package settings
+# Copy the workspace Cargo.toml and modify it to only include K-webserver
 COPY Cargo.toml ./
+RUN sed -i 's/members = \[.*\]/members = ["K-webserver"]/' Cargo.toml
 
 # Copy package files
 COPY K-webserver/Cargo.toml ./K-webserver/
