@@ -14,6 +14,12 @@ services:
     command: -c shared_preload_libraries=pg_stat_statements -c pg_stat_statements.max=10000 -c pg_stat_statements.track=all -c pg_stat_statements.save=on
     volumes:
       - /var/${DB_NAME}/:/var/lib/postgresql/data/
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   simply-kaspa-indexer:
     profiles: ["public-indexer", "personal-indexer"]
@@ -23,7 +29,14 @@ services:
     network_mode: "host"
     command: -s ws://${KASPA_NODE_ADDRESS}:${KASPA_NODE_PORT} -l localhost:8501 -n ${NETWORK} -d postgres://${DB_USER}:${DB_PASSWORD}@0.0.0.0:${DB_PORT}/${DB_NAME} --prune-db="0 * * * *" --retention=1h --disable=virtual_chain_processing,transaction_acceptance,blocks_table,block_parent_table,blocks_transactions_table,transactions_inputs_table,transactions_outputs_table,addresses_transactions_table,initial_utxo_import,vcp_wait_for_sync --exclude-fields=block_accepted_id_merkle_root,block_merge_set_blues_hashes,block_merge_set_reds_hashes,block_selected_parent_hash,block_bits,block_blue_work,block_blue_score,block_daa_score,block_hash_merkle_root,block_nonce,block_pruning_point,block_timestamp,block_utxo_commitment,block_version,tx_subnetwork_id,tx_hash,tx_mass,tx_in_previous_outpoint,tx_in_signature_script,tx_in_sig_op_count,tx_in_block_time,tx_out_amount,tx_out_script_public_key,tx_out_script_public_key_address,tx_out_block_time
     depends_on:
-      - k-indexer-db
+      k-indexer-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "netstat -tuln | grep ':8501 ' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
   k-transaction-processor:
     profiles: ["public-indexer", "personal-indexer"]
@@ -33,8 +46,16 @@ services:
     network_mode: "host"
     command: --upgrade-db --network ${NETWORK} --db-host localhost --db-port ${DB_PORT} --db-name ${DB_NAME} --db-user ${DB_USER} --db-password ${DB_PASSWORD} --db-max-connections 10 --workers 4 --channel transaction_channel --retry-attempts 3 --retry-delay 1000
     depends_on:
-      - k-indexer-db
-      - simply-kaspa-indexer
+      k-indexer-db:
+        condition: service_healthy
+      simply-kaspa-indexer:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f K-transaction-processor || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
   k-webserver:
     profiles: ["public-indexer", "personal-indexer"]
@@ -44,9 +65,18 @@ services:
     network_mode: "host"
     command: --db-host localhost --db-port ${DB_PORT} --db-name ${DB_NAME} --db-user ${DB_USER} --db-password ${DB_PASSWORD} --bind-address 0.0.0.0:${WEBSERVER_PORT} --worker-threads 6 --db-max-connections 18 --request-timeout 30 --rate-limit 200
     depends_on:
-      - k-indexer-db
-      - simply-kaspa-indexer
-      - k-transaction-processor
+      k-indexer-db:
+        condition: service_healthy
+      simply-kaspa-indexer:
+        condition: service_healthy
+      k-transaction-processor:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:${WEBSERVER_PORT}/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   k-database-cleaner:
     profiles: ["personal-indexer"]
@@ -56,5 +86,27 @@ services:
     network_mode: "host"
     command: --user ${USER_PUBKEY} --data-retention ${DATA_RETENTION} --purge-interval ${PURGE_INTERVAL} --db-host localhost --db-port ${DB_PORT} --db-name ${DB_NAME} --db-user ${DB_USER} --db-password ${DB_PASSWORD} --db-max-connections 2
     depends_on:
-      - k-indexer-db
-      - k-transaction-processor
+      k-indexer-db:
+        condition: service_healthy
+      k-transaction-processor:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f K-database-cleaner || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  portainer:
+    profiles: ["public-indexer", "personal-indexer"]
+    container_name: portainer
+    image: portainer/portainer-ce:latest
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer_data:/data
+
+volumes:
+  portainer_data:

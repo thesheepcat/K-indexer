@@ -121,3 +121,110 @@ jobs:
           ${{ github.ref == 'refs/heads/master' && 'thesheepcat/k-database-cleaner:latest' || 'thesheepcat/k-database-cleaner:dev' }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
+
+  build-content-remover:
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Login to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+    - name: Build and push K-content-remover
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ${{ github.ref == 'refs/heads/master' && './docker/PROD/Dockerfile.K-content-remover' || './docker/DEV/Dockerfile.K-content-remover' }}
+        push: true
+        tags: |
+          ${{ github.ref == 'refs/heads/master' && 'thesheepcat/k-content-remover:latest' || 'thesheepcat/k-content-remover:dev' }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+  release:
+    if: github.ref == 'refs/heads/master'
+    needs: [test, build-transaction-processor, build-webserver, build-database-cleaner, build-content-remover]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Rust
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Cache cargo registry
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Build release binaries
+      run: |
+        cargo build --release --bin K-transaction-processor
+        cargo build --release --bin K-webserver
+        cargo build --release --bin K-database-cleaner
+        cargo build --release --bin K-content-remover
+
+    - name: Create release archives
+      run: |
+        mkdir -p release-artifacts
+        tar -czf release-artifacts/K-transaction-processor-linux-x86_64.tar.gz -C target/release K-transaction-processor
+        tar -czf release-artifacts/K-webserver-linux-x86_64.tar.gz -C target/release K-webserver
+        tar -czf release-artifacts/K-database-cleaner-linux-x86_64.tar.gz -C target/release K-database-cleaner
+        tar -czf release-artifacts/K-content-remover-linux-x86_64.tar.gz -C target/release K-content-remover
+
+    - name: Extract version from Cargo.toml
+      id: tag
+      run: |
+        VERSION=$(grep -m1 'version = ' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+        echo "tag=v${VERSION}" >> $GITHUB_OUTPUT
+        echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ steps.tag.outputs.tag }}
+        name: Release ${{ steps.tag.outputs.version }}
+        draft: false
+        prerelease: false
+        files: |
+          release-artifacts/K-transaction-processor-linux-x86_64.tar.gz
+          release-artifacts/K-webserver-linux-x86_64.tar.gz
+          release-artifacts/K-database-cleaner-linux-x86_64.tar.gz
+          release-artifacts/K-content-remover-linux-x86_64.tar.gz
+        body: |
+          ## Linux x86_64 Binaries
+
+          This release contains compiled binaries for all K-indexer modules:
+          - K-transaction-processor
+          - K-webserver
+          - K-database-cleaner
+          - K-content-remover
+
+          **Platform:** Linux (Ubuntu) x86_64
+
+          ### Installation
+          ```bash
+          # Extract the archive
+          tar -xzf <module-name>-linux-x86_64.tar.gz
+
+          # Run the binary
+          ./<module-name>
+          ```
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
