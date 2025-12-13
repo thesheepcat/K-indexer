@@ -122,37 +122,9 @@ jobs:
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
-  build-content-remover:
-    needs: test
-    runs-on: ubuntu-latest
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
-
-    - name: Login to Docker Hub
-      uses: docker/login-action@v3
-      with:
-        username: ${{ secrets.DOCKERHUB_USERNAME }}
-        password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-    - name: Build and push K-content-remover
-      uses: docker/build-push-action@v5
-      with:
-        context: .
-        file: ${{ github.ref == 'refs/heads/master' && './docker/PROD/Dockerfile.K-content-remover' || './docker/DEV/Dockerfile.K-content-remover' }}
-        push: true
-        tags: |
-          ${{ github.ref == 'refs/heads/master' && 'thesheepcat/k-content-remover:latest' || 'thesheepcat/k-content-remover:dev' }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
-
   release:
     if: github.ref == 'refs/heads/master'
-    needs: [test, build-transaction-processor, build-webserver, build-database-cleaner, build-content-remover]
+    needs: [test, build-transaction-processor, build-webserver, build-database-cleaner]
     runs-on: ubuntu-latest
     permissions:
       contents: write
