@@ -112,7 +112,27 @@ The following services will be activated:
 - k-transaction-processor
 - k-webserver
 - k-database-cleaner (only if set as "personal indexer")
+- portainer (container management UI)
 
+#### 4. **Monitor Services with Portainer**
+
+Portainer provides a web-based interface to monitor and manage your Docker containers.
+
+Access Portainer at:
+```
+http://localhost:9000
+```
+
+**First-time Setup:**
+- Create an admin password when prompted
+- Select "Get Started" to connect to the local Docker environment
+
+**What You Can Do:**
+- **Monitor container health**: Check running/stopped status of all services
+- **View logs**: Real-time and historical logs for troubleshooting
+- **Resource usage**: CPU, memory, and network statistics
+- **Restart containers**: Quick restart without terminal access
+- **Execute commands**: Access container shells directly from the browser
 
 ---
 
@@ -174,6 +194,32 @@ K-content-remover allows you to completely remove all content associated with a 
 ### Getting Started
 
 For full documentation on installation, configuration, and usage, see the [K-content-remover README](K-content-remover/README.md).
+
+---
+
+## 📊 K-Webserver Performance Monitoring
+
+For operators running a **public indexer**, monitoring K-webserver performance is essential to ensure optimal API response times and identify potential bottlenecks.
+
+### Why Monitor K-Webserver?
+
+Public indexers should monitor:
+- **Request rates**: Track API endpoint usage and traffic patterns
+- **Response times**: Detect performance degradation and slow queries
+- **Resource utilization**: Identify endpoints that need optimization
+- **Error rates**: Monitor HTTP status codes and failures
+
+### Monitoring Stack
+
+The K-Webserver monitoring solution provides:
+- **Real-time dashboards**: Pre-configured Grafana dashboards for all API endpoints
+- **Prometheus metrics**: Automatic collection of performance metrics every 15 seconds
+- **Rolling window analytics**: 1-minute rolling averages for request rates and response times
+- **Easy setup**: Fully automated provisioning via Docker Compose
+
+### Getting Started
+
+For complete setup instructions, configuration options, and troubleshooting, see the [K-Webserver Monitoring Guide](docker/K-WEBSERVER-MONITORING/K-WEBSERVER-MONITORING.md).
 
 ---
 
