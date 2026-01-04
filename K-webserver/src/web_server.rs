@@ -149,6 +149,9 @@ struct GetNotificationsCountQuery {
     after: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct GetUsersCountQuery {}
+
 impl WebServer {
     pub async fn new(db: Arc<dyn DatabaseInterface>, server_config: ServerConfig) -> Self {
         let api_handlers = ApiHandlers::new(db.clone());
@@ -189,6 +192,7 @@ impl WebServer {
                 "/get-notifications-count",
                 get(handle_get_notifications_count),
             )
+            .route("/get-users-count", get(handle_get_users_count))
             .route("/get-notifications", get(handle_get_notifications))
             .route("/get-post-details", get(handle_get_post_details))
             .route("/get-user-details", get(handle_get_user_details))
@@ -1375,6 +1379,51 @@ async fn handle_get_notifications_count(
                 Ok(api_error) => {
                     let status_code = match api_error.code.as_str() {
                         "MISSING_PARAMETER" | "INVALID_USER_KEY" => StatusCode::BAD_REQUEST,
+                        _ => StatusCode::INTERNAL_SERVER_ERROR,
+                    };
+                    Err((status_code, Json(api_error)))
+                }
+                Err(_) => {
+                    let error = ApiError {
+                        error: "Internal server error".to_string(),
+                        code: "INTERNAL_ERROR".to_string(),
+                    };
+                    Err((StatusCode::INTERNAL_SERVER_ERROR, Json(error)))
+                }
+            }
+        }
+    }
+}
+
+async fn handle_get_users_count(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    State(app_state): State<Arc<AppState>>,
+    Query(_params): Query<GetUsersCountQuery>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ApiError>)> {
+    // Check rate limit first
+    check_rate_limit(&app_state, addr).await?;
+
+    // Use the API handler to get users count
+    match app_state.api_handlers.get_users_count().await {
+        Ok(response_json) => {
+            // Parse the JSON response back to a generic JSON value
+            match serde_json::from_str::<serde_json::Value>(&response_json) {
+                Ok(response) => Ok(Json(response)),
+                Err(err) => {
+                    log_error!("Failed to parse users count response: {}", err);
+                    let error = ApiError {
+                        error: "Internal server error".to_string(),
+                        code: "INTERNAL_ERROR".to_string(),
+                    };
+                    Err((StatusCode::INTERNAL_SERVER_ERROR, Json(error)))
+                }
+            }
+        }
+        Err(error_json) => {
+            // Parse the error response
+            match serde_json::from_str::<ApiError>(&error_json) {
+                Ok(api_error) => {
+                    let status_code = match api_error.code.as_str() {
                         _ => StatusCode::INTERNAL_SERVER_ERROR,
                     };
                     Err((status_code, Json(api_error)))

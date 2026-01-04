@@ -154,6 +154,9 @@ pub trait DatabaseInterface: Send + Sync {
         after: Option<String>,
     ) -> DatabaseResult<u64>;
 
+    // Get count of users (broadcasts in k_broadcasts table)
+    async fn get_users_count(&self) -> DatabaseResult<u64>;
+
     // Get network type from k_vars table
     async fn get_network(&self) -> DatabaseResult<String>;
 

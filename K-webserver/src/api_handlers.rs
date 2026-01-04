@@ -1337,6 +1337,34 @@ impl ApiHandlers {
         }
     }
 
+    pub async fn get_users_count(&self) -> Result<String, String> {
+        // Get users count from database
+        match self.db.get_users_count().await {
+            Ok(count) => {
+                let response = serde_json::json!({
+                    "count": count
+                });
+                match serde_json::to_string(&response) {
+                    Ok(json_response) => Ok(json_response),
+                    Err(err) => {
+                        log_error!("Failed to serialize users count response: {}", err);
+                        Err(self.create_error_response(
+                            "Internal server error during serialization",
+                            "SERIALIZATION_ERROR",
+                        ))
+                    }
+                }
+            }
+            Err(err) => {
+                log_error!("Database error while getting users count: {}", err);
+                Err(self.create_error_response(
+                    "Internal server error during database query",
+                    "DATABASE_ERROR",
+                ))
+            }
+        }
+    }
+
     /// Create a standardized error response
     fn create_error_response(&self, message: &str, code: &str) -> String {
         let error = ApiError {

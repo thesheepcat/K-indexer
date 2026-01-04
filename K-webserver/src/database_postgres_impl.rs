@@ -2721,6 +2721,20 @@ impl DatabaseInterface for PostgresDbManager {
             .map_err(|e| DatabaseError::QueryError(e.to_string()))
     }
 
+    async fn get_users_count(&self) -> DatabaseResult<u64> {
+        let row = sqlx::query(
+            r#"
+            SELECT COUNT(*) as count FROM k_broadcasts
+            "#,
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
+
+        let count: i64 = row.get("count");
+        Ok(count as u64)
+    }
+
     async fn get_stats(&self) -> DatabaseResult<crate::database_trait::DatabaseStats> {
         let row = sqlx::query(
             r#"
