@@ -10,3 +10,4 @@ K-webserver/Cargo.lock
 K-webserver/locust/__pycache__
 Cargo.lock
 /target
+test-endpoint.sh

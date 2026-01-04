@@ -323,7 +323,7 @@ impl ApiHandlers {
 
         let mut all_posts = Vec::new();
 
-        for (k_broadcast_record, is_blocked) in broadcasts_result.items {
+        for (k_broadcast_record, is_blocked, is_followed) in broadcasts_result.items {
             let mut server_user_post = ServerUserPost::from_k_broadcast_record_with_block_status(
                 &k_broadcast_record,
                 is_blocked,
@@ -332,6 +332,7 @@ impl ApiHandlers {
             // Enrich with user profile data from broadcasts (self-enrichment)
             server_user_post.user_nickname = Some(k_broadcast_record.base64_encoded_nickname);
             server_user_post.user_profile_image = k_broadcast_record.base64_encoded_profile_image;
+            server_user_post.followed_user = Some(is_followed);
 
             all_posts.push(server_user_post);
         }

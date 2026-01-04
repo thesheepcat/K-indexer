@@ -203,7 +203,7 @@ impl DatabaseInterface for PostgresDbManager {
         &self,
         requester_pubkey: &str,
         options: QueryOptions,
-    ) -> DatabaseResult<PaginatedResult<(KBroadcastRecord, bool)>> {
+    ) -> DatabaseResult<PaginatedResult<(KBroadcastRecord, bool, bool)>> {
         let requester_pubkey_bytes = Self::decode_hex_to_bytes(requester_pubkey)?;
         let limit = options.limit.unwrap_or(20) as i64;
         let offset_limit = limit + 1;
@@ -216,9 +216,14 @@ impl DatabaseInterface for PostgresDbManager {
                 CASE
                     WHEN kb.blocked_user_pubkey IS NOT NULL THEN true
                     ELSE false
-                END as is_blocked
+                END as is_blocked,
+                CASE
+                    WHEN kf.followed_user_pubkey IS NOT NULL THEN true
+                    ELSE false
+                END as is_followed
             FROM k_broadcasts b
             LEFT JOIN k_blocks kb ON kb.sender_pubkey = $1 AND kb.blocked_user_pubkey = b.sender_pubkey
+            LEFT JOIN k_follows kf ON kf.sender_pubkey = $1 AND kf.followed_user_pubkey = b.sender_pubkey
             WHERE 1=1
             "#,
         );
@@ -287,6 +292,7 @@ impl DatabaseInterface for PostgresDbManager {
             let sender_pubkey: Vec<u8> = row.get("sender_pubkey");
             let sender_signature: Vec<u8> = row.get("sender_signature");
             let is_blocked: bool = row.get("is_blocked");
+            let is_followed: bool = row.get("is_followed");
 
             let broadcast_record = KBroadcastRecord {
                 id: row.get::<i64, _>("id"),
@@ -299,7 +305,7 @@ impl DatabaseInterface for PostgresDbManager {
                 base64_encoded_message: row.get("base64_encoded_message"),
             };
 
-            broadcasts_with_block_status.push((broadcast_record, is_blocked));
+            broadcasts_with_block_status.push((broadcast_record, is_blocked, is_followed));
         }
 
         let has_more = broadcasts_with_block_status.len() > limit as usize;
@@ -310,7 +316,7 @@ impl DatabaseInterface for PostgresDbManager {
         // Extract just the broadcast records for pagination metadata calculation
         let broadcast_records: Vec<KBroadcastRecord> = broadcasts_with_block_status
             .iter()
-            .map(|(record, _)| record.clone())
+            .map(|(record, _, _)| record.clone())
             .collect();
         let pagination =
             self.create_compound_pagination_metadata(&broadcast_records, limit as u32, has_more);

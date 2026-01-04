@@ -67,7 +67,7 @@ pub trait DatabaseInterface: Send + Sync {
         &self,
         requester_pubkey: &str,
         options: QueryOptions,
-    ) -> DatabaseResult<PaginatedResult<(KBroadcastRecord, bool)>>;
+    ) -> DatabaseResult<PaginatedResult<(KBroadcastRecord, bool, bool)>>;
 
     async fn get_user_details(
         &self,
