@@ -87,6 +87,20 @@ pub trait DatabaseInterface: Send + Sync {
         options: QueryOptions,
     ) -> DatabaseResult<PaginatedResult<KBroadcastRecord>>;
 
+    async fn get_users_following(
+        &self,
+        requester_pubkey: &str,
+        user_pubkey: &str,
+        options: QueryOptions,
+    ) -> DatabaseResult<PaginatedResult<(KBroadcastRecord, bool)>>;
+
+    async fn get_users_followers(
+        &self,
+        requester_pubkey: &str,
+        user_pubkey: &str,
+        options: QueryOptions,
+    ) -> DatabaseResult<PaginatedResult<(KBroadcastRecord, bool)>>;
+
     // NEW: k_contents table - Get all posts using unified content table (excludes blocked users)
     async fn get_all_posts(
         &self,

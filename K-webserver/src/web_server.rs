@@ -143,6 +143,28 @@ struct GetFollowedUsersQuery {
 }
 
 #[derive(Debug, Deserialize)]
+struct GetUsersFollowingQuery {
+    #[serde(rename = "requesterPubkey")]
+    requester_pubkey: Option<String>,
+    #[serde(rename = "userPubkey")]
+    user_pubkey: Option<String>,
+    limit: Option<u32>,
+    before: Option<String>,
+    after: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GetUsersFollowersQuery {
+    #[serde(rename = "requesterPubkey")]
+    requester_pubkey: Option<String>,
+    #[serde(rename = "userPubkey")]
+    user_pubkey: Option<String>,
+    limit: Option<u32>,
+    before: Option<String>,
+    after: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
 struct GetNotificationsCountQuery {
     #[serde(rename = "requesterPubkey")]
     requester_pubkey: Option<String>,
@@ -186,18 +208,20 @@ impl WebServer {
                 get(handle_get_contents_following),
             )
             .route("/get-users", get(handle_get_users))
+            .route("/get-users-count", get(handle_get_users_count))
             .route("/get-replies", get(handle_get_replies))
             .route("/get-mentions", get(handle_get_mentions))
             .route(
                 "/get-notifications-count",
                 get(handle_get_notifications_count),
             )
-            .route("/get-users-count", get(handle_get_users_count))
             .route("/get-notifications", get(handle_get_notifications))
             .route("/get-post-details", get(handle_get_post_details))
             .route("/get-user-details", get(handle_get_user_details))
             .route("/get-blocked-users", get(handle_get_blocked_users))
             .route("/get-followed-users", get(handle_get_followed_users))
+            .route("/get-users-following", get(handle_get_users_following))
+            .route("/get-users-followers", get(handle_get_users_followers))
             .layer(prometheus_layer)
             .layer(TimeoutLayer::new(timeout_duration))
             .layer(RequestBodyLimitLayer::new(1024 * 1024)) // 1MB limit
@@ -1301,6 +1325,218 @@ async fn handle_get_followed_users(
                 Ok(users_response) => Ok(Json(users_response)),
                 Err(err) => {
                     log_error!("Failed to parse paginated followed users response: {}", err);
+                    let error = ApiError {
+                        error: "Internal server error".to_string(),
+                        code: "INTERNAL_ERROR".to_string(),
+                    };
+                    Err((StatusCode::INTERNAL_SERVER_ERROR, Json(error)))
+                }
+            }
+        }
+        Err(error_json) => {
+            // Parse the error response
+            match serde_json::from_str::<ApiError>(&error_json) {
+                Ok(api_error) => {
+                    let status_code = match api_error.code.as_str() {
+                        "MISSING_PARAMETER" | "INVALID_USER_KEY" | "INVALID_LIMIT" => {
+                            StatusCode::BAD_REQUEST
+                        }
+                        _ => StatusCode::INTERNAL_SERVER_ERROR,
+                    };
+                    Err((status_code, Json(api_error)))
+                }
+                Err(_) => {
+                    let error = ApiError {
+                        error: "Internal server error".to_string(),
+                        code: "INTERNAL_ERROR".to_string(),
+                    };
+                    Err((StatusCode::INTERNAL_SERVER_ERROR, Json(error)))
+                }
+            }
+        }
+    }
+}
+
+async fn handle_get_users_following(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    State(app_state): State<Arc<AppState>>,
+    Query(params): Query<GetUsersFollowingQuery>,
+) -> Result<Json<PaginatedUsersResponse>, (StatusCode, Json<ApiError>)> {
+    // Check rate limit first
+    check_rate_limit(&app_state, addr).await?;
+
+    // Check if requesterPubkey parameter is provided
+    let requester_pubkey = match params.requester_pubkey {
+        Some(pubkey) => pubkey,
+        None => {
+            let error = ApiError {
+                error: "Missing required parameter: requesterPubkey".to_string(),
+                code: "MISSING_PARAMETER".to_string(),
+            };
+            return Err((StatusCode::BAD_REQUEST, Json(error)));
+        }
+    };
+
+    // Check if userPubkey parameter is provided
+    let user_pubkey = match params.user_pubkey {
+        Some(pubkey) => pubkey,
+        None => {
+            let error = ApiError {
+                error: "Missing required parameter: userPubkey".to_string(),
+                code: "MISSING_PARAMETER".to_string(),
+            };
+            return Err((StatusCode::BAD_REQUEST, Json(error)));
+        }
+    };
+
+    // Validate required limit parameter
+    let limit = match params.limit {
+        Some(limit) => {
+            if limit < 1 || limit > 100 {
+                let error = ApiError {
+                    error: "Limit parameter must be between 1 and 100".to_string(),
+                    code: "INVALID_LIMIT".to_string(),
+                };
+                return Err((StatusCode::BAD_REQUEST, Json(error)));
+            }
+            limit
+        }
+        None => {
+            let error = ApiError {
+                error: "Missing required parameter: limit".to_string(),
+                code: "MISSING_PARAMETER".to_string(),
+            };
+            return Err((StatusCode::BAD_REQUEST, Json(error)));
+        }
+    };
+
+    // Use the API handler to get paginated users following
+    match app_state
+        .api_handlers
+        .get_users_following_paginated(
+            &requester_pubkey,
+            &user_pubkey,
+            limit,
+            params.before,
+            params.after,
+        )
+        .await
+    {
+        Ok(response_json) => {
+            // Parse the JSON response back to PaginatedUsersResponse
+            match serde_json::from_str::<PaginatedUsersResponse>(&response_json) {
+                Ok(users_response) => Ok(Json(users_response)),
+                Err(err) => {
+                    log_error!(
+                        "Failed to parse paginated users following response: {}",
+                        err
+                    );
+                    let error = ApiError {
+                        error: "Internal server error".to_string(),
+                        code: "INTERNAL_ERROR".to_string(),
+                    };
+                    Err((StatusCode::INTERNAL_SERVER_ERROR, Json(error)))
+                }
+            }
+        }
+        Err(error_json) => {
+            // Parse the error response
+            match serde_json::from_str::<ApiError>(&error_json) {
+                Ok(api_error) => {
+                    let status_code = match api_error.code.as_str() {
+                        "MISSING_PARAMETER" | "INVALID_USER_KEY" | "INVALID_LIMIT" => {
+                            StatusCode::BAD_REQUEST
+                        }
+                        _ => StatusCode::INTERNAL_SERVER_ERROR,
+                    };
+                    Err((status_code, Json(api_error)))
+                }
+                Err(_) => {
+                    let error = ApiError {
+                        error: "Internal server error".to_string(),
+                        code: "INTERNAL_ERROR".to_string(),
+                    };
+                    Err((StatusCode::INTERNAL_SERVER_ERROR, Json(error)))
+                }
+            }
+        }
+    }
+}
+
+async fn handle_get_users_followers(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    State(app_state): State<Arc<AppState>>,
+    Query(params): Query<GetUsersFollowersQuery>,
+) -> Result<Json<PaginatedUsersResponse>, (StatusCode, Json<ApiError>)> {
+    // Check rate limit first
+    check_rate_limit(&app_state, addr).await?;
+
+    // Check if requesterPubkey parameter is provided
+    let requester_pubkey = match params.requester_pubkey {
+        Some(pubkey) => pubkey,
+        None => {
+            let error = ApiError {
+                error: "Missing required parameter: requesterPubkey".to_string(),
+                code: "MISSING_PARAMETER".to_string(),
+            };
+            return Err((StatusCode::BAD_REQUEST, Json(error)));
+        }
+    };
+
+    // Check if userPubkey parameter is provided
+    let user_pubkey = match params.user_pubkey {
+        Some(pubkey) => pubkey,
+        None => {
+            let error = ApiError {
+                error: "Missing required parameter: userPubkey".to_string(),
+                code: "MISSING_PARAMETER".to_string(),
+            };
+            return Err((StatusCode::BAD_REQUEST, Json(error)));
+        }
+    };
+
+    // Validate required limit parameter
+    let limit = match params.limit {
+        Some(limit) => {
+            if limit < 1 || limit > 100 {
+                let error = ApiError {
+                    error: "Limit parameter must be between 1 and 100".to_string(),
+                    code: "INVALID_LIMIT".to_string(),
+                };
+                return Err((StatusCode::BAD_REQUEST, Json(error)));
+            }
+            limit
+        }
+        None => {
+            let error = ApiError {
+                error: "Missing required parameter: limit".to_string(),
+                code: "MISSING_PARAMETER".to_string(),
+            };
+            return Err((StatusCode::BAD_REQUEST, Json(error)));
+        }
+    };
+
+    // Use the API handler to get paginated users followers
+    match app_state
+        .api_handlers
+        .get_users_followers_paginated(
+            &requester_pubkey,
+            &user_pubkey,
+            limit,
+            params.before,
+            params.after,
+        )
+        .await
+    {
+        Ok(response_json) => {
+            // Parse the JSON response back to PaginatedUsersResponse
+            match serde_json::from_str::<PaginatedUsersResponse>(&response_json) {
+                Ok(users_response) => Ok(Json(users_response)),
+                Err(err) => {
+                    log_error!(
+                        "Failed to parse paginated users followers response: {}",
+                        err
+                    );
                     let error = ApiError {
                         error: "Internal server error".to_string(),
                         code: "INTERNAL_ERROR".to_string(),

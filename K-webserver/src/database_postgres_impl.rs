@@ -671,6 +671,252 @@ impl DatabaseInterface for PostgresDbManager {
         })
     }
 
+    async fn get_users_following(
+        &self,
+        requester_pubkey: &str,
+        user_pubkey: &str,
+        options: QueryOptions,
+    ) -> DatabaseResult<PaginatedResult<(KBroadcastRecord, bool)>> {
+        let user_pubkey_bytes = Self::decode_hex_to_bytes(user_pubkey)?;
+        let requester_pubkey_bytes = Self::decode_hex_to_bytes(requester_pubkey)?;
+        let limit = options.limit.unwrap_or(20) as i64;
+        let offset_limit = limit + 1;
+
+        let mut query = String::from(
+            r#"
+            SELECT kf.id, kf.transaction_id, kf.block_time, kf.followed_user_pubkey as sender_pubkey, kf.sender_signature,
+                   COALESCE(b.base64_encoded_nickname, '') as base64_encoded_nickname,
+                   b.base64_encoded_profile_image,
+                   COALESCE(b.base64_encoded_message, '') as base64_encoded_message,
+                   CASE WHEN kf2.id IS NOT NULL THEN true ELSE false END as is_followed_by_requester
+            FROM k_follows kf
+            LEFT JOIN k_broadcasts b ON b.sender_pubkey = kf.followed_user_pubkey
+            LEFT JOIN k_follows kf2 ON kf2.sender_pubkey = $2 AND kf2.followed_user_pubkey = kf.followed_user_pubkey
+            WHERE kf.sender_pubkey = $1
+            "#,
+        );
+
+        let mut bind_count = 2;
+
+        if let Some(before_cursor) = &options.before {
+            if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
+                bind_count += 2;
+                query.push_str(&format!(
+                    " AND (kf.block_time < ${} OR (kf.block_time = ${} AND kf.id < ${}))",
+                    bind_count - 1,
+                    bind_count - 1,
+                    bind_count
+                ));
+            }
+        }
+
+        if let Some(after_cursor) = &options.after {
+            if let Ok((after_timestamp, after_id)) = Self::parse_compound_cursor(after_cursor) {
+                bind_count += 2;
+                query.push_str(&format!(
+                    " AND (kf.block_time > ${} OR (kf.block_time = ${} AND kf.id > ${}))",
+                    bind_count - 1,
+                    bind_count - 1,
+                    bind_count
+                ));
+            }
+        }
+
+        if options.sort_descending {
+            query.push_str(" ORDER BY kf.block_time DESC, kf.id DESC");
+        } else {
+            query.push_str(" ORDER BY kf.block_time ASC, kf.id ASC");
+        }
+
+        bind_count += 1;
+        query.push_str(&format!(" LIMIT ${}", bind_count));
+
+        let mut query_builder = sqlx::query(&query);
+        query_builder = query_builder
+            .bind(&user_pubkey_bytes)
+            .bind(&requester_pubkey_bytes);
+
+        if let Some(before_cursor) = &options.before {
+            if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
+                query_builder = query_builder.bind(before_timestamp as i64).bind(before_id);
+            }
+        }
+
+        if let Some(after_cursor) = &options.after {
+            if let Ok((after_timestamp, after_id)) = Self::parse_compound_cursor(after_cursor) {
+                query_builder = query_builder.bind(after_timestamp as i64).bind(after_id);
+            }
+        }
+
+        query_builder = query_builder.bind(offset_limit);
+
+        let rows = query_builder.fetch_all(&self.pool).await.map_err(|e| {
+            DatabaseError::QueryError(format!("Failed to fetch users following: {}", e))
+        })?;
+
+        let mut broadcasts_with_follow_status = Vec::new();
+        for row in &rows {
+            let transaction_id: Vec<u8> = row.get("transaction_id");
+            let sender_pubkey: Vec<u8> = row.get("sender_pubkey");
+            let sender_signature: Vec<u8> = row.get("sender_signature");
+            let is_followed_by_requester: bool = row.get("is_followed_by_requester");
+
+            let broadcast = KBroadcastRecord {
+                id: row.get::<i64, _>("id"),
+                transaction_id: Self::encode_bytes_to_hex(&transaction_id),
+                block_time: row.get::<i64, _>("block_time") as u64,
+                sender_pubkey: Self::encode_bytes_to_hex(&sender_pubkey),
+                sender_signature: Self::encode_bytes_to_hex(&sender_signature),
+                base64_encoded_nickname: row.get("base64_encoded_nickname"),
+                base64_encoded_profile_image: row.get("base64_encoded_profile_image"),
+                base64_encoded_message: row.get("base64_encoded_message"),
+            };
+
+            broadcasts_with_follow_status.push((broadcast, is_followed_by_requester));
+        }
+
+        let has_more = broadcasts_with_follow_status.len() > limit as usize;
+        if has_more {
+            broadcasts_with_follow_status.pop();
+        }
+
+        // Extract just the broadcasts for pagination metadata
+        let broadcasts: Vec<_> = broadcasts_with_follow_status
+            .iter()
+            .map(|(b, _)| b.clone())
+            .collect();
+        let pagination =
+            self.create_compound_pagination_metadata(&broadcasts, limit as u32, has_more);
+
+        Ok(PaginatedResult {
+            items: broadcasts_with_follow_status,
+            pagination,
+        })
+    }
+
+    async fn get_users_followers(
+        &self,
+        requester_pubkey: &str,
+        user_pubkey: &str,
+        options: QueryOptions,
+    ) -> DatabaseResult<PaginatedResult<(KBroadcastRecord, bool)>> {
+        let user_pubkey_bytes = Self::decode_hex_to_bytes(user_pubkey)?;
+        let requester_pubkey_bytes = Self::decode_hex_to_bytes(requester_pubkey)?;
+        let limit = options.limit.unwrap_or(20) as i64;
+        let offset_limit = limit + 1;
+
+        let mut query = String::from(
+            r#"
+            SELECT kf.id, kf.transaction_id, kf.block_time, kf.sender_pubkey, kf.sender_signature,
+                   COALESCE(b.base64_encoded_nickname, '') as base64_encoded_nickname,
+                   b.base64_encoded_profile_image,
+                   COALESCE(b.base64_encoded_message, '') as base64_encoded_message,
+                   CASE WHEN kf2.id IS NOT NULL THEN true ELSE false END as is_followed_by_requester
+            FROM k_follows kf
+            LEFT JOIN k_broadcasts b ON b.sender_pubkey = kf.sender_pubkey
+            LEFT JOIN k_follows kf2 ON kf2.sender_pubkey = $2 AND kf2.followed_user_pubkey = kf.sender_pubkey
+            WHERE kf.followed_user_pubkey = $1
+            "#,
+        );
+
+        let mut bind_count = 2;
+
+        if let Some(before_cursor) = &options.before {
+            if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
+                bind_count += 2;
+                query.push_str(&format!(
+                    " AND (kf.block_time < ${} OR (kf.block_time = ${} AND kf.id < ${}))",
+                    bind_count - 1,
+                    bind_count - 1,
+                    bind_count
+                ));
+            }
+        }
+
+        if let Some(after_cursor) = &options.after {
+            if let Ok((after_timestamp, after_id)) = Self::parse_compound_cursor(after_cursor) {
+                bind_count += 2;
+                query.push_str(&format!(
+                    " AND (kf.block_time > ${} OR (kf.block_time = ${} AND kf.id > ${}))",
+                    bind_count - 1,
+                    bind_count - 1,
+                    bind_count
+                ));
+            }
+        }
+
+        if options.sort_descending {
+            query.push_str(" ORDER BY kf.block_time DESC, kf.id DESC");
+        } else {
+            query.push_str(" ORDER BY kf.block_time ASC, kf.id ASC");
+        }
+
+        bind_count += 1;
+        query.push_str(&format!(" LIMIT ${}", bind_count));
+
+        let mut query_builder = sqlx::query(&query);
+        query_builder = query_builder
+            .bind(&user_pubkey_bytes)
+            .bind(&requester_pubkey_bytes);
+
+        if let Some(before_cursor) = &options.before {
+            if let Ok((before_timestamp, before_id)) = Self::parse_compound_cursor(before_cursor) {
+                query_builder = query_builder.bind(before_timestamp as i64).bind(before_id);
+            }
+        }
+
+        if let Some(after_cursor) = &options.after {
+            if let Ok((after_timestamp, after_id)) = Self::parse_compound_cursor(after_cursor) {
+                query_builder = query_builder.bind(after_timestamp as i64).bind(after_id);
+            }
+        }
+
+        query_builder = query_builder.bind(offset_limit);
+
+        let rows = query_builder.fetch_all(&self.pool).await.map_err(|e| {
+            DatabaseError::QueryError(format!("Failed to fetch users followers: {}", e))
+        })?;
+
+        let mut broadcasts_with_follow_status = Vec::new();
+        for row in &rows {
+            let transaction_id: Vec<u8> = row.get("transaction_id");
+            let sender_pubkey: Vec<u8> = row.get("sender_pubkey");
+            let sender_signature: Vec<u8> = row.get("sender_signature");
+            let is_followed_by_requester: bool = row.get("is_followed_by_requester");
+
+            let broadcast = KBroadcastRecord {
+                id: row.get::<i64, _>("id"),
+                transaction_id: Self::encode_bytes_to_hex(&transaction_id),
+                block_time: row.get::<i64, _>("block_time") as u64,
+                sender_pubkey: Self::encode_bytes_to_hex(&sender_pubkey),
+                sender_signature: Self::encode_bytes_to_hex(&sender_signature),
+                base64_encoded_nickname: row.get("base64_encoded_nickname"),
+                base64_encoded_profile_image: row.get("base64_encoded_profile_image"),
+                base64_encoded_message: row.get("base64_encoded_message"),
+            };
+
+            broadcasts_with_follow_status.push((broadcast, is_followed_by_requester));
+        }
+
+        let has_more = broadcasts_with_follow_status.len() > limit as usize;
+        if has_more {
+            broadcasts_with_follow_status.pop();
+        }
+
+        // Extract just the broadcasts for pagination metadata
+        let broadcasts: Vec<_> = broadcasts_with_follow_status
+            .iter()
+            .map(|(b, _)| b.clone())
+            .collect();
+        let pagination =
+            self.create_compound_pagination_metadata(&broadcasts, limit as u32, has_more);
+
+        Ok(PaginatedResult {
+            items: broadcasts_with_follow_status,
+            pagination,
+        })
+    }
+
     // Optimized single-query method for get-posts-watching API with blocking awareness
 
     async fn get_all_posts(
