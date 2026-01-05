@@ -73,7 +73,7 @@ pub trait DatabaseInterface: Send + Sync {
         &self,
         user_public_key: &str,
         requester_pubkey: &str,
-    ) -> DatabaseResult<Option<(KBroadcastRecord, bool, bool, i64, i64)>>;
+    ) -> DatabaseResult<Option<(KBroadcastRecord, bool, bool, i64, i64, i64)>>;
 
     async fn get_blocked_users_by_requester(
         &self,

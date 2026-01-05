@@ -1022,7 +1022,7 @@ impl ApiHandlers {
 
         // Handle user data (even if no broadcast exists)
         let server_user_post = match broadcast_result {
-            Some((record, blocked, followed, followers_count, following_count)) => {
+            Some((record, blocked, followed, followers_count, following_count, blocked_count)) => {
                 // Check if this is a dummy record (no real broadcast data)
                 if record.id == 0 && record.transaction_id.is_empty() {
                     // User has no broadcast data - create minimal response with empty fields
@@ -1038,6 +1038,7 @@ impl ApiHandlers {
                         followed_user: Some(followed), // Use the actual following status from database
                         followers_count: Some(followers_count),
                         following_count: Some(following_count),
+                        blocked_count: Some(blocked_count),
                     }
                 } else {
                     // User has real broadcast data
@@ -1049,6 +1050,7 @@ impl ApiHandlers {
                     user_post.user_profile_image = record.base64_encoded_profile_image;
                     user_post.followers_count = Some(followers_count);
                     user_post.following_count = Some(following_count);
+                    user_post.blocked_count = Some(blocked_count);
                     user_post
                 }
             }
@@ -1066,6 +1068,7 @@ impl ApiHandlers {
                     followed_user: Some(false),
                     followers_count: Some(0),
                     following_count: Some(0),
+                    blocked_count: Some(0),
                 }
             }
         };

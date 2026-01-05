@@ -331,7 +331,7 @@ impl DatabaseInterface for PostgresDbManager {
         &self,
         user_public_key: &str,
         requester_pubkey: &str,
-    ) -> DatabaseResult<Option<(KBroadcastRecord, bool, bool, i64, i64)>> {
+    ) -> DatabaseResult<Option<(KBroadcastRecord, bool, bool, i64, i64, i64)>> {
         let user_pubkey_bytes = Self::decode_hex_to_bytes(user_public_key)?;
         let requester_pubkey_bytes = Self::decode_hex_to_bytes(requester_pubkey)?;
 
@@ -355,7 +355,8 @@ impl DatabaseInterface for PostgresDbManager {
                     WHERE kf.sender_pubkey = $2 AND kf.followed_user_pubkey = $1
                 ) as is_followed,
                 (SELECT COUNT(*) FROM k_follows WHERE followed_user_pubkey = $1) as followers_count,
-                (SELECT COUNT(*) FROM k_follows WHERE sender_pubkey = $1) as following_count
+                (SELECT COUNT(*) FROM k_follows WHERE sender_pubkey = $1) as following_count,
+                (SELECT COUNT(*) FROM k_blocks WHERE sender_pubkey = $1) as blocked_count
             FROM k_broadcasts b
             WHERE b.sender_pubkey = $1
             LIMIT 1
@@ -379,6 +380,7 @@ impl DatabaseInterface for PostgresDbManager {
             let is_followed: bool = row.get("is_followed");
             let followers_count: i64 = row.get("followers_count");
             let following_count: i64 = row.get("following_count");
+            let blocked_count: i64 = row.get("blocked_count");
 
             let broadcast_record = KBroadcastRecord {
                 id: row.get::<i64, _>("id"),
@@ -397,6 +399,7 @@ impl DatabaseInterface for PostgresDbManager {
                 is_followed,
                 followers_count,
                 following_count,
+                blocked_count,
             )))
         } else {
             // No broadcast data found, need separate query for block/follow status and counts
@@ -411,7 +414,8 @@ impl DatabaseInterface for PostgresDbManager {
                         WHERE kf.sender_pubkey = $2 AND kf.followed_user_pubkey = $1
                     ) as is_followed,
                     (SELECT COUNT(*) FROM k_follows WHERE followed_user_pubkey = $1) as followers_count,
-                    (SELECT COUNT(*) FROM k_follows WHERE sender_pubkey = $1) as following_count
+                    (SELECT COUNT(*) FROM k_follows WHERE sender_pubkey = $1) as following_count,
+                    (SELECT COUNT(*) FROM k_blocks WHERE sender_pubkey = $1) as blocked_count
             "#;
 
             let status_row = sqlx::query(status_query)
@@ -427,6 +431,7 @@ impl DatabaseInterface for PostgresDbManager {
             let is_followed: bool = status_row.get("is_followed");
             let followers_count: i64 = status_row.get("followers_count");
             let following_count: i64 = status_row.get("following_count");
+            let blocked_count: i64 = status_row.get("blocked_count");
 
             // Create a minimal broadcast record with empty fields and the status
             let broadcast_record = KBroadcastRecord {
@@ -446,6 +451,7 @@ impl DatabaseInterface for PostgresDbManager {
                 is_followed,
                 followers_count,
                 following_count,
+                blocked_count,
             )))
         }
     }
