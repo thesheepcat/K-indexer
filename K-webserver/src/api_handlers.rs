@@ -357,6 +357,93 @@ impl ApiHandlers {
         }
     }
 
+    /// GET /search-users with pagination
+    /// Search users with optional filters for pubkey or nickname
+    pub async fn search_users_paginated(
+        &self,
+        limit: u32,
+        requester_pubkey: &str,
+        before: Option<String>,
+        after: Option<String>,
+        searched_user_pubkey: Option<String>,
+        searched_user_nickname: Option<String>,
+    ) -> Result<String, String> {
+        // Validate searched_user_pubkey if provided
+        if let Some(ref pubkey) = searched_user_pubkey {
+            if pubkey.len() != 66 {
+                return Err(self.create_error_response(
+                    "Invalid searched user public key format. Must be 66 hex characters.",
+                    "INVALID_USER_KEY",
+                ));
+            }
+            if !pubkey.starts_with("02") && !pubkey.starts_with("03") {
+                return Err(self.create_error_response(
+                    "Invalid searched user public key prefix. Must start with 02 or 03.",
+                    "INVALID_USER_KEY",
+                ));
+            }
+        }
+
+        let options = QueryOptions {
+            limit: Some(limit as u64),
+            before,
+            after,
+            sort_descending: true,
+        };
+
+        let broadcasts_result = match self
+            .db
+            .search_users(
+                requester_pubkey,
+                options,
+                searched_user_pubkey,
+                searched_user_nickname,
+            )
+            .await
+        {
+            Ok(result) => result,
+            Err(err) => {
+                log_error!("Database error while searching users: {}", err);
+                return Err(self.create_error_response(
+                    "Internal server error during database query",
+                    "DATABASE_ERROR",
+                ));
+            }
+        };
+
+        let mut all_posts = Vec::new();
+
+        for (k_broadcast_record, is_blocked, is_followed) in broadcasts_result.items {
+            let mut server_user_post = ServerUserPost::from_k_broadcast_record_with_block_status(
+                &k_broadcast_record,
+                is_blocked,
+            );
+
+            // Enrich with user profile data from broadcasts (self-enrichment)
+            server_user_post.user_nickname = Some(k_broadcast_record.base64_encoded_nickname);
+            server_user_post.user_profile_image = k_broadcast_record.base64_encoded_profile_image;
+            server_user_post.followed_user = Some(is_followed);
+
+            all_posts.push(server_user_post);
+        }
+
+        let response = PaginatedUsersResponse {
+            posts: all_posts,
+            pagination: broadcasts_result.pagination,
+        };
+
+        match serde_json::to_string(&response) {
+            Ok(json) => Ok(json),
+            Err(err) => {
+                log_error!("Failed to serialize search users response: {}", err);
+                Err(self.create_error_response(
+                    "Internal server error during serialization",
+                    "SERIALIZATION_ERROR",
+                ))
+            }
+        }
+    }
+
     /// GET /get-replies with pagination (Post Replies Mode)
     /// Fetch paginated replies for a specific post with cursor-based pagination and voting status
     pub async fn get_replies_paginated(
