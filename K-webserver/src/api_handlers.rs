@@ -323,7 +323,7 @@ impl ApiHandlers {
 
         let mut all_posts = Vec::new();
 
-        for (k_broadcast_record, is_blocked) in broadcasts_result.items {
+        for (k_broadcast_record, is_blocked, is_followed) in broadcasts_result.items {
             let mut server_user_post = ServerUserPost::from_k_broadcast_record_with_block_status(
                 &k_broadcast_record,
                 is_blocked,
@@ -332,6 +332,7 @@ impl ApiHandlers {
             // Enrich with user profile data from broadcasts (self-enrichment)
             server_user_post.user_nickname = Some(k_broadcast_record.base64_encoded_nickname);
             server_user_post.user_profile_image = k_broadcast_record.base64_encoded_profile_image;
+            server_user_post.followed_user = Some(is_followed);
 
             all_posts.push(server_user_post);
         }
@@ -348,6 +349,96 @@ impl ApiHandlers {
                     "Failed to serialize paginated users response with block status: {}",
                     err
                 );
+                Err(self.create_error_response(
+                    "Internal server error during serialization",
+                    "SERIALIZATION_ERROR",
+                ))
+            }
+        }
+    }
+
+    /// GET /search-users with pagination
+    /// Search users with optional filters for pubkey or nickname
+    pub async fn search_users_paginated(
+        &self,
+        limit: u32,
+        requester_pubkey: &str,
+        before: Option<String>,
+        after: Option<String>,
+        searched_user_pubkey: Option<String>,
+        searched_user_nickname: Option<String>,
+    ) -> Result<String, String> {
+        // Validate searched_user_pubkey if provided
+        if let Some(ref pubkey) = searched_user_pubkey {
+            if pubkey.len() != 66 {
+                return Err(self.create_error_response(
+                    "Invalid searched user public key format. Must be 66 hex characters.",
+                    "INVALID_USER_KEY",
+                ));
+            }
+            if !pubkey.starts_with("02") && !pubkey.starts_with("03") {
+                return Err(self.create_error_response(
+                    "Invalid searched user public key prefix. Must start with 02 or 03.",
+                    "INVALID_USER_KEY",
+                ));
+            }
+        }
+
+        let options = QueryOptions {
+            limit: Some(limit as u64),
+            before,
+            after,
+            sort_descending: true,
+        };
+
+        // Strip the 02/03 prefix from the searched pubkey to match both variants
+        let searched_pubkey_without_prefix = searched_user_pubkey.map(|pk| pk[2..].to_string());
+
+        let broadcasts_result = match self
+            .db
+            .search_users(
+                requester_pubkey,
+                options,
+                searched_pubkey_without_prefix,
+                searched_user_nickname,
+            )
+            .await
+        {
+            Ok(result) => result,
+            Err(err) => {
+                log_error!("Database error while searching users: {}", err);
+                return Err(self.create_error_response(
+                    "Internal server error during database query",
+                    "DATABASE_ERROR",
+                ));
+            }
+        };
+
+        let mut all_posts = Vec::new();
+
+        for (k_broadcast_record, is_blocked, is_followed) in broadcasts_result.items {
+            let mut server_user_post = ServerUserPost::from_k_broadcast_record_with_block_status(
+                &k_broadcast_record,
+                is_blocked,
+            );
+
+            // Enrich with user profile data from broadcasts (self-enrichment)
+            server_user_post.user_nickname = Some(k_broadcast_record.base64_encoded_nickname);
+            server_user_post.user_profile_image = k_broadcast_record.base64_encoded_profile_image;
+            server_user_post.followed_user = Some(is_followed);
+
+            all_posts.push(server_user_post);
+        }
+
+        let response = PaginatedUsersResponse {
+            posts: all_posts,
+            pagination: broadcasts_result.pagination,
+        };
+
+        match serde_json::to_string(&response) {
+            Ok(json) => Ok(json),
+            Err(err) => {
+                log_error!("Failed to serialize search users response: {}", err);
                 Err(self.create_error_response(
                     "Internal server error during serialization",
                     "SERIALIZATION_ERROR",
@@ -1021,7 +1112,7 @@ impl ApiHandlers {
 
         // Handle user data (even if no broadcast exists)
         let server_user_post = match broadcast_result {
-            Some((record, blocked, followed, followers_count, following_count)) => {
+            Some((record, blocked, followed, followers_count, following_count, blocked_count)) => {
                 // Check if this is a dummy record (no real broadcast data)
                 if record.id == 0 && record.transaction_id.is_empty() {
                     // User has no broadcast data - create minimal response with empty fields
@@ -1037,6 +1128,7 @@ impl ApiHandlers {
                         followed_user: Some(followed), // Use the actual following status from database
                         followers_count: Some(followers_count),
                         following_count: Some(following_count),
+                        blocked_count: Some(blocked_count),
                     }
                 } else {
                     // User has real broadcast data
@@ -1048,6 +1140,7 @@ impl ApiHandlers {
                     user_post.user_profile_image = record.base64_encoded_profile_image;
                     user_post.followers_count = Some(followers_count);
                     user_post.following_count = Some(following_count);
+                    user_post.blocked_count = Some(blocked_count);
                     user_post
                 }
             }
@@ -1065,6 +1158,7 @@ impl ApiHandlers {
                     followed_user: Some(false),
                     followers_count: Some(0),
                     following_count: Some(0),
+                    blocked_count: Some(0),
                 }
             }
         };
@@ -1271,6 +1365,242 @@ impl ApiHandlers {
         }
     }
 
+    pub async fn get_users_following_paginated(
+        &self,
+        requester_pubkey: &str,
+        user_pubkey: &str,
+        limit: u32,
+        before: Option<String>,
+        after: Option<String>,
+    ) -> Result<String, String> {
+        // Validate requester public key format (66 hex characters for compressed public key)
+        if requester_pubkey.len() != 66 {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Must be 66 hex characters.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        if !requester_pubkey.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Must contain only hex characters.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        // Validate compressed public key prefix (should start with 02 or 03)
+        if !requester_pubkey.starts_with("02") && !requester_pubkey.starts_with("03") {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Compressed public key must start with 02 or 03.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        // Validate user public key format (66 hex characters for compressed public key)
+        if user_pubkey.len() != 66 {
+            return Err(self.create_error_response(
+                "Invalid user public key format. Must be 66 hex characters.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        if !user_pubkey.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(self.create_error_response(
+                "Invalid user public key format. Must contain only hex characters.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        // Validate compressed public key prefix (should start with 02 or 03)
+        if !user_pubkey.starts_with("02") && !user_pubkey.starts_with("03") {
+            return Err(self.create_error_response(
+                "Invalid user public key format. Compressed public key must start with 02 or 03.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        let options = QueryOptions {
+            limit: Some(limit as u64),
+            before,
+            after,
+            sort_descending: true,
+        };
+
+        let broadcasts_result = match self
+            .db
+            .get_users_following(requester_pubkey, user_pubkey, options)
+            .await
+        {
+            Ok(result) => result,
+            Err(err) => {
+                log_error!(
+                    "Database error while querying users following for user {}: {}",
+                    user_pubkey,
+                    err
+                );
+                return Err(self.create_error_response(
+                    "Internal server error during database query",
+                    "DATABASE_ERROR",
+                ));
+            }
+        };
+
+        let mut all_posts = Vec::new();
+
+        for (k_broadcast_record, is_followed_by_requester) in broadcasts_result.items {
+            let mut server_user_post = ServerUserPost::from_k_broadcast_record(&k_broadcast_record);
+
+            // Enrich with user profile data from broadcasts (self-enrichment)
+            server_user_post.user_nickname = Some(k_broadcast_record.base64_encoded_nickname);
+            server_user_post.user_profile_image = k_broadcast_record.base64_encoded_profile_image;
+
+            // Set followed_user based on whether requester follows this user
+            server_user_post.followed_user = Some(is_followed_by_requester);
+
+            // Remove post content
+            server_user_post.post_content = String::new();
+
+            all_posts.push(server_user_post);
+        }
+
+        let response = PaginatedUsersResponse {
+            posts: all_posts,
+            pagination: broadcasts_result.pagination,
+        };
+
+        match serde_json::to_string(&response) {
+            Ok(json) => Ok(json),
+            Err(err) => {
+                log_error!(
+                    "Failed to serialize paginated users following response: {}",
+                    err
+                );
+                Err(self.create_error_response(
+                    "Internal server error during serialization",
+                    "SERIALIZATION_ERROR",
+                ))
+            }
+        }
+    }
+
+    pub async fn get_users_followers_paginated(
+        &self,
+        requester_pubkey: &str,
+        user_pubkey: &str,
+        limit: u32,
+        before: Option<String>,
+        after: Option<String>,
+    ) -> Result<String, String> {
+        // Validate requester public key format (66 hex characters for compressed public key)
+        if requester_pubkey.len() != 66 {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Must be 66 hex characters.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        if !requester_pubkey.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Must contain only hex characters.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        // Validate compressed public key prefix (should start with 02 or 03)
+        if !requester_pubkey.starts_with("02") && !requester_pubkey.starts_with("03") {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Compressed public key must start with 02 or 03.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        // Validate user public key format (66 hex characters for compressed public key)
+        if user_pubkey.len() != 66 {
+            return Err(self.create_error_response(
+                "Invalid user public key format. Must be 66 hex characters.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        if !user_pubkey.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(self.create_error_response(
+                "Invalid user public key format. Must contain only hex characters.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        // Validate compressed public key prefix (should start with 02 or 03)
+        if !user_pubkey.starts_with("02") && !user_pubkey.starts_with("03") {
+            return Err(self.create_error_response(
+                "Invalid user public key format. Compressed public key must start with 02 or 03.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        let options = QueryOptions {
+            limit: Some(limit as u64),
+            before,
+            after,
+            sort_descending: true,
+        };
+
+        let broadcasts_result = match self
+            .db
+            .get_users_followers(requester_pubkey, user_pubkey, options)
+            .await
+        {
+            Ok(result) => result,
+            Err(err) => {
+                log_error!(
+                    "Database error while querying users followers for user {}: {}",
+                    user_pubkey,
+                    err
+                );
+                return Err(self.create_error_response(
+                    "Internal server error during database query",
+                    "DATABASE_ERROR",
+                ));
+            }
+        };
+
+        let mut all_posts = Vec::new();
+
+        for (k_broadcast_record, is_followed_by_requester) in broadcasts_result.items {
+            let mut server_user_post = ServerUserPost::from_k_broadcast_record(&k_broadcast_record);
+
+            // Enrich with user profile data from broadcasts (self-enrichment)
+            server_user_post.user_nickname = Some(k_broadcast_record.base64_encoded_nickname);
+            server_user_post.user_profile_image = k_broadcast_record.base64_encoded_profile_image;
+
+            // Set followed_user based on whether requester follows this user
+            server_user_post.followed_user = Some(is_followed_by_requester);
+
+            // Remove post content
+            server_user_post.post_content = String::new();
+
+            all_posts.push(server_user_post);
+        }
+
+        let response = PaginatedUsersResponse {
+            posts: all_posts,
+            pagination: broadcasts_result.pagination,
+        };
+
+        match serde_json::to_string(&response) {
+            Ok(json) => Ok(json),
+            Err(err) => {
+                log_error!(
+                    "Failed to serialize paginated users followers response: {}",
+                    err
+                );
+                Err(self.create_error_response(
+                    "Internal server error during serialization",
+                    "SERIALIZATION_ERROR",
+                ))
+            }
+        }
+    }
+
     /// GET /get-notifications-amount
     /// Get count of notifications for a specific user, optionally with cursor
     pub async fn get_notification_count(
@@ -1328,6 +1658,34 @@ impl ApiHandlers {
                     requester_pubkey,
                     err
                 );
+                Err(self.create_error_response(
+                    "Internal server error during database query",
+                    "DATABASE_ERROR",
+                ))
+            }
+        }
+    }
+
+    pub async fn get_users_count(&self) -> Result<String, String> {
+        // Get users count from database
+        match self.db.get_users_count().await {
+            Ok(count) => {
+                let response = serde_json::json!({
+                    "count": count
+                });
+                match serde_json::to_string(&response) {
+                    Ok(json_response) => Ok(json_response),
+                    Err(err) => {
+                        log_error!("Failed to serialize users count response: {}", err);
+                        Err(self.create_error_response(
+                            "Internal server error during serialization",
+                            "SERIALIZATION_ERROR",
+                        ))
+                    }
+                }
+            }
+            Err(err) => {
+                log_error!("Database error while getting users count: {}", err);
                 Err(self.create_error_response(
                     "Internal server error during database query",
                     "DATABASE_ERROR",
