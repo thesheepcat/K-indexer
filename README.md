@@ -1,8 +1,5 @@
 # K-indexer
 
-> **⚠️ Proof of Concept - Testnet Only**  
-> This is experimental software. Use only on testnet environments.
-
 K-indexer is a simplified Kaspa transaction indexer designed specifically for indexing and serving K protocol transactions.
 
 ## 🚀 New Architecture
@@ -71,7 +68,6 @@ To run the indexer, proceed in the following way:
 Follow the [documentation here on how to run rusty-kaspa](https://kaspa.aspectron.org/running-rusty-kaspa.html)
 
 **Required Node Parameters:**
-- `--testnet`: Run on testnet (required for safety)
 - `--utxoindex`: Enable UTXO indexing
 - `--rpclisten-borsh=0.0.0.0:17120`: Enable BORSH RPC on all interfaces
 
@@ -223,4 +219,24 @@ For complete setup instructions, configuration options, and troubleshooting, see
 
 ---
 
-In case you need any support, please join us at the Kluster Discord server: https://discord.gg/vuKyjtRGKB
+## ⚠️ Important
+
+**This code is a PROOF OF CONCEPT** designed to demonstrate K's potential to the Kaspa community and showcase a real solution to genuine problems faced by users worldwide.
+
+While K has the potential to become a feature-rich, widely-adopted platform, the current version is experimental and includes:
+- 🐛 Bugs and unexpected behaviors
+- 🐌 Inefficient processes in some areas
+- 🎨 User interface/experience improvements needed
+- 🔧 Missing features and functionality
+
+**By using K, you accept these limitations as part of the development process.**
+
+---
+
+## 💬 Support & Community
+
+Need help or want to connect with other K users and developers?
+
+**Join the Kluster Discord server**: https://discord.gg/vuKyjtRGKB
+
+---

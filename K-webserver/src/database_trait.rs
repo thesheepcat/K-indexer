@@ -67,13 +67,21 @@ pub trait DatabaseInterface: Send + Sync {
         &self,
         requester_pubkey: &str,
         options: QueryOptions,
-    ) -> DatabaseResult<PaginatedResult<(KBroadcastRecord, bool)>>;
+    ) -> DatabaseResult<PaginatedResult<(KBroadcastRecord, bool, bool)>>;
+
+    async fn search_users(
+        &self,
+        requester_pubkey: &str,
+        options: QueryOptions,
+        searched_user_pubkey: Option<String>,
+        searched_user_nickname: Option<String>,
+    ) -> DatabaseResult<PaginatedResult<(KBroadcastRecord, bool, bool)>>;
 
     async fn get_user_details(
         &self,
         user_public_key: &str,
         requester_pubkey: &str,
-    ) -> DatabaseResult<Option<(KBroadcastRecord, bool, bool, i64, i64)>>;
+    ) -> DatabaseResult<Option<(KBroadcastRecord, bool, bool, i64, i64, i64)>>;
 
     async fn get_blocked_users_by_requester(
         &self,
@@ -86,6 +94,20 @@ pub trait DatabaseInterface: Send + Sync {
         requester_pubkey: &str,
         options: QueryOptions,
     ) -> DatabaseResult<PaginatedResult<KBroadcastRecord>>;
+
+    async fn get_users_following(
+        &self,
+        requester_pubkey: &str,
+        user_pubkey: &str,
+        options: QueryOptions,
+    ) -> DatabaseResult<PaginatedResult<(KBroadcastRecord, bool)>>;
+
+    async fn get_users_followers(
+        &self,
+        requester_pubkey: &str,
+        user_pubkey: &str,
+        options: QueryOptions,
+    ) -> DatabaseResult<PaginatedResult<(KBroadcastRecord, bool)>>;
 
     // NEW: k_contents table - Get all posts using unified content table (excludes blocked users)
     async fn get_all_posts(
@@ -153,6 +175,9 @@ pub trait DatabaseInterface: Send + Sync {
         requester_pubkey: &str,
         after: Option<String>,
     ) -> DatabaseResult<u64>;
+
+    // Get count of users (broadcasts in k_broadcasts table)
+    async fn get_users_count(&self) -> DatabaseResult<u64>;
 
     // Get network type from k_vars table
     async fn get_network(&self) -> DatabaseResult<String>;
