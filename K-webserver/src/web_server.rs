@@ -215,27 +215,27 @@ impl WebServer {
                 get(move || async move { metric_handle.render() }),
             )
             .route("/get-posts", get(handle_get_posts))
+            .route("/get-post-details", get(handle_get_post_details))
             .route("/get-posts-watching", get(handle_get_posts_watching))
             .route(
                 "/get-contents-following",
                 get(handle_get_contents_following),
             )
+            .route("/get-replies", get(handle_get_replies))
+            .route("/get-mentions", get(handle_get_mentions))
             .route("/get-users", get(handle_get_users))
             .route("/get-users-count", get(handle_get_users_count))
             .route("/search-users", get(handle_search_users))
-            .route("/get-replies", get(handle_get_replies))
-            .route("/get-mentions", get(handle_get_mentions))
+            .route("/get-user-details", get(handle_get_user_details))
+            .route("/get-followed-users", get(handle_get_followed_users))
+            .route("/get-users-following", get(handle_get_users_following))
+            .route("/get-users-followers", get(handle_get_users_followers))
+            .route("/get-blocked-users", get(handle_get_blocked_users))
             .route(
                 "/get-notifications-count",
                 get(handle_get_notifications_count),
             )
             .route("/get-notifications", get(handle_get_notifications))
-            .route("/get-post-details", get(handle_get_post_details))
-            .route("/get-user-details", get(handle_get_user_details))
-            .route("/get-blocked-users", get(handle_get_blocked_users))
-            .route("/get-followed-users", get(handle_get_followed_users))
-            .route("/get-users-following", get(handle_get_users_following))
-            .route("/get-users-followers", get(handle_get_users_followers))
             .layer(prometheus_layer)
             .layer(TimeoutLayer::new(timeout_duration))
             .layer(RequestBodyLimitLayer::new(1024 * 1024)) // 1MB limit
