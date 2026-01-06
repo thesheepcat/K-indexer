@@ -361,11 +361,14 @@ impl DatabaseInterface for PostgresDbManager {
         let mut bind_count = 1; // Start with 1 since we already have requester_pubkey
         let mut search_user_pubkey_bytes: Option<Vec<u8>> = None;
 
-        // Add search filter for user pubkey
+        // Add search filter for user pubkey (matches both 02 and 03 prefix variants)
         if let Some(ref pubkey) = searched_user_pubkey {
             search_user_pubkey_bytes = Some(Self::decode_hex_to_bytes(pubkey)?);
             bind_count += 1;
-            query.push_str(&format!(" AND b.sender_pubkey = ${}", bind_count));
+            query.push_str(&format!(
+                " AND encode(b.sender_pubkey, 'hex') LIKE ${}",
+                bind_count
+            ));
         }
 
         // Add search filter for nickname (decode Base64 and search plain text)
@@ -412,9 +415,10 @@ impl DatabaseInterface for PostgresDbManager {
 
         let mut query_builder = sqlx::query(&query).bind(&requester_pubkey_bytes);
 
-        // Bind search user pubkey if provided
+        // Bind search user pubkey pattern if provided (matches both 02 and 03 prefix)
         if let Some(ref pubkey_bytes) = search_user_pubkey_bytes {
-            query_builder = query_builder.bind(pubkey_bytes);
+            let hex_pattern = format!("%{}", hex::encode(pubkey_bytes));
+            query_builder = query_builder.bind(hex_pattern);
         }
 
         // Bind nickname search pattern if provided

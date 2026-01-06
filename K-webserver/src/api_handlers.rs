@@ -391,12 +391,15 @@ impl ApiHandlers {
             sort_descending: true,
         };
 
+        // Strip the 02/03 prefix from the searched pubkey to match both variants
+        let searched_pubkey_without_prefix = searched_user_pubkey.map(|pk| pk[2..].to_string());
+
         let broadcasts_result = match self
             .db
             .search_users(
                 requester_pubkey,
                 options,
-                searched_user_pubkey,
+                searched_pubkey_without_prefix,
                 searched_user_nickname,
             )
             .await
