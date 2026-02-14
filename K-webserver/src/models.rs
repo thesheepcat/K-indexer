@@ -281,6 +281,8 @@ pub struct ServerUserPost {
     pub following_count: Option<i64>,
     #[serde(rename = "blockedCount", skip_serializing_if = "Option::is_none")]
     pub blocked_count: Option<i64>,
+    #[serde(rename = "contentsCount", skip_serializing_if = "Option::is_none")]
+    pub contents_count: Option<i64>,
 }
 
 impl ServerUserPost {
@@ -298,6 +300,7 @@ impl ServerUserPost {
             followers_count: None,
             following_count: None,
             blocked_count: None,
+            contents_count: None,
         }
     }
 
@@ -326,6 +329,7 @@ impl ServerUserPost {
             followers_count: None,
             following_count: None,
             blocked_count: None,
+            contents_count: None,
         }
     }
 
@@ -355,6 +359,7 @@ impl ServerUserPost {
             followers_count: None,
             following_count: None,
             blocked_count: None,
+            contents_count: None,
         }
     }
 }

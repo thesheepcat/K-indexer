@@ -107,6 +107,10 @@ The dashboard tracks performance for the following K-webserver endpoints:
 - `/get-posts-watching`
 - `/get-contents-following`
 - `/get-users`
+- `/get-users-count`
+- `/search-users`
+- `/get-users-following`
+- `/get-users-followers`
 - `/get-replies`
 - `/get-mentions`
 - `/get-notifications-count`
@@ -115,6 +119,9 @@ The dashboard tracks performance for the following K-webserver endpoints:
 - `/get-user-details`
 - `/get-blocked-users`
 - `/get-followed-users`
+- `/get-hashtag-content`
+- `/get-trending-hashtags`
+- `/get-most-active-users`
 
 ---
 
