@@ -240,6 +240,25 @@ pub struct PaginatedNotificationsResponse {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct TrendingHashtag {
+    pub hashtag: String,
+    #[serde(rename = "usageCount")]
+    pub usage_count: u64,
+    pub rank: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TrendingHashtagsResponse {
+    #[serde(rename = "timeWindow")]
+    pub time_window: String,
+    #[serde(rename = "fromTime")]
+    pub from_time: u64,
+    #[serde(rename = "toTime")]
+    pub to_time: u64,
+    pub hashtags: Vec<TrendingHashtag>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ServerUserPost {
     pub id: String,
     #[serde(rename = "userPublicKey")]
