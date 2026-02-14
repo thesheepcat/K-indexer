@@ -21,7 +21,7 @@ use crate::config::ServerConfig;
 use crate::database_trait::DatabaseInterface;
 use crate::models::{
     ApiError, PaginatedNotificationsResponse, PaginatedPostsResponse, PaginatedRepliesResponse,
-    PaginatedUsersResponse, PostDetailsResponse, ServerUserPost,
+    PaginatedUsersResponse, PostDetailsResponse, ServerUserPost, TrendingHashtagsResponse,
 };
 
 #[derive(Debug, Clone)]
@@ -121,6 +121,23 @@ struct GetNotificationsQuery {
     limit: Option<u32>,
     before: Option<String>,
     after: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GetHashtagContentQuery {
+    hashtag: Option<String>,
+    #[serde(rename = "requesterPubkey")]
+    requester_pubkey: Option<String>,
+    limit: Option<u32>,
+    before: Option<String>,
+    after: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GetTrendingHashtagsQuery {
+    #[serde(rename = "timeWindow")]
+    time_window: Option<String>,
+    limit: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -236,6 +253,8 @@ impl WebServer {
                 get(handle_get_notifications_count),
             )
             .route("/get-notifications", get(handle_get_notifications))
+            .route("/get-hashtag-content", get(handle_get_hashtag_content))
+            .route("/get-trending-hashtags", get(handle_get_trending_hashtags))
             .layer(prometheus_layer)
             .layer(TimeoutLayer::new(timeout_duration))
             .layer(RequestBodyLimitLayer::new(1024 * 1024)) // 1MB limit
@@ -698,6 +717,121 @@ async fn handle_get_notifications(
                         "MISSING_PARAMETER" | "INVALID_USER_KEY" | "INVALID_LIMIT" => {
                             StatusCode::BAD_REQUEST
                         }
+                        _ => StatusCode::INTERNAL_SERVER_ERROR,
+                    };
+                    Err((status_code, Json(api_error)))
+                }
+                Err(_) => {
+                    let error = ApiError {
+                        error: "Internal server error".to_string(),
+                        code: "INTERNAL_ERROR".to_string(),
+                    };
+                    Err((StatusCode::INTERNAL_SERVER_ERROR, Json(error)))
+                }
+            }
+        }
+    }
+}
+
+async fn handle_get_hashtag_content(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    State(app_state): State<Arc<AppState>>,
+    Query(params): Query<GetHashtagContentQuery>,
+) -> Result<Json<PaginatedPostsResponse>, (StatusCode, Json<ApiError>)> {
+    // Check rate limit first
+    check_rate_limit(&app_state, addr).await?;
+
+    // Check if hashtag parameter is provided
+    let hashtag = match params.hashtag {
+        Some(tag) => tag.to_lowercase(), // Normalize to lowercase
+        None => {
+            let error = ApiError {
+                error: "Missing required parameter: hashtag".to_string(),
+                code: "MISSING_PARAMETER".to_string(),
+            };
+            return Err((StatusCode::BAD_REQUEST, Json(error)));
+        }
+    };
+
+    // Validate hashtag length (max 30 characters, without #)
+    if hashtag.is_empty() {
+        let error = ApiError {
+            error: "Hashtag parameter cannot be empty".to_string(),
+            code: "INVALID_PARAMETER".to_string(),
+        };
+        return Err((StatusCode::BAD_REQUEST, Json(error)));
+    }
+
+    if hashtag.len() > 30 {
+        let error = ApiError {
+            error: "Hashtag parameter cannot exceed 30 characters".to_string(),
+            code: "INVALID_PARAMETER".to_string(),
+        };
+        return Err((StatusCode::BAD_REQUEST, Json(error)));
+    }
+
+    // Limit defaults to 20 if not provided
+    let limit = params.limit.unwrap_or(20);
+
+    // Validate limit parameter
+    if limit < 1 || limit > 100 {
+        let error = ApiError {
+            error: "Limit parameter must be between 1 and 100".to_string(),
+            code: "INVALID_LIMIT".to_string(),
+        };
+        return Err((StatusCode::BAD_REQUEST, Json(error)));
+    }
+
+    // Check if requesterPubkey parameter is provided
+    let requester_pubkey = match params.requester_pubkey {
+        Some(pubkey) => pubkey,
+        None => {
+            let error = ApiError {
+                error: "Missing required parameter: requesterPubkey".to_string(),
+                code: "MISSING_PARAMETER".to_string(),
+            };
+            return Err((StatusCode::BAD_REQUEST, Json(error)));
+        }
+    };
+
+    // Use the API handler to get paginated hashtag content
+    match app_state
+        .api_handlers
+        .get_hashtag_content_paginated(
+            &hashtag,
+            &requester_pubkey,
+            limit,
+            params.before,
+            params.after,
+        )
+        .await
+    {
+        Ok(response_json) => {
+            // Parse the JSON response back to PaginatedPostsResponse
+            match serde_json::from_str::<PaginatedPostsResponse>(&response_json) {
+                Ok(posts_response) => Ok(Json(posts_response)),
+                Err(err) => {
+                    log_error!(
+                        "Failed to parse paginated hashtag content response: {}",
+                        err
+                    );
+                    let error = ApiError {
+                        error: "Internal server error".to_string(),
+                        code: "INTERNAL_ERROR".to_string(),
+                    };
+                    Err((StatusCode::INTERNAL_SERVER_ERROR, Json(error)))
+                }
+            }
+        }
+        Err(error_json) => {
+            // Parse the error response
+            match serde_json::from_str::<ApiError>(&error_json) {
+                Ok(api_error) => {
+                    let status_code = match api_error.code.as_str() {
+                        "MISSING_PARAMETER" | "INVALID_PARAMETER" | "INVALID_LIMIT" => {
+                            StatusCode::BAD_REQUEST
+                        }
+                        "NOT_FOUND" => StatusCode::NOT_FOUND,
                         _ => StatusCode::INTERNAL_SERVER_ERROR,
                     };
                     Err((status_code, Json(api_error)))
@@ -1769,6 +1903,84 @@ async fn handle_get_users_count(
             match serde_json::from_str::<ApiError>(&error_json) {
                 Ok(api_error) => {
                     let status_code = match api_error.code.as_str() {
+                        _ => StatusCode::INTERNAL_SERVER_ERROR,
+                    };
+                    Err((status_code, Json(api_error)))
+                }
+                Err(_) => {
+                    let error = ApiError {
+                        error: "Internal server error".to_string(),
+                        code: "INTERNAL_ERROR".to_string(),
+                    };
+                    Err((StatusCode::INTERNAL_SERVER_ERROR, Json(error)))
+                }
+            }
+        }
+    }
+}
+
+async fn handle_get_trending_hashtags(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    State(app_state): State<Arc<AppState>>,
+    Query(params): Query<GetTrendingHashtagsQuery>,
+) -> Result<Json<TrendingHashtagsResponse>, (StatusCode, Json<ApiError>)> {
+    // Check rate limit first
+    check_rate_limit(&app_state, addr).await?;
+
+    // Parse and validate time_window parameter (default: "24h")
+    let time_window = params.time_window.unwrap_or_else(|| "24h".to_string());
+
+    // Validate time_window values
+    let valid_windows = ["1h", "6h", "24h", "7d", "30d"];
+    if !valid_windows.contains(&time_window.as_str()) {
+        let error = ApiError {
+            error: format!(
+                "Invalid timeWindow parameter. Must be one of: {}",
+                valid_windows.join(", ")
+            ),
+            code: "INVALID_PARAMETER".to_string(),
+        };
+        return Err((StatusCode::BAD_REQUEST, Json(error)));
+    }
+
+    // Limit defaults to 20 if not provided
+    let limit = params.limit.unwrap_or(20);
+
+    // Validate limit parameter
+    if limit < 1 || limit > 100 {
+        let error = ApiError {
+            error: "Limit parameter must be between 1 and 100".to_string(),
+            code: "INVALID_LIMIT".to_string(),
+        };
+        return Err((StatusCode::BAD_REQUEST, Json(error)));
+    }
+
+    // Use the API handler to get trending hashtags
+    match app_state
+        .api_handlers
+        .get_trending_hashtags(&time_window, limit)
+        .await
+    {
+        Ok(response_json) => {
+            // Parse the JSON response back to TrendingHashtagsResponse
+            match serde_json::from_str::<TrendingHashtagsResponse>(&response_json) {
+                Ok(response) => Ok(Json(response)),
+                Err(err) => {
+                    log_error!("Failed to parse trending hashtags response: {}", err);
+                    let error = ApiError {
+                        error: "Internal server error".to_string(),
+                        code: "INTERNAL_ERROR".to_string(),
+                    };
+                    Err((StatusCode::INTERNAL_SERVER_ERROR, Json(error)))
+                }
+            }
+        }
+        Err(error_json) => {
+            // Parse the error response
+            match serde_json::from_str::<ApiError>(&error_json) {
+                Ok(api_error) => {
+                    let status_code = match api_error.code.as_str() {
+                        "INVALID_PARAMETER" | "INVALID_LIMIT" => StatusCode::BAD_REQUEST,
                         _ => StatusCode::INTERNAL_SERVER_ERROR,
                     };
                     Err((status_code, Json(api_error)))
