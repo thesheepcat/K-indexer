@@ -15,6 +15,10 @@ tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
 hex = "0.4"
 futures = "0.3"
 chrono = { version = "0.4", features = ["serde"] }
+# Hashtag extraction dependencies
+base64 = "0.21"
+regex = "1.10"
+once_cell = "1.19"
 # Kaspa signature verification dependencies (from main K-indexer)
 kaspa-wallet-core = { git = "https://github.com/kaspanet/rusty-kaspa.git", features = ["wasm32-sdk"] }
 secp256k1 = "0.29"
