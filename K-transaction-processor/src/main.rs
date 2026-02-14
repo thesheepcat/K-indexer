@@ -1,5 +1,6 @@
 mod config;
 mod database;
+mod hashtag_extractor;
 mod k_protocol;
 mod listener;
 mod queue;

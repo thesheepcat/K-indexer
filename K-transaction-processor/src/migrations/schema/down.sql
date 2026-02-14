@@ -6,6 +6,7 @@ DROP TRIGGER IF EXISTS transaction_notify_trigger ON transactions;
 DROP FUNCTION IF EXISTS notify_transaction();
 
 -- Drop K protocol tables (reverse dependency order)
+DROP TABLE IF EXISTS k_hashtags CASCADE;
 DROP TABLE IF EXISTS k_contents CASCADE;
 DROP TABLE IF EXISTS k_follows CASCADE;
 DROP TABLE IF EXISTS k_blocks CASCADE;
