@@ -327,6 +327,160 @@ impl DatabaseInterface for PostgresDbManager {
         })
     }
 
+    async fn get_most_active_users(
+        &self,
+        requester_pubkey: &str,
+        options: QueryOptions,
+        from_time_millis: u64,
+        to_time_millis: u64,
+    ) -> DatabaseResult<PaginatedResult<(KBroadcastRecord, bool, bool, i64)>> {
+        let requester_pubkey_bytes = Self::decode_hex_to_bytes(requester_pubkey)?;
+        let limit = options.limit.unwrap_or(20) as i64;
+        let offset_limit = limit + 1;
+
+        let mut query = String::from(
+            r#"
+            WITH user_content_counts AS (
+                SELECT sender_pubkey, COUNT(*) as content_count
+                FROM k_contents
+                WHERE block_time >= $2 AND block_time <= $3
+                GROUP BY sender_pubkey
+            )
+            SELECT
+                b.id, b.transaction_id, b.block_time, b.sender_pubkey, b.sender_signature,
+                b.base64_encoded_nickname, b.base64_encoded_profile_image, b.base64_encoded_message,
+                ucc.content_count,
+                CASE
+                    WHEN kb.blocked_user_pubkey IS NOT NULL THEN true
+                    ELSE false
+                END as is_blocked,
+                CASE
+                    WHEN kf.followed_user_pubkey IS NOT NULL THEN true
+                    ELSE false
+                END as is_followed
+            FROM k_broadcasts b
+            INNER JOIN user_content_counts ucc ON ucc.sender_pubkey = b.sender_pubkey
+            LEFT JOIN k_blocks kb ON kb.sender_pubkey = $1 AND kb.blocked_user_pubkey = b.sender_pubkey
+            LEFT JOIN k_follows kf ON kf.sender_pubkey = $1 AND kf.followed_user_pubkey = b.sender_pubkey
+            WHERE 1=1
+            "#,
+        );
+
+        // $1 = requester_pubkey, $2 = from_time_millis, $3 = to_time_millis
+        let mut bind_count = 3;
+
+        if let Some(before_cursor) = &options.before {
+            if let Ok((before_count, before_id)) = Self::parse_compound_cursor(before_cursor) {
+                bind_count += 2;
+                query.push_str(&format!(
+                    " AND (ucc.content_count < ${} OR (ucc.content_count = ${} AND b.id < ${}))",
+                    bind_count - 1,
+                    bind_count - 1,
+                    bind_count
+                ));
+            }
+        }
+
+        if let Some(after_cursor) = &options.after {
+            if let Ok((after_count, after_id)) = Self::parse_compound_cursor(after_cursor) {
+                bind_count += 2;
+                query.push_str(&format!(
+                    " AND (ucc.content_count > ${} OR (ucc.content_count = ${} AND b.id > ${}))",
+                    bind_count - 1,
+                    bind_count - 1,
+                    bind_count
+                ));
+            }
+        }
+
+        query.push_str(" ORDER BY ucc.content_count DESC, b.id DESC");
+
+        bind_count += 1;
+        query.push_str(&format!(" LIMIT ${}", bind_count));
+
+        let mut query_builder = sqlx::query(&query)
+            .bind(&requester_pubkey_bytes)
+            .bind(from_time_millis as i64)
+            .bind(to_time_millis as i64);
+
+        if let Some(before_cursor) = &options.before {
+            if let Ok((before_count, before_id)) = Self::parse_compound_cursor(before_cursor) {
+                query_builder = query_builder.bind(before_count as i64).bind(before_id);
+            }
+        }
+
+        if let Some(after_cursor) = &options.after {
+            if let Ok((after_count, after_id)) = Self::parse_compound_cursor(after_cursor) {
+                query_builder = query_builder.bind(after_count as i64).bind(after_id);
+            }
+        }
+
+        query_builder = query_builder.bind(offset_limit);
+
+        let rows = query_builder.fetch_all(&self.pool).await.map_err(|e| {
+            DatabaseError::QueryError(format!("Failed to fetch most active users: {}", e))
+        })?;
+
+        let mut results: Vec<(KBroadcastRecord, bool, bool, i64)> = Vec::new();
+        for row in &rows {
+            let transaction_id: Vec<u8> = row.get("transaction_id");
+            let sender_pubkey: Vec<u8> = row.get("sender_pubkey");
+            let sender_signature: Vec<u8> = row.get("sender_signature");
+            let is_blocked: bool = row.get("is_blocked");
+            let is_followed: bool = row.get("is_followed");
+            let content_count: i64 = row.get("content_count");
+
+            let broadcast_record = KBroadcastRecord {
+                id: row.get::<i64, _>("id"),
+                transaction_id: Self::encode_bytes_to_hex(&transaction_id),
+                block_time: row.get::<i64, _>("block_time") as u64,
+                sender_pubkey: Self::encode_bytes_to_hex(&sender_pubkey),
+                sender_signature: Self::encode_bytes_to_hex(&sender_signature),
+                base64_encoded_nickname: row.get("base64_encoded_nickname"),
+                base64_encoded_profile_image: row.get("base64_encoded_profile_image"),
+                base64_encoded_message: row.get("base64_encoded_message"),
+            };
+
+            results.push((broadcast_record, is_blocked, is_followed, content_count));
+        }
+
+        let has_more = results.len() > limit as usize;
+        if has_more {
+            results.pop();
+        }
+
+        // Build pagination metadata using content_count as the cursor "timestamp" component
+        let pagination = if results.is_empty() {
+            PaginationMetadata {
+                has_more,
+                next_cursor: None,
+                prev_cursor: None,
+            }
+        } else {
+            let first = &results[0];
+            let last = results.last().unwrap();
+
+            let next_cursor = if has_more {
+                Some(Self::create_compound_cursor(last.3 as u64, last.0.id))
+            } else {
+                None
+            };
+
+            let prev_cursor = Some(Self::create_compound_cursor(first.3 as u64, first.0.id));
+
+            PaginationMetadata {
+                has_more,
+                next_cursor,
+                prev_cursor,
+            }
+        };
+
+        Ok(PaginatedResult {
+            items: results,
+            pagination,
+        })
+    }
+
     async fn search_users(
         &self,
         requester_pubkey: &str,

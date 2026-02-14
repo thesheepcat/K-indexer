@@ -92,6 +92,17 @@ struct GetUsersQuery {
 }
 
 #[derive(Debug, Deserialize)]
+struct GetMostActiveUsersQuery {
+    limit: Option<u32>,
+    before: Option<String>,
+    after: Option<String>,
+    #[serde(rename = "requesterPubkey")]
+    requester_pubkey: Option<String>,
+    #[serde(rename = "timeWindow")]
+    time_window: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
 struct SearchUsersQuery {
     limit: Option<u32>,
     before: Option<String>,
@@ -241,6 +252,7 @@ impl WebServer {
             .route("/get-replies", get(handle_get_replies))
             .route("/get-mentions", get(handle_get_mentions))
             .route("/get-users", get(handle_get_users))
+            .route("/get-most-active-users", get(handle_get_most_active_users))
             .route("/get-users-count", get(handle_get_users_count))
             .route("/search-users", get(handle_search_users))
             .route("/get-user-details", get(handle_get_user_details))
@@ -930,6 +942,116 @@ async fn handle_get_users(
                 }
             }
         }
+    }
+}
+
+async fn handle_get_most_active_users(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    State(app_state): State<Arc<AppState>>,
+    Query(params): Query<GetMostActiveUsersQuery>,
+) -> Result<Json<PaginatedUsersResponse>, (StatusCode, Json<ApiError>)> {
+    // Check rate limit first
+    check_rate_limit(&app_state, addr).await?;
+
+    // Parse and validate time_window parameter (required)
+    let time_window = match params.time_window {
+        Some(tw) => tw,
+        None => {
+            let error = ApiError {
+                error: "Missing required parameter: timeWindow".to_string(),
+                code: "MISSING_PARAMETER".to_string(),
+            };
+            return Err((StatusCode::BAD_REQUEST, Json(error)));
+        }
+    };
+
+    let valid_windows = ["1h", "6h", "24h", "7d", "30d"];
+    if !valid_windows.contains(&time_window.as_str()) {
+        let error = ApiError {
+            error: format!(
+                "Invalid timeWindow parameter. Must be one of: {}",
+                valid_windows.join(", ")
+            ),
+            code: "INVALID_PARAMETER".to_string(),
+        };
+        return Err((StatusCode::BAD_REQUEST, Json(error)));
+    }
+
+    // Validate required limit parameter
+    let limit = match params.limit {
+        Some(limit) => {
+            if limit < 1 || limit > 100 {
+                let error = ApiError {
+                    error: "Limit parameter must be between 1 and 100".to_string(),
+                    code: "INVALID_LIMIT".to_string(),
+                };
+                return Err((StatusCode::BAD_REQUEST, Json(error)));
+            }
+            limit
+        }
+        None => {
+            let error = ApiError {
+                error: "Missing required parameter: limit".to_string(),
+                code: "MISSING_PARAMETER".to_string(),
+            };
+            return Err((StatusCode::BAD_REQUEST, Json(error)));
+        }
+    };
+
+    // Check if requesterPubkey parameter is provided
+    let requester_pubkey = match params.requester_pubkey {
+        Some(pubkey) => pubkey,
+        None => {
+            let error = ApiError {
+                error: "Missing required parameter: requesterPubkey".to_string(),
+                code: "MISSING_PARAMETER".to_string(),
+            };
+            return Err((StatusCode::BAD_REQUEST, Json(error)));
+        }
+    };
+
+    // Use the API handler to get most active users ranked by content count
+    match app_state
+        .api_handlers
+        .get_most_active_users_paginated(
+            limit,
+            &requester_pubkey,
+            &time_window,
+            params.before,
+            params.after,
+        )
+        .await
+    {
+        Ok(response_json) => match serde_json::from_str::<PaginatedUsersResponse>(&response_json) {
+            Ok(users_response) => Ok(Json(users_response)),
+            Err(err) => {
+                log_error!("Failed to parse most active users response: {}", err);
+                let error = ApiError {
+                    error: "Internal server error".to_string(),
+                    code: "INTERNAL_ERROR".to_string(),
+                };
+                Err((StatusCode::INTERNAL_SERVER_ERROR, Json(error)))
+            }
+        },
+        Err(error_json) => match serde_json::from_str::<ApiError>(&error_json) {
+            Ok(api_error) => {
+                let status_code = match api_error.code.as_str() {
+                    "DATABASE_ERROR" | "SERIALIZATION_ERROR" => StatusCode::INTERNAL_SERVER_ERROR,
+                    "MISSING_PARAMETER" | "INVALID_LIMIT" | "INVALID_PARAMETER" => {
+                        StatusCode::BAD_REQUEST
+                    }
+                    _ => StatusCode::INTERNAL_SERVER_ERROR,
+                };
+                Err((status_code, Json(api_error)))
+            }
+            Err(_) => {
+                let error = ApiError {
+                    error: "Internal server error".to_string(),
+                    code: "INTERNAL_ERROR".to_string(),
+                };
+                Err((StatusCode::INTERNAL_SERVER_ERROR, Json(error)))
+            }
+        },
     }
 }
 
