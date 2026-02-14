@@ -10,8 +10,8 @@ CREATE TABLE IF NOT EXISTS k_vars (
     value TEXT NOT NULL
 );
 
--- Insert initial schema version (v1 = complete K protocol schema)
-INSERT INTO k_vars (key, value) VALUES ('schema_version', '1') ON CONFLICT (key) DO NOTHING;
+-- Insert initial schema version (v2 = complete K protocol schema with hashtags)
+INSERT INTO k_vars (key, value) VALUES ('schema_version', '2') ON CONFLICT (key) DO NOTHING;
 
 -- NOTE: k_posts and k_replies tables removed in v6 (replaced by k_contents table in v4)
 -- Create K protocol tables
@@ -158,8 +158,10 @@ CREATE INDEX IF NOT EXISTS idx_k_contents_quotes ON k_contents(referenced_conten
 
 -- Covering index for feed queries (posts + reposts + quotes, exclude replies)
 -- This index is used for main feed and user timeline queries
-CREATE INDEX IF NOT EXISTS idx_k_contents_feed_covering ON k_contents(block_time DESC, id DESC)
-    INCLUDE (transaction_id, sender_pubkey, sender_signature, base64_encoded_message, content_type, referenced_content_id)
+-- Note: base64_encoded_message is excluded from INCLUDE to avoid btree size limit errors
+-- when messages contain many hashtags (btree v4 max is 2704 bytes)
+CREATE INDEX IF NOT EXISTS idx_k_contents_feed_optimized ON k_contents(block_time DESC, id DESC)
+    INCLUDE (transaction_id, sender_pubkey, sender_signature, content_type, referenced_content_id)
     WHERE content_type IN ('post', 'repost', 'quote');
 
 -- Content type filtering index
@@ -167,3 +169,39 @@ CREATE INDEX IF NOT EXISTS idx_k_contents_content_type ON k_contents(content_typ
 
 -- User content index (all content types by user)
 CREATE INDEX IF NOT EXISTS idx_k_contents_sender_content_type ON k_contents(sender_pubkey, content_type, block_time DESC);
+
+-- ============================================================================
+-- NEW in v2: k_hashtags table for hashtag management
+-- ============================================================================
+
+-- Create k_hashtags table
+CREATE TABLE IF NOT EXISTS k_hashtags (
+    id BIGSERIAL PRIMARY KEY,
+    sender_pubkey BYTEA NOT NULL,
+    content_id BYTEA NOT NULL,
+    block_time BIGINT NOT NULL,
+    hashtag VARCHAR(30) NOT NULL
+);
+
+-- Index 1: Exact match with cursor pagination
+CREATE INDEX IF NOT EXISTS idx_k_hashtags_by_hashtag_time
+ON k_hashtags (hashtag, block_time DESC, content_id);
+
+-- Index 2: Pattern matching (prefix and contains)
+CREATE INDEX IF NOT EXISTS idx_k_hashtags_pattern
+ON k_hashtags (hashtag text_pattern_ops, block_time DESC);
+
+-- Index 3: Trending hashtags calculation
+CREATE INDEX IF NOT EXISTS idx_k_hashtags_trending
+ON k_hashtags (block_time DESC, hashtag);
+
+-- Index 4: Hashtag by sender with cursor pagination
+CREATE INDEX IF NOT EXISTS idx_k_hashtags_by_hashtag_sender
+ON k_hashtags (hashtag, sender_pubkey, block_time DESC, content_id);
+
+-- Foreign key constraint
+ALTER TABLE k_hashtags
+ADD CONSTRAINT fk_k_hashtags_content
+FOREIGN KEY (content_id)
+REFERENCES k_contents(transaction_id)
+ON DELETE CASCADE;

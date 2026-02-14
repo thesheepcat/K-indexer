@@ -1694,6 +1694,95 @@ impl ApiHandlers {
         }
     }
 
+    /// GET /get-hashtag-content with pagination
+    /// Fetch paginated content (posts, replies, quotes) containing a specific hashtag
+    pub async fn get_hashtag_content_paginated(
+        &self,
+        hashtag: &str,
+        requester_pubkey: &str,
+        limit: u32,
+        before: Option<String>,
+        after: Option<String>,
+    ) -> Result<String, String> {
+        // Validate requester public key format (66 hex characters for compressed public key)
+        if requester_pubkey.len() != 66 {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Must be 66 hex characters.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        if !requester_pubkey.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Must contain only hex characters.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        // Validate compressed public key prefix (should start with 02 or 03)
+        if !requester_pubkey.starts_with("02") && !requester_pubkey.starts_with("03") {
+            return Err(self.create_error_response(
+                "Invalid requester public key format. Compressed public key must start with 02 or 03.",
+                "INVALID_USER_KEY",
+            ));
+        }
+
+        let options = QueryOptions {
+            limit: Some(limit as u64),
+            before,
+            after,
+            sort_descending: true,
+        };
+
+        // Get content with this hashtag
+        let content_result = match self
+            .db
+            .get_hashtag_content(hashtag, requester_pubkey, options)
+            .await
+        {
+            Ok(result) => result,
+            Err(err) => {
+                log_error!(
+                    "Database error while querying hashtag content for #{}: {}",
+                    hashtag,
+                    err
+                );
+                return Err(self.create_error_response(
+                    "Internal server error during database query",
+                    "DATABASE_ERROR",
+                ));
+            }
+        };
+
+        // Convert enriched KPostRecords to ServerPosts (blocked users already excluded)
+        let all_posts: Vec<ServerPost> = content_result
+            .items
+            .iter()
+            .map(|post_record| {
+                ServerPost::from_enriched_k_post_record_with_block_status(post_record, false)
+            })
+            .collect();
+
+        let response = PaginatedPostsResponse {
+            posts: all_posts,
+            pagination: content_result.pagination,
+        };
+
+        match serde_json::to_string(&response) {
+            Ok(json) => Ok(json),
+            Err(err) => {
+                log_error!(
+                    "Failed to serialize paginated hashtag content response: {}",
+                    err
+                );
+                Err(self.create_error_response(
+                    "Internal server error during serialization",
+                    "SERIALIZATION_ERROR",
+                ))
+            }
+        }
+    }
+
     /// Create a standardized error response
     fn create_error_response(&self, message: &str, code: &str) -> String {
         let error = ApiError {
@@ -1705,5 +1794,85 @@ impl ApiHandlers {
             r#"{"error":"Internal error creating error response","code":"INTERNAL_ERROR"}"#
                 .to_string()
         })
+    }
+
+    /// GET /get-trending-hashtags
+    /// Fetch trending hashtags within a time window
+    pub async fn get_trending_hashtags(
+        &self,
+        time_window: &str,
+        limit: u32,
+    ) -> Result<String, String> {
+        use crate::models::{TrendingHashtag, TrendingHashtagsResponse};
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        // Calculate time window in milliseconds (block_time is stored in milliseconds)
+        let window_millis = match time_window {
+            "1h" => 3_600_000_u64,      // 1 hour = 3,600,000 ms
+            "6h" => 21_600_000_u64,     // 6 hours = 21,600,000 ms
+            "24h" => 86_400_000_u64,    // 24 hours = 86,400,000 ms
+            "7d" => 604_800_000_u64,    // 7 days = 604,800,000 ms
+            "30d" => 2_592_000_000_u64, // 30 days = 2,592,000,000 ms
+            _ => {
+                return Err(self
+                    .create_error_response("Invalid time window parameter", "INVALID_PARAMETER"));
+            }
+        };
+
+        // Get current Unix timestamp in milliseconds
+        let to_time_millis = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        let from_time_millis = to_time_millis.saturating_sub(window_millis);
+
+        // Convert to seconds for the response (API returns seconds in fromTime/toTime)
+        let to_time = to_time_millis / 1000;
+        let from_time = from_time_millis / 1000;
+
+        // Query database for trending hashtags (using milliseconds for block_time comparison)
+        let trending_hashtags = match self
+            .db
+            .get_trending_hashtags(from_time_millis, to_time_millis, limit)
+            .await
+        {
+            Ok(hashtags) => hashtags,
+            Err(err) => {
+                log_error!("Database error while querying trending hashtags: {}", err);
+                return Err(self.create_error_response(
+                    "Internal server error during database query",
+                    "DATABASE_ERROR",
+                ));
+            }
+        };
+
+        // Add rank to each hashtag
+        let hashtags_with_rank: Vec<TrendingHashtag> = trending_hashtags
+            .into_iter()
+            .enumerate()
+            .map(|(index, (hashtag, usage_count))| TrendingHashtag {
+                hashtag,
+                usage_count,
+                rank: (index + 1) as u32,
+            })
+            .collect();
+
+        let response = TrendingHashtagsResponse {
+            time_window: time_window.to_string(),
+            from_time,
+            to_time,
+            hashtags: hashtags_with_rank,
+        };
+
+        match serde_json::to_string(&response) {
+            Ok(json) => Ok(json),
+            Err(err) => {
+                log_error!("Failed to serialize trending hashtags response: {}", err);
+                Err(self.create_error_response(
+                    "Internal server error during serialization",
+                    "SERIALIZATION_ERROR",
+                ))
+            }
+        }
     }
 }

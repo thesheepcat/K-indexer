@@ -184,6 +184,25 @@ pub trait DatabaseInterface: Send + Sync {
 
     // Get database statistics
     async fn get_stats(&self) -> DatabaseResult<DatabaseStats>;
+
+    // Hashtag operations
+
+    // Get content containing a specific hashtag
+    async fn get_hashtag_content(
+        &self,
+        hashtag: &str,
+        requester_pubkey: &str,
+        options: QueryOptions,
+    ) -> DatabaseResult<PaginatedResult<KPostRecord>>;
+
+    // Get trending hashtags within a time window
+    // Returns: Vec<(hashtag: String, usage_count: u64)>
+    async fn get_trending_hashtags(
+        &self,
+        from_time: u64,
+        to_time: u64,
+        limit: u32,
+    ) -> DatabaseResult<Vec<(String, u64)>>;
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

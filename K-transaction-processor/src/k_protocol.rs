@@ -1,4 +1,5 @@
 use crate::database::{DbPool, Transaction};
+use crate::hashtag_extractor::extract_hashtags_from_base64;
 use anyhow::Result;
 use hex;
 use serde_json;
@@ -589,35 +590,80 @@ impl KProtocolProcessor {
         let sender_pubkey_bytes = hex::decode(&k_post.sender_pubkey)?;
         let sender_signature_bytes = hex::decode(&k_post.sender_signature)?;
 
-        // Single query to insert post and all mentions using CTE
-        if k_post.mentioned_pubkeys.is_empty() {
-            // If no mentions, just insert the post (skip if already exists)
-            let result = sqlx::query(
-                r#"
-                INSERT INTO k_contents (
-                    transaction_id, block_time, sender_pubkey, sender_signature,
-                    base64_encoded_message, content_type, referenced_content_id
-                ) VALUES ($1, $2, $3, $4, $5, 'post', NULL)
-                ON CONFLICT (sender_signature) DO NOTHING
-                "#,
-            )
-            .bind(&transaction_id_bytes)
-            .bind(block_time)
-            .bind(&sender_pubkey_bytes)
-            .bind(&sender_signature_bytes)
-            .bind(k_post.base64_encoded_message)
-            .execute(&self.db_pool)
-            .await?;
+        // Extract hashtags from the message
+        let hashtags = extract_hashtags_from_base64(&k_post.base64_encoded_message);
 
-            if result.rows_affected() == 0 {
-                info!(
-                    "Post transaction {} already exists, skipping",
-                    transaction_id
-                );
+        // Single query to insert post and all mentions/hashtags using CTE
+        if k_post.mentioned_pubkeys.is_empty() {
+            // No mentions - check if we have hashtags
+            if hashtags.is_empty() {
+                // No mentions, no hashtags - simple insert
+                let result = sqlx::query(
+                    r#"
+                    INSERT INTO k_contents (
+                        transaction_id, block_time, sender_pubkey, sender_signature,
+                        base64_encoded_message, content_type, referenced_content_id
+                    ) VALUES ($1, $2, $3, $4, $5, 'post', NULL)
+                    ON CONFLICT (sender_signature) DO NOTHING
+                    "#,
+                )
+                .bind(&transaction_id_bytes)
+                .bind(block_time)
+                .bind(&sender_pubkey_bytes)
+                .bind(&sender_signature_bytes)
+                .bind(&k_post.base64_encoded_message)
+                .execute(&self.db_pool)
+                .await?;
+
+                if result.rows_affected() == 0 {
+                    info!(
+                        "Post transaction {} already exists, skipping",
+                        transaction_id
+                    );
+                } else {
+                    info!("Saved K post: {}", transaction_id);
+                }
             } else {
-                info!("Saved K post: {}", transaction_id);
+                // No mentions but has hashtags - use CTE to insert post + hashtags atomically
+                let result = sqlx::query(
+                    r#"
+                    WITH post_insert AS (
+                        INSERT INTO k_contents (
+                            transaction_id, block_time, sender_pubkey, sender_signature,
+                            base64_encoded_message, content_type, referenced_content_id
+                        ) VALUES ($1, $2, $3, $4, $5, 'post', NULL)
+                        ON CONFLICT (sender_signature) DO NOTHING
+                        RETURNING transaction_id, block_time, sender_pubkey
+                    )
+                    INSERT INTO k_hashtags (sender_pubkey, content_id, block_time, hashtag)
+                    SELECT pi.sender_pubkey, pi.transaction_id, pi.block_time, unnest($6::text[])
+                    FROM post_insert pi
+                    "#,
+                )
+                .bind(&transaction_id_bytes)
+                .bind(block_time)
+                .bind(&sender_pubkey_bytes)
+                .bind(&sender_signature_bytes)
+                .bind(&k_post.base64_encoded_message)
+                .bind(&hashtags)
+                .execute(&self.db_pool)
+                .await?;
+
+                if result.rows_affected() == 0 {
+                    info!(
+                        "Post transaction {} already exists, skipping",
+                        transaction_id
+                    );
+                } else {
+                    info!(
+                        "Saved K post with {} hashtags: {}",
+                        hashtags.len(),
+                        transaction_id
+                    );
+                }
             }
         } else {
+            // Has mentions - check if we also have hashtags
             // Convert mentioned pubkeys to bytea
             let mentioned_pubkeys_bytes: Result<Vec<Vec<u8>>, _> = k_post
                 .mentioned_pubkeys
@@ -626,38 +672,86 @@ impl KProtocolProcessor {
                 .collect();
             let mentioned_pubkeys_bytes = mentioned_pubkeys_bytes?;
 
-            // Insert post and mentions in a single query using CTE (skip if already exists)
-            let result = sqlx::query(
-                r#"
-                WITH post_insert AS (
-                    INSERT INTO k_contents (
-                        transaction_id, block_time, sender_pubkey, sender_signature,
-                        base64_encoded_message, content_type, referenced_content_id
-                    ) VALUES ($1, $2, $3, $4, $5, 'post', NULL)
-                    ON CONFLICT (sender_signature) DO NOTHING
-                    RETURNING transaction_id, block_time, sender_pubkey
+            if hashtags.is_empty() {
+                // Has mentions but no hashtags - CTE with post + mentions
+                let result = sqlx::query(
+                    r#"
+                    WITH post_insert AS (
+                        INSERT INTO k_contents (
+                            transaction_id, block_time, sender_pubkey, sender_signature,
+                            base64_encoded_message, content_type, referenced_content_id
+                        ) VALUES ($1, $2, $3, $4, $5, 'post', NULL)
+                        ON CONFLICT (sender_signature) DO NOTHING
+                        RETURNING transaction_id, block_time, sender_pubkey
+                    )
+                    INSERT INTO k_mentions (content_id, content_type, mentioned_pubkey, block_time, sender_pubkey)
+                    SELECT pi.transaction_id, 'post', unnest($6::bytea[]), pi.block_time, pi.sender_pubkey
+                    FROM post_insert pi
+                    "#,
                 )
-                INSERT INTO k_mentions (content_id, content_type, mentioned_pubkey, block_time, sender_pubkey)
-                SELECT pi.transaction_id, 'post', unnest($6::bytea[]), pi.block_time, pi.sender_pubkey
-                FROM post_insert pi
-                "#,
-            )
-            .bind(&transaction_id_bytes)
-            .bind(block_time)
-            .bind(&sender_pubkey_bytes)
-            .bind(&sender_signature_bytes)
-            .bind(k_post.base64_encoded_message)
-            .bind(&mentioned_pubkeys_bytes)
-            .execute(&self.db_pool)
-            .await?;
+                .bind(&transaction_id_bytes)
+                .bind(block_time)
+                .bind(&sender_pubkey_bytes)
+                .bind(&sender_signature_bytes)
+                .bind(&k_post.base64_encoded_message)
+                .bind(&mentioned_pubkeys_bytes)
+                .execute(&self.db_pool)
+                .await?;
 
-            if result.rows_affected() == 0 {
-                info!(
-                    "Post transaction {} already exists, skipping",
-                    transaction_id
-                );
+                if result.rows_affected() == 0 {
+                    info!(
+                        "Post transaction {} already exists, skipping",
+                        transaction_id
+                    );
+                } else {
+                    info!("Saved K post: {}", transaction_id);
+                }
             } else {
-                info!("Saved K post: {}", transaction_id);
+                // Has both mentions AND hashtags - extended CTE with post + mentions + hashtags
+                let result = sqlx::query(
+                    r#"
+                    WITH post_insert AS (
+                        INSERT INTO k_contents (
+                            transaction_id, block_time, sender_pubkey, sender_signature,
+                            base64_encoded_message, content_type, referenced_content_id
+                        ) VALUES ($1, $2, $3, $4, $5, 'post', NULL)
+                        ON CONFLICT (sender_signature) DO NOTHING
+                        RETURNING transaction_id, block_time, sender_pubkey
+                    ),
+                    mentions_insert AS (
+                        INSERT INTO k_mentions (content_id, content_type, mentioned_pubkey, block_time, sender_pubkey)
+                        SELECT pi.transaction_id, 'post', unnest($6::bytea[]), pi.block_time, pi.sender_pubkey
+                        FROM post_insert pi
+                        RETURNING 1
+                    )
+                    INSERT INTO k_hashtags (sender_pubkey, content_id, block_time, hashtag)
+                    SELECT pi.sender_pubkey, pi.transaction_id, pi.block_time, unnest($7::text[])
+                    FROM post_insert pi
+                    "#,
+                )
+                .bind(&transaction_id_bytes)
+                .bind(block_time)
+                .bind(&sender_pubkey_bytes)
+                .bind(&sender_signature_bytes)
+                .bind(&k_post.base64_encoded_message)
+                .bind(&mentioned_pubkeys_bytes)
+                .bind(&hashtags)
+                .execute(&self.db_pool)
+                .await?;
+
+                if result.rows_affected() == 0 {
+                    info!(
+                        "Post transaction {} already exists, skipping",
+                        transaction_id
+                    );
+                } else {
+                    info!(
+                        "Saved K post with {} mentions and {} hashtags: {}",
+                        mentioned_pubkeys_bytes.len(),
+                        hashtags.len(),
+                        transaction_id
+                    );
+                }
             }
         }
         Ok(())
@@ -701,36 +795,83 @@ impl KProtocolProcessor {
         let sender_signature_bytes = hex::decode(&k_reply.sender_signature)?;
         let post_id_bytes = hex::decode(&k_reply.post_id)?;
 
-        // Single query to insert reply and all mentions using CTE
-        if k_reply.mentioned_pubkeys.is_empty() {
-            // If no mentions, just insert the reply (skip if already exists)
-            let result = sqlx::query(
-                r#"
-                INSERT INTO k_contents (
-                    transaction_id, block_time, sender_pubkey, sender_signature,
-                    base64_encoded_message, content_type, referenced_content_id
-                ) VALUES ($1, $2, $3, $4, $5, 'reply', $6)
-                ON CONFLICT (sender_signature) DO NOTHING
-                "#,
-            )
-            .bind(&transaction_id_bytes)
-            .bind(block_time)
-            .bind(&sender_pubkey_bytes)
-            .bind(&sender_signature_bytes)
-            .bind(k_reply.base64_encoded_message)
-            .bind(&post_id_bytes)
-            .execute(&self.db_pool)
-            .await?;
+        // Extract hashtags from the message
+        let hashtags = extract_hashtags_from_base64(&k_reply.base64_encoded_message);
 
-            if result.rows_affected() == 0 {
-                info!(
-                    "Reply transaction {} already exists, skipping",
-                    transaction_id
-                );
+        // Single query to insert reply and all mentions/hashtags using CTE
+        if k_reply.mentioned_pubkeys.is_empty() {
+            // No mentions - check if we have hashtags
+            if hashtags.is_empty() {
+                // No mentions, no hashtags - simple insert
+                let result = sqlx::query(
+                    r#"
+                    INSERT INTO k_contents (
+                        transaction_id, block_time, sender_pubkey, sender_signature,
+                        base64_encoded_message, content_type, referenced_content_id
+                    ) VALUES ($1, $2, $3, $4, $5, 'reply', $6)
+                    ON CONFLICT (sender_signature) DO NOTHING
+                    "#,
+                )
+                .bind(&transaction_id_bytes)
+                .bind(block_time)
+                .bind(&sender_pubkey_bytes)
+                .bind(&sender_signature_bytes)
+                .bind(&k_reply.base64_encoded_message)
+                .bind(&post_id_bytes)
+                .execute(&self.db_pool)
+                .await?;
+
+                if result.rows_affected() == 0 {
+                    info!(
+                        "Reply transaction {} already exists, skipping",
+                        transaction_id
+                    );
+                } else {
+                    info!("Saved K reply: {} -> {}", transaction_id, post_id_for_log);
+                }
             } else {
-                info!("Saved K reply: {} -> {}", transaction_id, post_id_for_log);
+                // No mentions but has hashtags - use CTE to insert reply + hashtags atomically
+                let result = sqlx::query(
+                    r#"
+                    WITH reply_insert AS (
+                        INSERT INTO k_contents (
+                            transaction_id, block_time, sender_pubkey, sender_signature,
+                            base64_encoded_message, content_type, referenced_content_id
+                        ) VALUES ($1, $2, $3, $4, $5, 'reply', $6)
+                        ON CONFLICT (sender_signature) DO NOTHING
+                        RETURNING transaction_id, block_time, sender_pubkey
+                    )
+                    INSERT INTO k_hashtags (sender_pubkey, content_id, block_time, hashtag)
+                    SELECT ri.sender_pubkey, ri.transaction_id, ri.block_time, unnest($7::text[])
+                    FROM reply_insert ri
+                    "#,
+                )
+                .bind(&transaction_id_bytes)
+                .bind(block_time)
+                .bind(&sender_pubkey_bytes)
+                .bind(&sender_signature_bytes)
+                .bind(&k_reply.base64_encoded_message)
+                .bind(&post_id_bytes)
+                .bind(&hashtags)
+                .execute(&self.db_pool)
+                .await?;
+
+                if result.rows_affected() == 0 {
+                    info!(
+                        "Reply transaction {} already exists, skipping",
+                        transaction_id
+                    );
+                } else {
+                    info!(
+                        "Saved K reply with {} hashtags: {} -> {}",
+                        hashtags.len(),
+                        transaction_id,
+                        post_id_for_log
+                    );
+                }
             }
         } else {
+            // Has mentions - check if we also have hashtags
             // Convert mentioned pubkeys to bytea
             let mentioned_pubkeys_bytes: Result<Vec<Vec<u8>>, _> = k_reply
                 .mentioned_pubkeys
@@ -739,39 +880,89 @@ impl KProtocolProcessor {
                 .collect();
             let mentioned_pubkeys_bytes = mentioned_pubkeys_bytes?;
 
-            // Insert reply and mentions in a single query using CTE (skip if already exists)
-            let result = sqlx::query(
-                r#"
-                WITH reply_insert AS (
-                    INSERT INTO k_contents (
-                        transaction_id, block_time, sender_pubkey, sender_signature,
-                        base64_encoded_message, content_type, referenced_content_id
-                    ) VALUES ($1, $2, $3, $4, $5, 'reply', $6)
-                    ON CONFLICT (sender_signature) DO NOTHING
-                    RETURNING transaction_id, block_time, sender_pubkey
+            if hashtags.is_empty() {
+                // Has mentions but no hashtags - CTE with reply + mentions
+                let result = sqlx::query(
+                    r#"
+                    WITH reply_insert AS (
+                        INSERT INTO k_contents (
+                            transaction_id, block_time, sender_pubkey, sender_signature,
+                            base64_encoded_message, content_type, referenced_content_id
+                        ) VALUES ($1, $2, $3, $4, $5, 'reply', $6)
+                        ON CONFLICT (sender_signature) DO NOTHING
+                        RETURNING transaction_id, block_time, sender_pubkey
+                    )
+                    INSERT INTO k_mentions (content_id, content_type, mentioned_pubkey, block_time, sender_pubkey)
+                    SELECT ri.transaction_id, 'reply', unnest($7::bytea[]), ri.block_time, ri.sender_pubkey
+                    FROM reply_insert ri
+                    "#,
                 )
-                INSERT INTO k_mentions (content_id, content_type, mentioned_pubkey, block_time, sender_pubkey)
-                SELECT ri.transaction_id, 'reply', unnest($7::bytea[]), ri.block_time, ri.sender_pubkey
-                FROM reply_insert ri
-                "#,
-            )
-            .bind(&transaction_id_bytes)
-            .bind(block_time)
-            .bind(&sender_pubkey_bytes)
-            .bind(&sender_signature_bytes)
-            .bind(k_reply.base64_encoded_message)
-            .bind(&post_id_bytes)
-            .bind(&mentioned_pubkeys_bytes)
-            .execute(&self.db_pool)
-            .await?;
+                .bind(&transaction_id_bytes)
+                .bind(block_time)
+                .bind(&sender_pubkey_bytes)
+                .bind(&sender_signature_bytes)
+                .bind(&k_reply.base64_encoded_message)
+                .bind(&post_id_bytes)
+                .bind(&mentioned_pubkeys_bytes)
+                .execute(&self.db_pool)
+                .await?;
 
-            if result.rows_affected() == 0 {
-                info!(
-                    "Reply transaction {} already exists, skipping",
-                    transaction_id
-                );
+                if result.rows_affected() == 0 {
+                    info!(
+                        "Reply transaction {} already exists, skipping",
+                        transaction_id
+                    );
+                } else {
+                    info!("Saved K reply: {} -> {}", transaction_id, post_id_for_log);
+                }
             } else {
-                info!("Saved K reply: {} -> {}", transaction_id, post_id_for_log);
+                // Has both mentions AND hashtags - extended CTE with reply + mentions + hashtags
+                let result = sqlx::query(
+                    r#"
+                    WITH reply_insert AS (
+                        INSERT INTO k_contents (
+                            transaction_id, block_time, sender_pubkey, sender_signature,
+                            base64_encoded_message, content_type, referenced_content_id
+                        ) VALUES ($1, $2, $3, $4, $5, 'reply', $6)
+                        ON CONFLICT (sender_signature) DO NOTHING
+                        RETURNING transaction_id, block_time, sender_pubkey
+                    ),
+                    mentions_insert AS (
+                        INSERT INTO k_mentions (content_id, content_type, mentioned_pubkey, block_time, sender_pubkey)
+                        SELECT ri.transaction_id, 'reply', unnest($7::bytea[]), ri.block_time, ri.sender_pubkey
+                        FROM reply_insert ri
+                        RETURNING 1
+                    )
+                    INSERT INTO k_hashtags (sender_pubkey, content_id, block_time, hashtag)
+                    SELECT ri.sender_pubkey, ri.transaction_id, ri.block_time, unnest($8::text[])
+                    FROM reply_insert ri
+                    "#,
+                )
+                .bind(&transaction_id_bytes)
+                .bind(block_time)
+                .bind(&sender_pubkey_bytes)
+                .bind(&sender_signature_bytes)
+                .bind(&k_reply.base64_encoded_message)
+                .bind(&post_id_bytes)
+                .bind(&mentioned_pubkeys_bytes)
+                .bind(&hashtags)
+                .execute(&self.db_pool)
+                .await?;
+
+                if result.rows_affected() == 0 {
+                    info!(
+                        "Reply transaction {} already exists, skipping",
+                        transaction_id
+                    );
+                } else {
+                    info!(
+                        "Saved K reply with {} mentions and {} hashtags: {} -> {}",
+                        mentioned_pubkeys_bytes.len(),
+                        hashtags.len(),
+                        transaction_id,
+                        post_id_for_log
+                    );
+                }
             }
         }
         Ok(())
@@ -815,42 +1006,96 @@ impl KProtocolProcessor {
         let content_id_bytes = hex::decode(&k_quote.content_id)?;
         let mentioned_pubkey_bytes = hex::decode(&k_quote.mentioned_pubkey)?;
 
-        // Single query to insert quote and mention using CTE (skip if already exists)
-        let result = sqlx::query(
-            r#"
-            WITH quote_insert AS (
-                INSERT INTO k_contents (
-                    transaction_id, block_time, sender_pubkey, sender_signature,
-                    base64_encoded_message, content_type, referenced_content_id
-                ) VALUES ($1, $2, $3, $4, $5, 'quote', $6)
-                ON CONFLICT (sender_signature) DO NOTHING
-                RETURNING transaction_id, block_time, sender_pubkey
-            )
-            INSERT INTO k_mentions (content_id, content_type, mentioned_pubkey, block_time, sender_pubkey)
-            SELECT qi.transaction_id, 'quote', $7, qi.block_time, qi.sender_pubkey
-            FROM quote_insert qi
-            "#,
-        )
-        .bind(&transaction_id_bytes)
-        .bind(block_time)
-        .bind(&sender_pubkey_bytes)
-        .bind(&sender_signature_bytes)
-        .bind(k_quote.base64_encoded_message)
-        .bind(&content_id_bytes)
-        .bind(&mentioned_pubkey_bytes)
-        .execute(&self.db_pool)
-        .await?;
+        // Extract hashtags from the message
+        let hashtags = extract_hashtags_from_base64(&k_quote.base64_encoded_message);
 
-        if result.rows_affected() == 0 {
-            info!(
-                "Quote transaction {} already exists, skipping",
-                transaction_id
-            );
+        // Single query to insert quote, mention, and hashtags using CTE
+        if hashtags.is_empty() {
+            // No hashtags - CTE with quote + mention only
+            let result = sqlx::query(
+                r#"
+                WITH quote_insert AS (
+                    INSERT INTO k_contents (
+                        transaction_id, block_time, sender_pubkey, sender_signature,
+                        base64_encoded_message, content_type, referenced_content_id
+                    ) VALUES ($1, $2, $3, $4, $5, 'quote', $6)
+                    ON CONFLICT (sender_signature) DO NOTHING
+                    RETURNING transaction_id, block_time, sender_pubkey
+                )
+                INSERT INTO k_mentions (content_id, content_type, mentioned_pubkey, block_time, sender_pubkey)
+                SELECT qi.transaction_id, 'quote', $7, qi.block_time, qi.sender_pubkey
+                FROM quote_insert qi
+                "#,
+            )
+            .bind(&transaction_id_bytes)
+            .bind(block_time)
+            .bind(&sender_pubkey_bytes)
+            .bind(&sender_signature_bytes)
+            .bind(&k_quote.base64_encoded_message)
+            .bind(&content_id_bytes)
+            .bind(&mentioned_pubkey_bytes)
+            .execute(&self.db_pool)
+            .await?;
+
+            if result.rows_affected() == 0 {
+                info!(
+                    "Quote transaction {} already exists, skipping",
+                    transaction_id
+                );
+            } else {
+                info!(
+                    "Saved K quote: {} -> {} (mentioned: {})",
+                    transaction_id, content_id_for_log, mentioned_pubkey_for_log
+                );
+            }
         } else {
-            info!(
-                "Saved K quote: {} -> {} (mentioned: {})",
-                transaction_id, content_id_for_log, mentioned_pubkey_for_log
-            );
+            // Has hashtags - extended CTE with quote + mention + hashtags
+            let result = sqlx::query(
+                r#"
+                WITH quote_insert AS (
+                    INSERT INTO k_contents (
+                        transaction_id, block_time, sender_pubkey, sender_signature,
+                        base64_encoded_message, content_type, referenced_content_id
+                    ) VALUES ($1, $2, $3, $4, $5, 'quote', $6)
+                    ON CONFLICT (sender_signature) DO NOTHING
+                    RETURNING transaction_id, block_time, sender_pubkey
+                ),
+                mentions_insert AS (
+                    INSERT INTO k_mentions (content_id, content_type, mentioned_pubkey, block_time, sender_pubkey)
+                    SELECT qi.transaction_id, 'quote', $7, qi.block_time, qi.sender_pubkey
+                    FROM quote_insert qi
+                    RETURNING 1
+                )
+                INSERT INTO k_hashtags (sender_pubkey, content_id, block_time, hashtag)
+                SELECT qi.sender_pubkey, qi.transaction_id, qi.block_time, unnest($8::text[])
+                FROM quote_insert qi
+                "#,
+            )
+            .bind(&transaction_id_bytes)
+            .bind(block_time)
+            .bind(&sender_pubkey_bytes)
+            .bind(&sender_signature_bytes)
+            .bind(&k_quote.base64_encoded_message)
+            .bind(&content_id_bytes)
+            .bind(&mentioned_pubkey_bytes)
+            .bind(&hashtags)
+            .execute(&self.db_pool)
+            .await?;
+
+            if result.rows_affected() == 0 {
+                info!(
+                    "Quote transaction {} already exists, skipping",
+                    transaction_id
+                );
+            } else {
+                info!(
+                    "Saved K quote with {} hashtags: {} -> {} (mentioned: {})",
+                    hashtags.len(),
+                    transaction_id,
+                    content_id_for_log,
+                    mentioned_pubkey_for_log
+                );
+            }
         }
         Ok(())
     }
