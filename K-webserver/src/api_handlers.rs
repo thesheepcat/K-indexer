@@ -357,6 +357,93 @@ impl ApiHandlers {
         }
     }
 
+    /// GET /get-most-active-users with pagination
+    /// Fetch users ranked by total content count (posts, replies, quotes) in k_contents
+    /// within a specific time window
+    pub async fn get_most_active_users_paginated(
+        &self,
+        limit: u32,
+        requester_pubkey: &str,
+        time_window: &str,
+        before: Option<String>,
+        after: Option<String>,
+    ) -> Result<String, String> {
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        // Calculate time window in milliseconds (block_time is stored in milliseconds)
+        let window_millis = match time_window {
+            "1h" => 3_600_000_u64,
+            "6h" => 21_600_000_u64,
+            "24h" => 86_400_000_u64,
+            "7d" => 604_800_000_u64,
+            "30d" => 2_592_000_000_u64,
+            _ => {
+                return Err(self
+                    .create_error_response("Invalid time window parameter", "INVALID_PARAMETER"));
+            }
+        };
+
+        let to_time_millis = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        let from_time_millis = to_time_millis.saturating_sub(window_millis);
+
+        let options = QueryOptions {
+            limit: Some(limit as u64),
+            before,
+            after,
+            sort_descending: true,
+        };
+
+        let result = match self
+            .db
+            .get_most_active_users(requester_pubkey, options, from_time_millis, to_time_millis)
+            .await
+        {
+            Ok(result) => result,
+            Err(err) => {
+                log_error!("Database error while querying most active users: {}", err);
+                return Err(self.create_error_response(
+                    "Internal server error during database query",
+                    "DATABASE_ERROR",
+                ));
+            }
+        };
+
+        let mut all_posts = Vec::new();
+
+        for (k_broadcast_record, is_blocked, is_followed, content_count) in result.items {
+            let mut server_user_post = ServerUserPost::from_k_broadcast_record_with_block_status(
+                &k_broadcast_record,
+                is_blocked,
+            );
+
+            server_user_post.user_nickname = Some(k_broadcast_record.base64_encoded_nickname);
+            server_user_post.user_profile_image = k_broadcast_record.base64_encoded_profile_image;
+            server_user_post.followed_user = Some(is_followed);
+            server_user_post.contents_count = Some(content_count);
+
+            all_posts.push(server_user_post);
+        }
+
+        let response = PaginatedUsersResponse {
+            posts: all_posts,
+            pagination: result.pagination,
+        };
+
+        match serde_json::to_string(&response) {
+            Ok(json) => Ok(json),
+            Err(err) => {
+                log_error!("Failed to serialize most active users response: {}", err);
+                Err(self.create_error_response(
+                    "Internal server error during serialization",
+                    "SERIALIZATION_ERROR",
+                ))
+            }
+        }
+    }
+
     /// GET /search-users with pagination
     /// Search users with optional filters for pubkey or nickname
     pub async fn search_users_paginated(
@@ -1129,6 +1216,7 @@ impl ApiHandlers {
                         followers_count: Some(followers_count),
                         following_count: Some(following_count),
                         blocked_count: Some(blocked_count),
+                        contents_count: None,
                     }
                 } else {
                     // User has real broadcast data
@@ -1159,6 +1247,7 @@ impl ApiHandlers {
                     followers_count: Some(0),
                     following_count: Some(0),
                     blocked_count: Some(0),
+                    contents_count: None,
                 }
             }
         };
