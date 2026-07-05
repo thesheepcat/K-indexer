@@ -98,7 +98,11 @@ async fn main() -> Result<()> {
         config.workers.count,
         config.processing.channel_name,
         config.network,
-        if config.reindex_enabled { "enabled" } else { "disabled" }
+        if config.reindex_enabled {
+            "enabled"
+        } else {
+            "disabled"
+        }
     );
     info!(
         "Database connection: {}:{}/{}",
