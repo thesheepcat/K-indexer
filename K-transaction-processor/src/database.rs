@@ -158,12 +158,15 @@ impl KDbClient {
                 );
                 execute_ddl(SCHEMA_UP_SQL, &self.pool).await?;
 
-                // Create the notification function and trigger separately to avoid parsing issues
-                self.create_notification_system().await?;
-
                 info!("Fresh schema creation completed successfully");
             }
         }
+
+        // Step 2: idempotently (re)assert the notification function + trigger on EVERY startup,
+        // regardless of fresh/upgrade/up-to-date branch and regardless of `upgrade_db`.
+        // This self-heals a trigger dropped by a simply-kaspa-indexer schema migration
+        // (e.g. the v10 -> v20 denormalization recreates the `transactions` table).
+        self.create_notification_system().await?;
 
         // Verify schema setup
         verify_schema_setup(&self.pool).await?;
@@ -191,6 +194,11 @@ impl KDbClient {
         )
         .execute(&self.pool)
         .await?;
+
+        // Drop first so the trigger can be (re)asserted idempotently on every startup.
+        sqlx::query("DROP TRIGGER IF EXISTS transaction_notify_trigger ON transactions")
+            .execute(&self.pool)
+            .await?;
 
         // Create the trigger
         sqlx::query(
