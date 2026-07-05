@@ -65,6 +65,12 @@ struct Args {
         default_value = "testnet-10"
     )]
     network: String,
+
+    #[arg(
+        long,
+        help = "Disable the periodic REINDEX of the transactions table indexes"
+    )]
+    no_reindex: bool,
 }
 
 #[tokio::main]
@@ -88,8 +94,11 @@ async fn main() -> Result<()> {
     // Load configuration from CLI arguments only
     let config = AppConfig::from_args(&args);
     info!(
-        "Configuration loaded: {} workers, channel: {}, network: {}",
-        config.workers.count, config.processing.channel_name, config.network
+        "Configuration loaded: {} workers, channel: {}, network: {}, reindex: {}",
+        config.workers.count,
+        config.processing.channel_name,
+        config.network,
+        if config.reindex_enabled { "enabled" } else { "disabled" }
     );
     info!(
         "Database connection: {}:{}/{}",
