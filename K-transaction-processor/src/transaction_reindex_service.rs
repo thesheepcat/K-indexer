@@ -117,7 +117,15 @@ impl TransactionReindexService {
 }
 
 /// Start the reindex service as a background task
-pub async fn start_reindex_service(_config: AppConfig, pool: PgPool) {
+pub async fn start_reindex_service(config: AppConfig, pool: PgPool) {
+    if !config.reindex_enabled {
+        info!("Transaction Reindex Service disabled via --no-reindex flag");
+        // Park this task forever instead of returning, so the `tokio::select!` in main()
+        // doesn't treat a disabled-by-choice service as an unexpected stop.
+        std::future::pending::<()>().await;
+        return;
+    }
+
     // Default to 12 hours interval
     let interval_hours = 12;
 

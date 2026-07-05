@@ -6,6 +6,7 @@ pub struct AppConfig {
     pub workers: WorkerConfig,
     pub processing: ProcessingConfig,
     pub network: String,
+    pub reindex_enabled: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -85,6 +86,7 @@ impl AppConfig {
                 retry_delay_ms: args.retry_delay.unwrap_or(1000),
             },
             network,
+            reindex_enabled: !args.no_reindex,
         }
     }
 }

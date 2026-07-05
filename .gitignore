@@ -10,4 +10,4 @@ K-webserver/Cargo.lock
 K-webserver/locust/__pycache__
 Cargo.lock
 /target
-test-endpoint.sh
+SKI_2.2.0_MIGRATION_ISSUES.md
